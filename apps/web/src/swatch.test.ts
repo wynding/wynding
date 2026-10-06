@@ -8,9 +8,9 @@
 // `canvasGraphics`), unit tested there (`canvas-graphics.test.ts`, `art-paint.test.ts`); the
 // tile no longer carries a copy of its own.
 
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, vi } from 'vitest';
 import { resolvePalette, towerArtFit, type PathFactory } from '@wynding/render';
-import { paintSwatch, SWATCH_SIZE_PX } from './swatch';
+import { paintSwatch, releaseSwatch, SWATCH_SIZE_PX } from './swatch';
 
 /** A recording 2D context: every method call and style write lands in `ops` in order, so
  *  the assertions below can see both WHAT was drawn and with WHICH style. */
@@ -288,19 +288,29 @@ describe('paintSwatch', () => {
   ): {
     view: object;
     observers: { callback: ResizeObserverCallback; options: unknown }[];
+    instances: { observe: ReturnType<typeof vi.fn>; disconnect: ReturnType<typeof vi.fn> }[];
   } => {
     const observers: { callback: ResizeObserverCallback; options: unknown }[] = [];
+    const instances: { observe: ReturnType<typeof vi.fn>; disconnect: ReturnType<typeof vi.fn> }[] =
+      [];
     class FakeObserver {
-      constructor(private readonly callback: ResizeObserverCallback) {}
-      observe(_target: unknown, options: unknown): void {
+      readonly observe = vi.fn((_target: unknown, options: unknown): void => {
         observers.push({ callback: this.callback, options });
+      });
+      readonly disconnect = vi.fn();
+      constructor(private readonly callback: ResizeObserverCallback) {
+        instances.push(this);
       }
     }
     class Entry {}
     if (devicePixels) {
       Object.defineProperty(Entry.prototype, 'devicePixelContentBoxSize', { get: () => [] });
     }
-    return { view: { ResizeObserver: FakeObserver, ResizeObserverEntry: Entry }, observers };
+    return {
+      view: { ResizeObserver: FakeObserver, ResizeObserverEntry: Entry },
+      observers,
+      instances,
+    };
   };
   const entry = (device: [number, number] | null): ResizeObserverEntry =>
     ({
@@ -349,6 +359,31 @@ describe('paintSwatch', () => {
     at = { left: 0.5, top: 0.5, width: SWATCH_SIZE_PX, height: SWATCH_SIZE_PX }; // laid out
     observers[0]!.callback([entry(null)], {} as ResizeObserver);
     expect([canvas.width, canvas.height]).toEqual([39, 39]);
+  });
+
+  it("releaseSwatch disconnects the tile's observer, and a later paint observes it afresh", () => {
+    const { view, instances } = observingView(true);
+    const { ctx } = recordingCtx();
+    const canvas = fakeCanvas(ctx, { dpr: 1.1, at: { left: 0, top: 0 }, view });
+    paintSwatch(canvas, 'slow', 'default', recordingPaths().makePath);
+    expect(instances).toHaveLength(1);
+    expect(instances[0]!.observe).toHaveBeenCalledWith(canvas, { box: 'device-pixel-content-box' });
+    expect(instances[0]!.disconnect).not.toHaveBeenCalled();
+    releaseSwatch(canvas);
+    expect(instances[0]!.disconnect).toHaveBeenCalledOnce();
+    // Released, so painted again it registers anew: a second observer, on the same canvas.
+    paintSwatch(canvas, 'slow', 'default', recordingPaths().makePath);
+    expect(instances).toHaveLength(2);
+    expect(instances[1]!.observe).toHaveBeenCalledWith(canvas, { box: 'device-pixel-content-box' });
+    expect(instances[1]!.disconnect).not.toHaveBeenCalled();
+  });
+
+  it('releaseSwatch is a no-op for a canvas never painted, or watched by no observer', () => {
+    const { ctx } = recordingCtx();
+    expect(() => releaseSwatch(fakeCanvas(ctx))).not.toThrow();
+    const noObserver = fakeCanvas(ctx, { view: {} });
+    paintSwatch(noObserver, 'basic', 'default', recordingPaths().makePath);
+    expect(() => releaseSwatch(noObserver)).not.toThrow();
   });
 
   it("a mode change changes the paint — protan's role colours replace the default ones", () => {

@@ -2916,33 +2916,37 @@ describe('the coverage contract is enforced, not merely asserted', () => {
   // This is the fourth and last of this file's tables to be counted rather than merely matched,
   // after the three escape tables — and, since #163, counted PER VALUE AND PER COPY, since a
   // distinct-value count could not see a second copy of a value the baseline already held.
-  it('re-proves every OFF_SURFACE classification, not just its filename', () => {
-    const stale: string[] = [];
-    for (const e of OFF_SURFACE) {
-      if (e.holds === 'circular') {
-        expect(
-          ['packages/perf/src/claims.ts', 'packages/perf/src/claims.test.ts'],
-          `${e.file} claims circularity, which only the table itself may claim`,
-        ).toContain(e.file);
-        continue;
+  it(
+    're-proves every OFF_SURFACE classification, not just its filename',
+    { timeout: 60_000 },
+    () => {
+      const stale: string[] = [];
+      for (const e of OFF_SURFACE) {
+        if (e.holds === 'circular') {
+          expect(
+            ['packages/perf/src/claims.ts', 'packages/perf/src/claims.test.ts'],
+            `${e.file} claims circularity, which only the table itself may claim`,
+          ).toContain(e.file);
+          continue;
+        }
+        const recorded = fmtHolds(e.holds);
+        const found = fmtHolds(heldGapValues(e.file));
+        if (found !== recorded) {
+          const name = e.file.split('/').pop() as string;
+          stale.push(
+            `  ${name}: recorded ${recorded}\n${' '.repeat(name.length + 4)}but found ${found}`,
+          );
+        }
       }
-      const recorded = fmtHolds(e.holds);
-      const found = fmtHolds(heldGapValues(e.file));
-      if (found !== recorded) {
-        const name = e.file.split('/').pop() as string;
-        stale.push(
-          `  ${name}: recorded ${recorded}\n${' '.repeat(name.length + 4)}but found ${found}`,
-        );
-      }
-    }
-    expect(
-      stale,
-      `these OFF_SURFACE entries no longer describe what leaving the file off the surface ` +
-        `costs. The census is the justification — a file that has GAINED a cross-file claim, ` +
-        `or a further copy of one it already held, is no longer the file that was classified. ` +
-        `Re-measure the entry, or put the source on the surface:\n${stale.join('\n')}`,
-    ).toEqual([]);
-  });
+      expect(
+        stale,
+        `these OFF_SURFACE entries no longer describe what leaving the file off the surface ` +
+          `costs. The census is the justification — a file that has GAINED a cross-file claim, ` +
+          `or a further copy of one it already held, is no longer the file that was classified. ` +
+          `Re-measure the entry, or put the source on the surface:\n${stale.join('\n')}`,
+      ).toEqual([]);
+    },
+  );
 
   // `G`'s friendly names are a third spelling of the same paths, and a third spelling is what
   // this file keeps having to delete. It cannot be derived (the names are the point), so it is

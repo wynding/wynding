@@ -45,33 +45,18 @@ describe('backingStoreSize — as many pixels as the device pixels the box is dr
   const report = (over: Partial<DevicePixelReport> = {}): DevicePixelReport => ({
     width: 329,
     height: 201,
-    cssWidth: 328.5,
-    cssHeight: 200,
     dpr: 1,
     ...over,
   });
 
-  it('takes the browser’s own count when it has given one for the box as it is now', () => {
+  it('takes the browser’s own count when it has given one at the page’s scale', () => {
     // A count unlike the arithmetic's, so the answer shows whose it is.
     expect(backingStoreSize(box, 1, 1, report())).toEqual({ width: 329, height: 201 });
-    // A reading of the same layout with floating-point dust in it is still that layout.
-    expect(backingStoreSize(box, 1, 1, report({ cssWidth: 328.5 + 1e-9 }))).toEqual({
-      width: 329,
-      height: 201,
-    });
   });
 
   it('works it out from where the box sits otherwise', () => {
     const worked = { width: 328, height: 200 };
     expect(backingStoreSize(box, 1, 1, null), 'no observer (WebKit)').toEqual(worked);
-    // A report for the box before it was resized — by a layout unit, the least a change can be.
-    for (const stale of [
-      { cssWidth: 328.5 - 1 / 64 },
-      { cssHeight: 200 + 1 / 64 },
-      { cssWidth: 300, cssHeight: 180 },
-    ]) {
-      expect(backingStoreSize(box, 1, 1, report(stale)), JSON.stringify(stale)).toEqual(worked);
-    }
     // A report taken at another dpr (the window moved to another screen; a new one follows).
     expect(backingStoreSize(box, 1, 1, report({ dpr: 2 })), 'stale dpr').toEqual(worked);
     // Past the clamp the store is drawn at 2 on a 3× screen: deliberately fewer pixels than
@@ -89,12 +74,25 @@ describe('backingStoreSize — as many pixels as the device pixels the box is dr
       'emulated',
     ).toEqual({ width: 657, height: 400 });
     expect(backingStoreSize(box, 1, 1, report({ height: 202 })), 'two off').toEqual(worked);
+    // A count at another scale on one axis alone is not the box's count either, whatever the
+    // other axis says: each axis is held to the box's size × dpr on its own.
+    const worked2 = { width: 657, height: 400 }; // pixels 105 to 762, and 0 to 400
+    expect(
+      backingStoreSize(box, 2, 2, report({ dpr: 2, width: 328, height: 400 })),
+      'width off',
+    ).toEqual(worked2);
+    expect(
+      backingStoreSize(box, 2, 2, report({ dpr: 2, width: 657, height: 200 })),
+      'height off',
+    ).toEqual(worked2);
+    // A pixel and a half off on the width alone (as 'two off' is on the height).
+    expect(backingStoreSize(box, 1, 1, report({ width: 330 })), 'width 1.5 off').toEqual(worked);
   });
 
   it('is never under one pixel', () => {
     const empty = { left: 10.5, top: 3, width: 0, height: 0 };
     expect(backingStoreSize(empty, 1, 1, null)).toEqual({ width: 1, height: 1 });
-    const answer = { width: 0, height: 0, cssWidth: 0, cssHeight: 0, dpr: 1 };
+    const answer = { width: 0, height: 0, dpr: 1 };
     expect(backingStoreSize(empty, 1, 1, answer)).toEqual({ width: 1, height: 1 });
   });
 });
@@ -105,18 +103,12 @@ describe('devicePixelReport and observesDevicePixels — the browser’s own cou
     blockSize,
   });
 
-  it('reads the device pixels and the CSS box from an entry, inline as width', () => {
+  it('reads the device pixels from an entry, inline as width', () => {
     const entry = {
       devicePixelContentBoxSize: [size(329, 201)],
       contentBoxSize: [size(328.5, 200)],
     } as unknown as ResizeObserverEntry;
-    expect(devicePixelReport(entry, 1.25)).toEqual({
-      width: 329,
-      height: 201,
-      cssWidth: 328.5,
-      cssHeight: 200,
-      dpr: 1.25,
-    });
+    expect(devicePixelReport(entry, 1.25)).toEqual({ width: 329, height: 201, dpr: 1.25 });
   });
 
   it('has none where the browser gives none', () => {

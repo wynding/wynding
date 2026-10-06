@@ -27,6 +27,7 @@ import { resolvePalette } from './palette';
 import { createProjection, type Projection } from './projection';
 import type { CreepPlacement, FrameAnchor, SpritePlacement } from './placement';
 import { createScorchTracker } from './scorches';
+import { renderTimeOf } from './tracers';
 import type { LiveSpark } from './sparks';
 import { recordingLayer, type Call } from './test-support/recording-graphics';
 import type { CreepVM, RenderOverlay, RenderVM, TowerVM } from './types';
@@ -493,6 +494,17 @@ describe('drawBoardFrame — a tracer converges on where its creep is DRAWN', ()
   });
 });
 
+/** One frame as the scene draws it: the tracker is fed first (`scene.ts`'s `draw()`), then
+ *  `drawBoardFrame` reads the scorches still fading. */
+function fedFrame(t: ReturnType<typeof targets>['t'], input: BoardFrameInput): void {
+  input.scorches.update({
+    tracers: input.overlay.tracers,
+    sparks: input.overlay.sparks,
+    renderTick: renderTimeOf(input.prevVm, input.curVm, input.alpha),
+  });
+  drawBoardFrame(t, input);
+}
+
 describe('drawBoardFrame — a spent mine’s scorch, in the scorches layer, on the frame’s own clock', () => {
   it('shows a detonated mine’s scorch at its footprint centre, fading from the render tick it went off at', () => {
     const { t } = targets();
@@ -517,7 +529,7 @@ describe('drawBoardFrame — a spent mine’s scorch, in the scorches layer, on 
       scorches,
     });
     // The mine stands, on its pad in the plates layer, and nothing has gone off.
-    drawBoardFrame(t, frame(20, 0, [mine], []));
+    fedFrame(t, frame(20, 0, [mine], []));
     expect(t.plates.syncs[0]!.map((p) => p.frame)).toEqual([PAD_FRAME_KEY]);
     expect(t.scorches.syncs[0]).toEqual([]);
     // It goes off — a blast whose origin is its destination, at its footprint centre — in a
@@ -531,7 +543,7 @@ describe('drawBoardFrame — a spent mine’s scorch, in the scorches layer, on 
       launchTick: 21,
       impactTick: 21,
     };
-    drawBoardFrame(t, frame(21, 0.25, [], [blast]));
+    fedFrame(t, frame(21, 0.25, [], [blast]));
     expect(t.scorches.syncs[1]).toHaveLength(1);
     const scorch = t.scorches.syncs[1]![0]!;
     expect(scorch.frame).toBe(SCORCH_FRAME_KEY);
@@ -544,15 +556,15 @@ describe('drawBoardFrame — a spent mine’s scorch, in the scorches layer, on 
     // 40.5 ticks later on the same clock — a frame at render tick 61.75, its previous tick
     // plus its alpha — it is just past half faded; and the tracer, still listed, is not
     // scorched again.
-    drawBoardFrame(t, frame(61, 0.75, [], [blast]));
+    fedFrame(t, frame(61, 0.75, [], [blast]));
     expect(t.scorches.syncs[2]).toHaveLength(1);
     expect(t.scorches.syncs[2]![0]!.alpha).toBeCloseTo(1 - 40.5 / 80, 9);
     // At 80 ticks it is gone.
-    drawBoardFrame(t, frame(101, 0.25, [], []));
+    fedFrame(t, frame(101, 0.25, [], []));
     expect(t.scorches.syncs[3]).toEqual([]);
   });
 
-  it('feeds the tracker the frame’s impacts and towers: a mine seen standing, then gone with only its blast’s landing at its centre, leaves a scorch', () => {
+  it('feeds the tracker the frame’s impacts: a mine seen standing, then gone with only its marked blast landing at its centre, leaves a scorch', () => {
     const { t } = targets();
     const scorches = createScorchTracker();
     const mine = tower(3, 'mine', 6); // footprint centre: the corner of cells (7, 3)
@@ -567,11 +579,14 @@ describe('drawBoardFrame — a spent mine’s scorch, in the scorches layer, on 
         sparks: [],
         scorches,
       }) satisfies BoardFrameInput;
-    drawBoardFrame(t, frame(20, [mine], OVERLAY)); // the mine stands
+    fedFrame(t, frame(20, [mine], OVERLAY)); // the mine stands
     // Gone, with no tracer: only the blast's impact, at its footprint centre.
-    drawBoardFrame(
+    fedFrame(
       t,
-      frame(21, [], { ...OVERLAY, sparks: [{ x: 7 * 256, y: 3 * 256, radiusFp: 2.5 * 256 }] }),
+      frame(21, [], {
+        ...OVERLAY,
+        sparks: [{ x: 7 * 256, y: 3 * 256, radiusFp: 2.5 * 256, detonation: true }],
+      }),
     );
     expect(t.scorches.syncs[1]!.map((p) => p.frame)).toEqual([SCORCH_FRAME_KEY]);
   });
@@ -600,10 +615,10 @@ describe('drawBoardFrame — a spent mine’s scorch, in the scorches layer, on 
         sparks: [],
         scorches,
       }) satisfies BoardFrameInput;
-    drawBoardFrame(t, frame(21, [blast]));
+    fedFrame(t, frame(21, [blast]));
     expect(t.scorches.syncs[0]).toHaveLength(1); // held
     resetBoardFrame(t, { scorches });
-    drawBoardFrame(t, frame(22, []));
+    fedFrame(t, frame(22, []));
     expect(t.scorches.syncs[1]).toEqual([]);
     expect(scorches.live(22)).toEqual([]);
   });

@@ -25,33 +25,30 @@ export function snappedSpan(start: number, size: number, dpr: number): number {
 }
 
 /** What a `ResizeObserver` watching a canvas's `device-pixel-content-box` last reported: the
- *  device pixels the browser draws the canvas's content box into, the CSS size of that box,
- *  and the dpr at the time. */
+ *  device pixels the browser draws the canvas's content box into, and the dpr at the time. */
 export interface DevicePixelReport {
   readonly width: number;
   readonly height: number;
-  readonly cssWidth: number;
-  readonly cssHeight: number;
   readonly dpr: number;
 }
-
-/** CSS sizes this close are one layout: a real change is at least a layout unit (1/64 of a
- *  pixel), far above floating-point dust. */
-const SAME_LAYOUT = 1e-3;
 
 /**
  * The backing store a canvas needs to be shown pixel for pixel: as many pixels as the device
  * pixels the browser draws its box into. That is the browser's own answer when it has given
- * one (`reported`, from a `device-pixel-content-box` observer — Chromium and Firefox) for
- * the box as it is now — the same CSS size, at the same dpr — counting pixels at that dpr
- * (within one of the box's size × dpr, as any count of where the box snaps to is), and the
- * store is drawn at the device's own ratio (`dpr === rawDpr`). Otherwise it is worked out
- * from where the box sits (`snappedSpan`): WebKit gives no such answer, the observer has not
- * yet answered for a box just resized, Chromium's device-scale emulation counts the screen's
- * own pixels rather than the emulated ones (a box 1072 CSS px wide read 1072 at an emulated
- * 2), and a store at a dpr clamped below the device's is deliberately fewer pixels than the
- * box, scaled up into it. `box` is the canvas's CSS box from its page position, as
- * `getBoundingClientRect` reads it. Never under one pixel.
+ * one (`reported`, from a `device-pixel-content-box` observer — Chromium and Firefox),
+ * counting pixels at the page's dpr (within one of the box's size × dpr, as any count of
+ * where the box snaps to is), and the store is drawn at the device's own ratio
+ * (`dpr === rawDpr`). The observer reports again whenever its count changes, so a report is
+ * never held to the CSS size it was taken at (a layout reads two ways, by up to a 64th of a
+ * pixel, and a resize that keeps the count brings no new report): one taken just before a
+ * resize stands until the new count comes, later in the same observer loop. Otherwise it is
+ * worked out from where the box sits (`snappedSpan`): WebKit gives no such answer, the
+ * observer has not answered yet (or the box was just resized more than a pixel from its
+ * last count), Chromium's device-scale emulation counts the screen's own pixels rather than
+ * the emulated ones (a box 1072 CSS px wide read 1072 at an emulated 2), and a store at a
+ * dpr clamped below the device's is deliberately fewer pixels than the box, scaled up into
+ * it. `box` is the canvas's CSS box from its page position, as `getBoundingClientRect` reads
+ * it. Never under one pixel.
  */
 export function backingStoreSize(
   box: {
@@ -68,8 +65,6 @@ export function backingStoreSize(
     reported !== null &&
     dpr === rawDpr &&
     reported.dpr === rawDpr &&
-    Math.abs(reported.cssWidth - box.width) < SAME_LAYOUT &&
-    Math.abs(reported.cssHeight - box.height) < SAME_LAYOUT &&
     Math.abs(reported.width - box.width * dpr) <= 1 &&
     Math.abs(reported.height - box.height * dpr) <= 1
       ? reported
@@ -89,15 +84,8 @@ export function devicePixelReport(
   const device = (
     entry.devicePixelContentBoxSize as readonly ResizeObserverSize[] | undefined
   )?.[0];
-  const css = entry.contentBoxSize[0];
-  if (device === undefined || css === undefined) return null;
-  return {
-    width: device.inlineSize,
-    height: device.blockSize,
-    cssWidth: css.inlineSize,
-    cssHeight: css.blockSize,
-    dpr,
-  };
+  if (device === undefined) return null;
+  return { width: device.inlineSize, height: device.blockSize, dpr };
 }
 
 /** Whether this window's `ResizeObserver` can watch a `device-pixel-content-box`. */
