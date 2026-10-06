@@ -1196,10 +1196,12 @@ Rail at 150% text, whose content box passes 160px, no longer clips the armed tow
 states the shortfall ("Not enough Bounty: N more needed."), and the Panel shows the cost. A
 design call, left for the owner's UAT pass.
 
-**Residual — the single-column full form on a 700-820px window collides at heavy text.** Its
-196-230px Rail still draws the name beside the corner hotkey, and the name runs under the digit:
-700px from 150%, 760px from 175% and 820px only at 200% (clean at 130-140%). The base before #181 collided there at every text size, so this predates it;
-the two-column fallback above does not cover it.
+**Residual — the single-column full form collides at heavy text.** Its 196-230px Rail still
+draws the name beside the corner hotkey, and the name runs under the digit or past the Card's
+edge: 700px from 150%, 760px from 175% and 820px only at 200%, and on narrower portrait windows
+from 652px wide at 137.5% text, 660px at 150% and 688px at 200% (a 296-720px sweep, both font
+stacks). The base before #181 collided there at every text size, so this predates it; the
+two-column fallback above does not cover it.
 
 **Residual — the armed, condensed Panel scrolls sideways a few px further than before #181.** On
 a narrow Rail at heavy text its scrollport is a few px wider in range than the base's: 360×640 by
