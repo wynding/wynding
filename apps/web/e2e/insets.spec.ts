@@ -255,6 +255,9 @@ type Walk = {
   zoom: 100 | 200;
   inset: number;
   direction: 'Tab' | 'Shift+Tab';
+  /** The Rail's column count, asserted with its overflow as the walk's premise, so a walk
+   *  meant for a two-column Rail can never quietly walk one column. */
+  columns?: number;
 };
 
 /** THE WALK. Entered from the keyboard (the arming hotkey, or nothing) so `:focus-visible`
@@ -284,12 +287,23 @@ type Walk = {
  *  would hold this bound to a 1px margin instead of an 8-23px one. */
 async function walkRail(
   page: Page,
-  { view, armed, pinned = false, zoom, inset, direction }: Walk,
+  { view, armed, pinned = false, zoom, inset, direction, columns }: Walk,
 ): Promise<void> {
   await gotoAt(page, view);
   // compact.spec.ts's text-zoom posture: the root font doubles, so every rem does.
   if (zoom === 200) await page.addStyleTag({ content: ':root{font-size:200%}' });
   await inject(page, { top: `${inset}px` });
+  if (columns !== undefined) {
+    const premise = await page.evaluate(() => {
+      const rail = document.querySelector('.wy-rail') as HTMLElement;
+      const lefts = [...document.querySelectorAll('.wy-card')].map((c) =>
+        Math.round(c.getBoundingClientRect().left),
+      );
+      return { columns: new Set(lefts).size, overflow: rail.scrollHeight - rail.clientHeight };
+    });
+    expect(premise.columns, `the premise: a ${columns}-column Rail`).toBe(columns);
+    expect(premise.overflow, 'the premise: the Rail overflows').toBeGreaterThan(0);
+  }
   const cards = page.locator('.wy-card');
   const n = await cards.count();
   expect(n, 'the shipped catalog renders nine Cards').toBe(CARD_COUNT);
@@ -487,8 +501,9 @@ test.describe('the Standard Rail parks a focused Card with its ring inside the s
   // since #181's shorter Cards only low in its band (doubled text fits at 1440x900), so it is
   // walked at 1440x560. That Rail is ONE column by then: the two-column grid falls back to one
   // at heavy text (ui.css), so what this walk exercises is the single column's scroll. A
-  // two-column Rail that overflows exists only at 175% text on 1920x501 and 1920x560 (measured:
-  // 77px and 18px), and is not walked.
+  // two-column Rail still overflows at rest on a wide, short window at heavy text (measured:
+  // 16-149px from 1920 to 2560 wide, 501-600 tall, at 175-200%), so the two-column walk runs at
+  // 2560x560 at 200% (56px), with its two columns asserted.
   //
   // Standard's Rail pays NO top inset of its own: it sits below `.wy-status`, which already
   // does. Two checks hold that. The 24px walks bound each ring from below by the larger of
@@ -502,6 +517,7 @@ test.describe('the Standard Rail parks a focused Card with its ring inside the s
   // of room above the Panel and nothing could be claimed.
   const STANDARD_TALL = { width: 360, height: 640 }; // portrait phone, Standard by height
   const WIDE_SHORT = { width: 1440, height: 560 };
+  const TWO_COLUMN_SHORT = { width: 2560, height: 560 };
   // The unarmed 100% walk needs a Rail that SCROLLS far enough for a Shift+Tab stop to park a
   // Card at its top bound — or the top-reserve assertion checks only Infinity. At 1000×720 it
   // did while #101's reserved hud row held the status row at 248px; since #181's one-line
@@ -516,6 +532,7 @@ test.describe('the Standard Rail parks a focused Card with its ring inside the s
     pinned: boolean;
     zoom: 100 | 200;
     insets: readonly number[];
+    columns?: number;
   }[] = [
     // 640x560 unarmed at default text size is no longer walked (#181 L2): its 144px Rail now
     // carries the icon-form Cards two to a row, which fit with room to spare, so there is no
@@ -534,8 +551,9 @@ test.describe('the Standard Rail parks a focused Card with its ring inside the s
     { view: STANDARD, armed: true, pinned: false, zoom: 100, insets: [0] },
     { view: STANDARD, armed: false, pinned: false, zoom: 200, insets: [0] },
     { view: WIDE_SHORT, armed: false, pinned: false, zoom: 200, insets: [0] },
+    { view: TWO_COLUMN_SHORT, armed: false, pinned: false, zoom: 200, insets: [0], columns: 2 },
   ];
-  for (const { view, armed, pinned, zoom, insets } of WALKS) {
+  for (const { view, armed, pinned, zoom, insets, columns } of WALKS) {
     for (const inset of insets) {
       for (const direction of ['Tab', 'Shift+Tab'] as const) {
         const state = armed ? (pinned ? 'armed, Panel pinned' : 'armed, Panel in flow') : 'unarmed';
@@ -543,7 +561,7 @@ test.describe('the Standard Rail parks a focused Card with its ring inside the s
         test(`${view.width}x${view.height} ${state}, ${zoom}% text, ${inset}px top inset, ${direction}: every focused Card AND its ring stay inside the Rail's scrollport${extra}`, async ({
           page,
         }) => {
-          await walkRail(page, { view, armed, pinned, zoom, inset, direction });
+          await walkRail(page, { view, armed, pinned, zoom, inset, direction, columns });
         });
       }
     }

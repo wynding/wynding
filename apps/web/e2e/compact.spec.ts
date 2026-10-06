@@ -1276,8 +1276,8 @@ test.describe('M2-S12a: the condensed Panel and the Rail affordance', () => {
   });
 
   // Compact PINS the Panel at every text size (ui.css's Compact fork), but the condensed form
-  // follows the Rail's width — and from 150% text the Compact Rail's content box is wider than
-  // 160px. A pinned Panel must still show the armed tower's whole name, never scrolling it
+  // follows the Rail's width — and above 125% text a Compact Rail's content box can pass
+  // 160px (658×320 from 126% to 151%; 740×360 and wider through 200%). A pinned Panel must still show the armed tower's whole name, never scrolling it
   // sideways out of a box too narrow for the wide form's head art beside it.
   for (const [label, size, zoom] of [
     ['658×320', PHONE, 150],
@@ -1290,12 +1290,19 @@ test.describe('M2-S12a: the condensed Panel and the Rail affordance', () => {
       await page.addStyleTag({ content: `:root { font-size: ${zoom}% }` });
       await armByHotkey(page, '3'); // Splash Tower
       const m = await page.evaluate(() => {
+        const rail = document.querySelector('.wy-rail') as HTMLElement;
+        const rcs = getComputedStyle(rail);
         const panel = document.querySelector('.wy-panel') as HTMLElement;
         const scroll = panel.querySelector('.wy-panel-scroll') as HTMLElement;
         const range = document.createRange();
         range.selectNodeContents(panel.querySelector('.wy-panel-name') as HTMLElement);
         const sr = scroll.getBoundingClientRect();
         return {
+          // The Rail's CONTENT box: what the 160px condensed query reads.
+          content:
+            rail.getBoundingClientRect().width -
+            parseFloat(rcs.paddingLeft) -
+            parseFloat(rcs.paddingRight),
           position: getComputedStyle(panel).position,
           nameRight: Math.max(...[...range.getClientRects()].map((r) => r.right)),
           clipRight: sr.left + scroll.clientLeft + scroll.clientWidth,
@@ -1303,6 +1310,10 @@ test.describe('M2-S12a: the condensed Panel and the Rail affordance', () => {
         };
       });
       expect(m.position, 'the premise: Compact pins the Panel').toBe('sticky');
+      expect(
+        m.content,
+        'the premise: the Rail is wider than the 160px condensed query',
+      ).toBeGreaterThan(160);
       expect(
         m.nameRight,
         "the armed tower's name must not run under the Panel's edge",
