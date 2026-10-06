@@ -36,6 +36,12 @@ import {
 // `page.touchscreen`) never scrolls anything into view first, as a locator's click does. What
 // each asserts afterwards: no new run, no survey answer, and no change to the status region or
 // the Run data disclosure beyond what the aimed control does.
+//
+// Each pair must reach the page as the gesture it stands for: its timing premise. A pair the
+// wall clock delivers can miss it on a slow runner (WebKit on CI has taken 720 ms to deliver two
+// clicks 120 ms apart), and the guard is never judged on a pair that missed it: the scenario is
+// played up to three times in all, and where no play meets the premise the test is skipped at run
+// time, naming what was measured (`untilPremise`).
 
 type Size = { readonly width: number; readonly height: number };
 /** A double-click slowed to 750 ms, as a player who has slowed their system's double-click speed
@@ -145,6 +151,54 @@ async function afterKeyActivation(page: Page): Promise<void> {
   await page.evaluate(() => new Promise<void>((resolve) => setTimeout(resolve, 0)));
 }
 
+/** How many times a scenario is played, at most, for its press pair to meet its timing premise. */
+const PREMISE_TRIES = 3;
+
+/** Whether a press pair met its timing premise: null where it did, else what the page measured. */
+type Premise = string | null;
+
+const ms = (t: number): string => `${String(Math.round(t))} ms`;
+
+/** Whether `pair` reaches this browser with its own device timestamps: Chromium dispatches every
+ *  pair but the double-click stamped (`stampedPair`, `heldThenQuick`), so it meets its premise by
+ *  construction, and a miss there is the harness's fault, never the runner's pace. */
+const isStamped = (page: Page, pair: Pair): boolean => isChromium(page) && pair !== 'double-click';
+
+/** Play a scenario, from opening its page to its press pair, until the pair meets its timing
+ *  premise (`premise` null), at most `PREMISE_TRIES` times, and resolve to that play's result. A
+ *  pair the wall clock delivers (WebKit's `page.mouse` and `page.touchscreen`, and in both
+ *  browsers the double-click and the raw presses) can reach the page slower than the gesture it
+ *  stands for, and a pair that missed its premise stands for no double press at all: judged on
+ *  it, the guard would prove nothing either way. So the guard is judged on a pair that met it, and
+ *  only on that one. Where none does, the test is skipped at run time with every measured miss in
+ *  the skip's annotation: the report shows that the runner could not create the premise, not that
+ *  the guard failed. A miss means a slow runner, so it also marks the test slow (triple timeout)
+ *  for the plays still to come. */
+async function untilPremise<T extends { readonly premise: Premise }>(
+  play: () => Promise<T>,
+): Promise<T> {
+  const missed: string[] = [];
+  for (let i = 0; i < PREMISE_TRIES; i++) {
+    const result = await play();
+    if (result.premise === null) {
+      if (missed.length > 0) {
+        test.info().annotations.push({
+          type: 'premise missed, played again',
+          description: missed.join('; '),
+        });
+      }
+      return result;
+    }
+    if (missed.length === 0) test.slow();
+    missed.push(result.premise);
+  }
+  test.skip(
+    true,
+    `the press pair never met its timing premise in ${String(PREMISE_TRIES)} plays: ${missed.join('; ')}`,
+  );
+  throw new Error('unreachable: test.skip ends the test');
+}
+
 /** A press held `hold` ms, then a single press `HELD_GAP` ms after its release (each its own
  *  click, `detail` 1): stamped in Chromium, as `stampedPair` explains. */
 const HELD_GAP = 135;
@@ -185,17 +239,21 @@ async function heldThenQuick(page: Page, first: Point, second: Point, hold: numb
   }
 }
 
-/** Two presses, the second `drift` off the first. The pair must have reached the page as two
- *  pointer clicks in one gesture (inside the guard's window, or for the slowed double-click past
- *  it but counted by the system as a repeat), or it stands for no double press at all: a harness
- *  slow to deliver the second would pass a test the guard never had to hold. */
+/** Two presses, the second `drift` off the first, resolving to whether the pair met its timing
+ *  premise: two pointer clicks in one gesture, the second inside the guard's window (from the
+ *  first's release, for a held pair), or for the slowed double-click past it but inside a
+ *  repeat's span. A pair outside it stands for no double press at all: a harness slow to deliver
+ *  the second would pass a test the guard never had to hold. What no runner's pace can change is
+ *  asserted here: two clicks reached the page, each counted as the pair counts it, a held press
+ *  was held, and a held or slowed pair's second press came past the window. So is a stamped
+ *  pair's premise (`isStamped`). */
 async function pressTwice(
   page: Page,
   pair: Pair,
   x: number,
   y: number,
   drift: Drift = NO_DRIFT,
-): Promise<void> {
+): Promise<Premise> {
   const second = { x: x + drift.dx, y: y + drift.dy };
   await recordClicks(page);
   const hold = holdOf(pair);
@@ -222,6 +280,7 @@ async function pressTwice(
   const clicks = await recordedClicks(page);
   expect(clicks, `${pair}: two pointer clicks reached the page`).toHaveLength(2);
   const gap = clicks[1]!.t - clicks[0]!.t;
+  let premise: Premise;
   if (hold !== null) {
     const downs = await recordedDowns(page);
     expect(downs, `${pair}: two presses reached the page`).toHaveLength(2);
@@ -236,22 +295,28 @@ async function pressTwice(
       downs[1]! - downs[0]!,
       `${pair}: the second is past the window from the first press's start`,
     ).toBeGreaterThanOrEqual(PRESS_GUARD_WINDOW_MS);
-    expect(
-      downs[1]! - clicks[0]!.t,
-      `${pair}: and inside it from the first's release`,
-    ).toBeLessThan(PRESS_GUARD_WINDOW_MS);
+    const afterRelease = downs[1]! - clicks[0]!.t;
+    premise =
+      afterRelease < PRESS_GUARD_WINDOW_MS
+        ? null
+        : `${pair}: the second came ${ms(afterRelease)} after the first's release, not inside the ${ms(PRESS_GUARD_WINDOW_MS)} window`;
   } else if (pair === SLOWED) {
     expect(clicks[1]!.detail, `${pair}: the system counts the second as a repeat`).toBe(2);
     expect(gap, `${pair}: past the double-click window`).toBeGreaterThanOrEqual(
       PRESS_GUARD_WINDOW_MS,
     );
-    expect(gap, `${pair}: inside a repeat's span`).toBeLessThan(PRESS_GUARD_REPEAT_MS);
+    premise =
+      gap < PRESS_GUARD_REPEAT_MS
+        ? null
+        : `${pair}: the second came ${ms(gap)} after the first, past a repeat's ${ms(PRESS_GUARD_REPEAT_MS)} span`;
   } else {
-    expect(
-      gap,
-      `${pair}: the second inside the ${String(PRESS_GUARD_WINDOW_MS)} ms window`,
-    ).toBeLessThan(PRESS_GUARD_WINDOW_MS);
+    premise =
+      gap < PRESS_GUARD_WINDOW_MS
+        ? null
+        : `${pair}: the second came ${ms(gap)} after the first, not inside the ${ms(PRESS_GUARD_WINDOW_MS)} window`;
   }
+  if (isStamped(page, pair)) expect(premise, `${pair}: stamped, so inside its premise`).toBeNull();
+  return premise;
 }
 
 /** Two presses in Chromium, each at its own spot, stamped as a device stamps them: 120 ms apart,
@@ -302,9 +367,10 @@ async function stampedPair(
 }
 
 /** Two single presses, each its own click (`detail` 1) at its own spot, `gap` ms apart: stamped
- *  in Chromium, as `stampedPair` explains. They must reach the page inside the guard's window, or
- *  the guard never had to judge the second. */
-async function pressApart(page: Page, first: Point, second: Point, gap: number): Promise<void> {
+ *  in Chromium, as `stampedPair` explains. Resolves to whether they met their premise: reaching
+ *  the page inside the guard's window, or the guard never had to judge the second
+ *  (`untilPremise`). */
+async function pressApart(page: Page, first: Point, second: Point, gap: number): Promise<Premise> {
   await recordClicks(page);
   if (isChromium(page)) {
     const cdp = await page.context().newCDPSession(page);
@@ -338,9 +404,13 @@ async function pressApart(page: Page, first: Point, second: Point, gap: number):
     clicks.map((c) => c.detail),
     'each its own click',
   ).toEqual([1, 1]);
-  expect(clicks[1]!.t - clicks[0]!.t, 'the second inside the window').toBeLessThan(
-    PRESS_GUARD_WINDOW_MS,
-  );
+  const apart = clicks[1]!.t - clicks[0]!.t;
+  const premise =
+    apart < PRESS_GUARD_WINDOW_MS
+      ? null
+      : `two clicks ${String(gap)} ms apart: the second came ${ms(apart)} after the first, not inside the ${ms(PRESS_GUARD_WINDOW_MS)} window`;
+  if (isChromium(page)) expect(premise, 'stamped, so inside the window').toBeNull();
+  return premise;
 }
 
 /** One press with the real pointer on `selector`, brought into view first: a setup step. */
@@ -559,7 +629,7 @@ for (const r of REPRO.a) {
       page,
     }) => {
       await page.setViewportSize(r);
-      await notNowCase(page, await openResults(page, 'win', r.text), pair);
+      await notNowCase(page, () => openResults(page, 'win', r.text), pair);
     });
   }
 }
@@ -571,7 +641,7 @@ for (const r of REPRO.a.filter((size) => size.width >= 1280)) {
     page,
   }) => {
     await page.setViewportSize(r);
-    await notNowCase(page, await openResults(page, 'win', r.text), SLOWED);
+    await notNowCase(page, () => openResults(page, 'win', r.text), SLOWED);
   });
 }
 
@@ -581,7 +651,7 @@ for (const r of REPRO.b) {
       page,
     }) => {
       await page.setViewportSize(r);
-      await sendCase(page, await openResults(page, 'win', r.text), pair);
+      await sendCase(page, () => openResults(page, 'win', r.text), pair);
     });
   }
 }
@@ -592,7 +662,7 @@ for (const r of REPRO.c) {
       page,
     }) => {
       await page.setViewportSize(r);
-      await runDataCase(page, await openResults(page, 'win', r.text), pair);
+      await runDataCase(page, () => openResults(page, 'win', r.text), pair);
     });
   }
 }
@@ -606,19 +676,19 @@ for (const pair of [HELD_450, HELD_550] as const) {
     page,
   }) => {
     await page.setViewportSize({ width: 1440, height: 900 });
-    await notNowCase(page, await openResults(page, 'win', 200), pair);
+    await notNowCase(page, () => openResults(page, 'win', 200), pair);
   });
   test(`(b) at 658×320, 100% text, Send pressed as ${pair} after the rating prompt: the accepted send's collapse never hands the second press to Play again`, async ({
     page,
   }) => {
     await page.setViewportSize({ width: 658, height: 320 });
-    await sendCase(page, await openResults(page, 'win', 100), pair);
+    await sendCase(page, () => openResults(page, 'win', 100), pair);
   });
   test(`(c) at 480×640, 200% text, Run data pressed as ${pair}, high on the toggle where its closing brings the control above under the pointer: the second press reaches nothing else`, async ({
     page,
   }) => {
     await page.setViewportSize({ width: 480, height: 640 });
-    await runDataCase(page, await openResults(page, 'win', 200), pair);
+    await runDataCase(page, () => openResults(page, 'win', 200), pair);
   });
 }
 
@@ -632,34 +702,41 @@ for (const r of [
     page,
   }) => {
     await page.setViewportSize(r);
-    const dialog = await openResults(page, 'win', r.text);
-    const toggle = toggleOf(dialog);
-    const body = dialog.locator('.wy-results-body');
-    // The body's range with the group closed, measured before it opens.
-    const closedHeight = await body.evaluate((b) => b.scrollHeight);
-    await page.locator('.wy-results-more').scrollIntoViewIfNeeded();
-    const text = await boxOf(page, '.wy-results-more > span');
-    const [tx, ty] = [centreX(text), at(text, 0.5)];
-    expect(
-      await page.evaluate(([x, y]) => document.elementFromPoint(x, y)?.tagName, [tx, ty] as const),
-      'the opening press lands on the toggle’s text',
-    ).toBe('SPAN');
-    await page.mouse.click(tx, ty);
-    await expect(toggle).toHaveAttribute('aria-expanded', 'true');
-    await page.waitForTimeout(PRESS_GUARD_WINDOW_MS + 100);
-    const worst = await worstPlace(body, closedHeight);
-    expect(worst, 'a control above the toggle is within reach of the clamp').not.toBeNull();
-    await body.evaluate((b, top) => (b.scrollTop = top), worst!.scroll);
-    await twoFrames(page);
-    expect(
-      await page.evaluate(
-        ([x, y]) => document.elementFromPoint(x, y) === document.querySelector('.wy-results-more'),
-        [worst!.x, worst!.y] as const,
-      ),
-      'the pair lands on the toggle itself, not its text',
-    ).toBe(true);
-    const before = await strayState(page);
-    await pressTwice(page, 'double-click', worst!.x, worst!.y);
+    const { dialog, before } = await untilPremise(async () => {
+      const dialog = await openResults(page, 'win', r.text);
+      const toggle = toggleOf(dialog);
+      const body = dialog.locator('.wy-results-body');
+      // The body's range with the group closed, measured before it opens.
+      const closedHeight = await body.evaluate((b) => b.scrollHeight);
+      await page.locator('.wy-results-more').scrollIntoViewIfNeeded();
+      const text = await boxOf(page, '.wy-results-more > span');
+      const [tx, ty] = [centreX(text), at(text, 0.5)];
+      expect(
+        await page.evaluate(([x, y]) => document.elementFromPoint(x, y)?.tagName, [
+          tx,
+          ty,
+        ] as const),
+        'the opening press lands on the toggle’s text',
+      ).toBe('SPAN');
+      await page.mouse.click(tx, ty);
+      await expect(toggle).toHaveAttribute('aria-expanded', 'true');
+      await page.waitForTimeout(PRESS_GUARD_WINDOW_MS + 100);
+      const worst = await worstPlace(body, closedHeight);
+      expect(worst, 'a control above the toggle is within reach of the clamp').not.toBeNull();
+      await body.evaluate((b, top) => (b.scrollTop = top), worst!.scroll);
+      await twoFrames(page);
+      expect(
+        await page.evaluate(
+          ([x, y]) =>
+            document.elementFromPoint(x, y) === document.querySelector('.wy-results-more'),
+          [worst!.x, worst!.y] as const,
+        ),
+        'the pair lands on the toggle itself, not its text',
+      ).toBe(true);
+      const before = await strayState(page);
+      const premise = await pressTwice(page, 'double-click', worst!.x, worst!.y);
+      return { premise, dialog, before };
+    });
     await expectNoNewRun(page, dialog, 'Run data double-clicked');
     const after = await strayState(page);
     expect({ ...after, runData: null }, 'nothing but the toggle').toEqual({
@@ -675,7 +752,7 @@ for (const r of REPRO.d) {
       page,
     }) => {
       await page.setViewportSize(r);
-      await shorterMessageCase(page, await openResults(page, 'win', r.text), pair);
+      await shorterMessageCase(page, () => openResults(page, 'win', r.text), pair);
     });
   }
 }
@@ -689,8 +766,7 @@ test.describe('on a touch screen', () => {
     page,
   }) => {
     await page.setViewportSize({ width: 658, height: 320 });
-    const dialog = await openResults(page, 'win', 200);
-    await notNowCase(page, dialog, 'two taps');
+    await notNowCase(page, () => openResults(page, 'win', 200), 'two taps');
   });
 
   // A finger's second tap drifts further than a resting mouse: past the mouse's slop, inside a
@@ -706,8 +782,7 @@ test.describe('on a touch screen', () => {
       expect(off, 'past a mouse’s slop').toBeGreaterThan(PRESS_GUARD_SLOP_PX);
       expect(off, 'inside a finger’s').toBeLessThanOrEqual(PRESS_GUARD_TOUCH_SLOP_PX);
       await page.setViewportSize({ width: 658, height: 320 });
-      const dialog = await openResults(page, 'win', 200);
-      await notNowCase(page, dialog, 'two taps', drift);
+      await notNowCase(page, () => openResults(page, 'win', 200), 'two taps', drift);
     });
   }
 
@@ -715,44 +790,48 @@ test.describe('on a touch screen', () => {
     page,
   }) => {
     await page.setViewportSize({ width: 658, height: 320 });
-    const dialog = await openResults(page, 'win');
-    await sendCase(page, dialog, 'two taps');
+    await sendCase(page, () => openResults(page, 'win'), 'two taps');
   });
 
   test('(c) at 658×320, 200% text, Run data tapped twice high on the toggle, scrolled to where its closing brings the control above under the finger: the second tap reaches nothing else', async ({
     page,
   }) => {
     await page.setViewportSize({ width: 658, height: 320 });
-    const dialog = await openResults(page, 'win', 200);
-    await runDataCase(page, dialog, 'two taps');
+    await runDataCase(page, () => openResults(page, 'win', 200), 'two taps');
   });
 
   test('(d) at 844×390, 200% text, Verify tapped twice after Save’s longer message: the status region never shrinks', async ({
     page,
   }) => {
     await page.setViewportSize({ width: 844, height: 390 });
-    const dialog = await openResults(page, 'win', 200);
-    await shorterMessageCase(page, dialog, 'two taps');
+    await shorterMessageCase(page, () => openResults(page, 'win', 200), 'two taps');
   });
 });
 
+/** A results dialog opened afresh: each play of a scenario opens its own (`untilPremise`). */
+type Open = () => Promise<Locator>;
+
 /** (a) Open the form, scroll to its end, press Not now twice. The first press closes the form;
- *  the body clamps and Play again comes down under the pointer. */
+ *  the body clamps and Play again comes down under the pointer. Resolves to the dialog it judged. */
 async function notNowCase(
   page: Page,
-  dialog: Locator,
+  open: Open,
   pair: Pair,
   drift: Drift = NO_DRIFT,
-): Promise<void> {
-  await pressOnce(page, '.wy-survey-opener > .wy-btn', pair);
-  await expect(dialog.getByRole('button', { name: 'Send' })).toBeVisible();
-  await page.waitForTimeout(500); // let the guard's window from the opening press close
-  await scrollToEnd(page);
+): Promise<Locator> {
   const notNow = '.wy-survey-actions .wy-btn:nth-child(2)';
-  expect(await wholeInView(page, notNow), 'Not now is on screen').toBe(true);
-  const box = await boxOf(page, notNow);
-  const before = await strayState(page);
-  await pressTwice(page, pair, centreX(box), at(box, 0.5), drift);
+  const { dialog, before } = await untilPremise(async () => {
+    const dialog = await open();
+    await pressOnce(page, '.wy-survey-opener > .wy-btn', pair);
+    await expect(dialog.getByRole('button', { name: 'Send' })).toBeVisible();
+    await page.waitForTimeout(500); // let the guard's window from the opening press close
+    await scrollToEnd(page);
+    expect(await wholeInView(page, notNow), 'Not now is on screen').toBe(true);
+    const box = await boxOf(page, notNow);
+    const before = await strayState(page);
+    const premise = await pressTwice(page, pair, centreX(box), at(box, 0.5), drift);
+    return { premise, dialog, before };
+  });
   await expect(dialog.getByRole('button', { name: 'Give feedback' })).toBeVisible();
   await expectNoNewRun(page, dialog, 'Not now pressed twice');
   expect(await strayState(page), 'only the form closed').toEqual({ ...before, survey: false });
@@ -760,24 +839,29 @@ async function notNowCase(
   // clamp left it, at the end of its range.
   const { top, end } = await scroll(page);
   expect(top, 'no scroll after the clamp').toBeGreaterThanOrEqual(end - 1);
+  return dialog;
 }
 
 /** (b) Open the form, press Send with no rating (the prompt), pick a rating, scroll to the end,
  *  press Send twice. The accepted send retires the form and the body clamps. */
-async function sendCase(page: Page, dialog: Locator, pair: Pair): Promise<void> {
-  await pressOnce(page, '.wy-survey-opener > .wy-btn', pair);
-  await expect(dialog.getByRole('button', { name: 'Send' })).toBeVisible();
-  await pressOnce(page, '.wy-survey-actions .wy-btn:nth-child(1)', pair);
-  await expect(dialog.getByRole('status')).toContainText('to send your feedback');
-  await pressOnce(page, '.wy-survey-scale label:nth-of-type(4)', pair);
-  await expect(dialog.getByRole('radio', { name: '4' }).first()).toBeChecked();
-  await page.waitForTimeout(500);
-  await scrollToEnd(page);
+async function sendCase(page: Page, open: Open, pair: Pair): Promise<void> {
   const send = '.wy-survey-actions .wy-btn:nth-child(1)';
-  expect(await wholeInView(page, send), 'Send is on screen').toBe(true);
-  const box = await boxOf(page, send);
-  const before = await strayState(page);
-  await pressTwice(page, pair, centreX(box), at(box, 0.5));
+  const { dialog, before } = await untilPremise(async () => {
+    const dialog = await open();
+    await pressOnce(page, '.wy-survey-opener > .wy-btn', pair);
+    await expect(dialog.getByRole('button', { name: 'Send' })).toBeVisible();
+    await pressOnce(page, send, pair);
+    await expect(dialog.getByRole('status')).toContainText('to send your feedback');
+    await pressOnce(page, '.wy-survey-scale label:nth-of-type(4)', pair);
+    await expect(dialog.getByRole('radio', { name: '4' }).first()).toBeChecked();
+    await page.waitForTimeout(500);
+    await scrollToEnd(page);
+    expect(await wholeInView(page, send), 'Send is on screen').toBe(true);
+    const box = await boxOf(page, send);
+    const before = await strayState(page);
+    const premise = await pressTwice(page, pair, centreX(box), at(box, 0.5));
+    return { premise, dialog, before };
+  });
   await expect(dialog.getByRole('status')).toContainText('Thanks for the feedback');
   await expectNoNewRun(page, dialog, 'Send pressed twice');
   const after = await strayState(page);
@@ -795,26 +879,32 @@ async function sendCase(page: Page, dialog: Locator, pair: Pair): Promise<void> 
  *  exactly the point pressed. At the end of the range the clamp is the group's whole height,
  *  which here carries a stat tile, not a control, under the pointer: a player can stop anywhere,
  *  so the case is set up where it is worst, not where it happens to be harmless. */
-async function runDataCase(page: Page, dialog: Locator, pair: Pair): Promise<void> {
-  const toggle = toggleOf(dialog);
-  const body = dialog.locator('.wy-results-body');
-  await pressOnce(page, '.wy-results-more', pair);
-  await expect(toggle).toHaveAttribute('aria-expanded', 'true');
-  // The body's range with the group closed, measured by closing and reopening it from the
-  // keyboard, which the guard never holds.
-  await toggle.press('Enter');
-  await expect(toggle).toHaveAttribute('aria-expanded', 'false');
-  const closedHeight = await body.evaluate((b) => b.scrollHeight);
-  await toggle.press('Enter');
-  await expect(toggle).toHaveAttribute('aria-expanded', 'true');
-  await page.waitForTimeout(500); // let the guard's window from the opening press close
-  const worst = await worstPlace(body, closedHeight);
-  expect(worst, 'a control above the toggle is within reach of the clamp here').not.toBeNull();
-  await body.evaluate((b, top) => (b.scrollTop = top), worst!.scroll);
-  await twoFrames(page);
-  expect(await pressableAt(page, '.wy-results-more', worst!.x, worst!.y), 'the toggle').toBe(true);
-  const before = await strayState(page);
-  await pressTwice(page, pair, worst!.x, worst!.y);
+async function runDataCase(page: Page, open: Open, pair: Pair): Promise<void> {
+  const { dialog, before } = await untilPremise(async () => {
+    const dialog = await open();
+    const toggle = toggleOf(dialog);
+    const body = dialog.locator('.wy-results-body');
+    await pressOnce(page, '.wy-results-more', pair);
+    await expect(toggle).toHaveAttribute('aria-expanded', 'true');
+    // The body's range with the group closed, measured by closing and reopening it from the
+    // keyboard, which the guard never holds.
+    await toggle.press('Enter');
+    await expect(toggle).toHaveAttribute('aria-expanded', 'false');
+    const closedHeight = await body.evaluate((b) => b.scrollHeight);
+    await toggle.press('Enter');
+    await expect(toggle).toHaveAttribute('aria-expanded', 'true');
+    await page.waitForTimeout(500); // let the guard's window from the opening press close
+    const worst = await worstPlace(body, closedHeight);
+    expect(worst, 'a control above the toggle is within reach of the clamp here').not.toBeNull();
+    await body.evaluate((b, top) => (b.scrollTop = top), worst!.scroll);
+    await twoFrames(page);
+    expect(await pressableAt(page, '.wy-results-more', worst!.x, worst!.y), 'the toggle').toBe(
+      true,
+    );
+    const before = await strayState(page);
+    const premise = await pressTwice(page, pair, worst!.x, worst!.y);
+    return { premise, dialog, before };
+  });
   await expectNoNewRun(page, dialog, 'Run data pressed twice');
   const after = await strayState(page);
   // The second press, swallowed, left the group closed: nothing but the toggle changed.
@@ -857,32 +947,37 @@ const worstPlace = (
 /** (d) Open Run data, press Save (a two-line message), scroll to the end, press Verify twice
  *  HIGH on it. Verify's one-line message is shorter than Save's: were the region to shrink, the
  *  body would clamp and bring the toggle down under the pointer. */
-async function shorterMessageCase(page: Page, dialog: Locator, pair: Pair): Promise<void> {
-  const toggle = toggleOf(dialog);
-  await pressOnce(page, '.wy-results-more', pair);
-  await expect(toggle).toHaveAttribute('aria-expanded', 'true');
-  await page.waitForTimeout(500);
-  const download = page.waitForEvent('download');
-  await pressOnce(page, '.wy-results-run-data .wy-btn:nth-child(3)', pair);
-  await download;
-  await expect(dialog.getByRole('status')).not.toHaveText('');
-  await page.waitForTimeout(500);
-  await scrollToEnd(page);
+async function shorterMessageCase(page: Page, open: Open, pair: Pair): Promise<void> {
   const verify = '.wy-results-run-data .wy-btn:nth-child(1)';
-  // At the end of the range, or as near it as keeps Verify's top on screen: on a short window
-  // a tall status message can leave Verify above the view at the very end.
-  await page.locator('.wy-results-body').evaluate((b, sel) => {
-    const above =
-      b.getBoundingClientRect().top - document.querySelector(sel)!.getBoundingClientRect().top;
-    if (above > 0) b.scrollTop -= above + 2;
-  }, verify);
-  await twoFrames(page);
-  const box = await boxOf(page, verify);
-  const [x, y] = [centreX(box), at(box, 0.1)];
-  expect(await pressableAt(page, verify, x, y), 'Verify, high on it, is on screen').toBe(true);
+  const { dialog, statusHeight } = await untilPremise(async () => {
+    const dialog = await open();
+    const toggle = toggleOf(dialog);
+    await pressOnce(page, '.wy-results-more', pair);
+    await expect(toggle).toHaveAttribute('aria-expanded', 'true');
+    await page.waitForTimeout(500);
+    const download = page.waitForEvent('download');
+    await pressOnce(page, '.wy-results-run-data .wy-btn:nth-child(3)', pair);
+    await download;
+    await expect(dialog.getByRole('status')).not.toHaveText('');
+    await page.waitForTimeout(500);
+    await scrollToEnd(page);
+    // At the end of the range, or as near it as keeps Verify's top on screen: on a short window
+    // a tall status message can leave Verify above the view at the very end.
+    await page.locator('.wy-results-body').evaluate((b, sel) => {
+      const above =
+        b.getBoundingClientRect().top - document.querySelector(sel)!.getBoundingClientRect().top;
+      if (above > 0) b.scrollTop -= above + 2;
+    }, verify);
+    await twoFrames(page);
+    const box = await boxOf(page, verify);
+    const [x, y] = [centreX(box), at(box, 0.1)];
+    expect(await pressableAt(page, verify, x, y), 'Verify, high on it, is on screen').toBe(true);
+    const statusHeight = (await dialog.locator('.wy-verify').boundingBox())?.height ?? 0;
+    const premise = await pressTwice(page, pair, x, y);
+    return { premise, dialog, statusHeight };
+  });
+  const toggle = toggleOf(dialog);
   const status = dialog.locator('.wy-verify');
-  const statusHeight = (await status.boundingBox())?.height ?? 0;
-  await pressTwice(page, pair, x, y);
   await expect(dialog.getByRole('status')).toContainText('Verified');
   await expectNoNewRun(page, dialog, 'Verify pressed twice');
   await expect(toggle, 'Run data stayed open').toHaveAttribute('aria-expanded', 'true');
@@ -1042,24 +1137,26 @@ for (const size of [
       page,
     }) => {
       await page.setViewportSize(size);
-      const dialog = await openResults(page, 'win');
-      // Opened from the keyboard: no pointer press comes before the two below.
-      await dialog.getByRole('button', { name: 'Give feedback' }).focus();
-      await page.keyboard.press('Enter');
-      await expect(dialog.getByRole('button', { name: 'Send' })).toBeVisible();
-      const three = '.wy-survey-scale label:nth-of-type(3)';
-      await page.locator(three).first().scrollIntoViewIfNeeded();
-      await twoFrames(page);
-      const b3 = await boxOf(page, three);
-      const b4 = await boxOf(page, '.wy-survey-scale label:nth-of-type(4)');
-      // Just inside rating 3's facing edge, then on rating 4's radio.
-      const p3 = { x: b3.x + b3.width - 4, y: at(b3, 0.5) };
-      const p4 = { x: b4.x + 7, y: at(b4, 0.5) };
-      expect(
-        Math.hypot(p4.x - p3.x, p4.y - p3.y),
-        'the two presses are at one spot, to the guard',
-      ).toBeLessThanOrEqual(PRESS_GUARD_SLOP_PX);
-      await pressApart(page, p3, p4, gap);
+      const { dialog } = await untilPremise(async () => {
+        const dialog = await openResults(page, 'win');
+        // Opened from the keyboard: no pointer press comes before the two below.
+        await dialog.getByRole('button', { name: 'Give feedback' }).focus();
+        await page.keyboard.press('Enter');
+        await expect(dialog.getByRole('button', { name: 'Send' })).toBeVisible();
+        const three = '.wy-survey-scale label:nth-of-type(3)';
+        await page.locator(three).first().scrollIntoViewIfNeeded();
+        await twoFrames(page);
+        const b3 = await boxOf(page, three);
+        const b4 = await boxOf(page, '.wy-survey-scale label:nth-of-type(4)');
+        // Just inside rating 3's facing edge, then on rating 4's radio.
+        const p3 = { x: b3.x + b3.width - 4, y: at(b3, 0.5) };
+        const p4 = { x: b4.x + 7, y: at(b4, 0.5) };
+        expect(
+          Math.hypot(p4.x - p3.x, p4.y - p3.y),
+          'the two presses are at one spot, to the guard',
+        ).toBeLessThanOrEqual(PRESS_GUARD_SLOP_PX);
+        return { premise: await pressApart(page, p3, p4, gap), dialog };
+      });
       await expect(dialog.getByRole('radio', { name: '4' }).first()).toBeChecked();
     });
   }
@@ -1070,8 +1167,7 @@ for (const key of ['Enter', 'Space'] as const) {
     page,
   }) => {
     await page.setViewportSize({ width: 1440, height: 900 });
-    const dialog = await openResults(page, 'win', 200);
-    await notNowCase(page, dialog, 'double-click');
+    const dialog = await notNowCase(page, () => openResults(page, 'win', 200), 'double-click');
     const feedback = dialog.getByRole('button', { name: 'Give feedback' });
     await expect(feedback, 'focus where Not now put it').toBeFocused();
     await page.keyboard.press(key);
@@ -1091,14 +1187,7 @@ test('a double-click on the board as the run ends: its second press lands on Pla
   await openResults(page, 'win');
   const play = await boxOf(page, '.wy-results .wy-primary');
   const [x, y] = [centreX(play), at(play, 0.5)];
-  // The same run one tick short of its end: the first press anywhere plays that tick, and the
-  // dialog opens on the next frame (`results-entry.ts`, `&endOnPress=1`).
-  await page.goto(`${HARNESS}?run=win&survey=1&endOnPress=1`);
   const dialog = page.getByRole('dialog');
-  const board = page.locator('.wy-board');
-  await expect(board).toHaveAttribute('data-sim-phase', /\w/, { timeout: 30_000 });
-  expect(await board.getAttribute('data-sim-phase'), 'the run is not over yet').not.toBe('won');
-  await expect(dialog).toBeHidden();
   const hit = ([px, py]: readonly [number, number]) =>
     page.evaluate(
       ([hx, hy]) => {
@@ -1110,44 +1199,61 @@ test('a double-click on the board as the run ends: its second press lands on Pla
       },
       [px, py] as const,
     );
-  expect((await hit([x, y])).control, 'the first press lands on the board, on no control').toBe(
-    false,
-  );
-  await recordClicks(page);
-  if (isChromium(page)) {
-    const cdp = await page.context().newCDPSession(page);
-    const send = (type: 'mousePressed' | 'mouseReleased', clickCount: number) =>
-      cdp.send('Input.dispatchMouseEvent', {
-        type,
-        x,
-        y,
-        button: 'left',
-        clickCount,
-        timestamp: Date.now() / 1000,
-      });
-    await send('mousePressed', 1);
-    await send('mouseReleased', 1);
-    await expect(dialog).toBeVisible();
-    expect((await hit([x, y])).playAgain, 'Play again is under the pointer').toBe(true);
-    await send('mousePressed', 2);
-    await send('mouseReleased', 2);
-    await cdp.detach();
-  } else {
-    await page.mouse.move(x, y);
-    await page.mouse.down();
-    await page.mouse.up();
-    await expect(dialog).toBeVisible();
-    expect((await hit([x, y])).playAgain, 'Play again is under the pointer').toBe(true);
-    await page.mouse.down({ clickCount: 2 });
-    await page.mouse.up({ clickCount: 2 });
-  }
-  await twoFrames(page);
-  const clicks = await recordedClicks(page);
-  expect(
-    clicks.map((c) => c.detail),
-    'a double-click reached the page',
-  ).toEqual([1, 2]);
-  expect(clicks[1]!.t - clicks[0]!.t, 'in one gesture').toBeLessThan(PRESS_GUARD_REPEAT_MS);
+  // Its presses are timed by the clock in both browsers (Chromium's carry the time they are sent
+  // at), with the dialog's arrival awaited between them.
+  await untilPremise(async () => {
+    // The same run one tick short of its end: the first press anywhere plays that tick, and the
+    // dialog opens on the next frame (`results-entry.ts`, `&endOnPress=1`).
+    await page.goto(`${HARNESS}?run=win&survey=1&endOnPress=1`);
+    const board = page.locator('.wy-board');
+    await expect(board).toHaveAttribute('data-sim-phase', /\w/, { timeout: 30_000 });
+    expect(await board.getAttribute('data-sim-phase'), 'the run is not over yet').not.toBe('won');
+    await expect(dialog).toBeHidden();
+    expect((await hit([x, y])).control, 'the first press lands on the board, on no control').toBe(
+      false,
+    );
+    await recordClicks(page);
+    if (isChromium(page)) {
+      const cdp = await page.context().newCDPSession(page);
+      const send = (type: 'mousePressed' | 'mouseReleased', clickCount: number) =>
+        cdp.send('Input.dispatchMouseEvent', {
+          type,
+          x,
+          y,
+          button: 'left',
+          clickCount,
+          timestamp: Date.now() / 1000,
+        });
+      await send('mousePressed', 1);
+      await send('mouseReleased', 1);
+      await expect(dialog).toBeVisible();
+      expect((await hit([x, y])).playAgain, 'Play again is under the pointer').toBe(true);
+      await send('mousePressed', 2);
+      await send('mouseReleased', 2);
+      await cdp.detach();
+    } else {
+      await page.mouse.move(x, y);
+      await page.mouse.down();
+      await page.mouse.up();
+      await expect(dialog).toBeVisible();
+      expect((await hit([x, y])).playAgain, 'Play again is under the pointer').toBe(true);
+      await page.mouse.down({ clickCount: 2 });
+      await page.mouse.up({ clickCount: 2 });
+    }
+    await twoFrames(page);
+    const clicks = await recordedClicks(page);
+    expect(
+      clicks.map((c) => c.detail),
+      'a double-click reached the page',
+    ).toEqual([1, 2]);
+    const gap = clicks[1]!.t - clicks[0]!.t;
+    return {
+      premise:
+        gap < PRESS_GUARD_REPEAT_MS
+          ? null
+          : `a double-click on the board: its second click came ${ms(gap)} after the first, past a repeat's ${ms(PRESS_GUARD_REPEAT_MS)} span`,
+    };
+  });
   await expectNoNewRun(page, dialog, 'the board double-click');
 });
 
@@ -1325,22 +1431,28 @@ for (const hold of [450, 550]) {
   test(`a press on the board held ${String(hold)} ms as the run ends, then a press 135 ms after its release on Play again, now under the pointer: held`, async ({
     page,
   }) => {
-    const spot = await endingOnBoard(page, { width: 1280, height: 720 });
-    await recordClicks(page);
-    await rawPress(page, spot, hold);
-    await expect(page.getByRole('dialog')).toBeVisible();
-    await page.waitForTimeout(HELD_GAP);
-    await rawPress(page, spot, 80);
-    const downs = await recordedDowns(page);
-    const clicks = await recordedClicks(page);
-    expect(downs, 'two presses reached the page').toHaveLength(2);
-    expect(downs[1]! - downs[0]!, 'past the window from the first press').toBeGreaterThanOrEqual(
-      PRESS_GUARD_WINDOW_MS,
-    );
-    expect(clicks, 'the first press released over the dialog').toHaveLength(2);
-    expect(downs[1]! - clicks[0]!.t, 'inside the window from its release').toBeLessThan(
-      PRESS_GUARD_WINDOW_MS,
-    );
+    await untilPremise(async () => {
+      const spot = await endingOnBoard(page, { width: 1280, height: 720 });
+      await recordClicks(page);
+      await rawPress(page, spot, hold);
+      await expect(page.getByRole('dialog')).toBeVisible();
+      await page.waitForTimeout(HELD_GAP);
+      await rawPress(page, spot, 80);
+      const downs = await recordedDowns(page);
+      const clicks = await recordedClicks(page);
+      expect(downs, 'two presses reached the page').toHaveLength(2);
+      expect(downs[1]! - downs[0]!, 'past the window from the first press').toBeGreaterThanOrEqual(
+        PRESS_GUARD_WINDOW_MS,
+      );
+      expect(clicks, 'the first press released over the dialog').toHaveLength(2);
+      const afterRelease = downs[1]! - clicks[0]!.t;
+      return {
+        premise:
+          afterRelease < PRESS_GUARD_WINDOW_MS
+            ? null
+            : `a board press held ${String(hold)} ms: the second came ${ms(afterRelease)} after its release, not inside the ${ms(PRESS_GUARD_WINDOW_MS)} window`,
+      };
+    });
     await expectHeld(page, 'the held board press');
   });
 }
@@ -1348,21 +1460,32 @@ for (const hold of [450, 550]) {
 test('two single clicks at one spot, the dialog arriving 0–200 ms before the second: the second, aimed at the board, lands on Play again and is held', async ({
   page,
 }) => {
-  const spot = await endingOnBoard(page, { width: 1280, height: 720 }, '&endDelay=570');
-  await recordClicks(page);
-  await rawPress(page, spot);
-  await page.waitForTimeout(560);
-  await rawPress(page, spot);
-  const downs = await recordedDowns(page);
-  const onPlay = await recordedDownsOnPlay(page);
-  const endedAt = await page.evaluate(() => (window as unknown as { __endedAt: number }).__endedAt);
-  expect(downs, 'two presses reached the page').toHaveLength(2);
-  expect(onPlay[1], 'the second press landed on Play again').toBe(true);
-  expect(downs[1]! - downs[0]!, 'past the window from the first press').toBeGreaterThanOrEqual(
-    PRESS_GUARD_WINDOW_MS,
-  );
-  expect(downs[1]! - endedAt, 'the dialog arrived before the second press').toBeGreaterThan(0);
-  expect(downs[1]! - endedAt, 'and just before it').toBeLessThan(200);
+  await untilPremise(async () => {
+    const spot = await endingOnBoard(page, { width: 1280, height: 720 }, '&endDelay=570');
+    await recordClicks(page);
+    await rawPress(page, spot);
+    await page.waitForTimeout(560);
+    await rawPress(page, spot);
+    const downs = await recordedDowns(page);
+    const onPlay = await recordedDownsOnPlay(page);
+    // Unset where the run had not ended yet when the second press came.
+    const endedAt = await page.evaluate(
+      () => (window as unknown as { __endedAt?: number }).__endedAt,
+    );
+    expect(downs, 'two presses reached the page').toHaveLength(2);
+    expect(downs[1]! - downs[0]!, 'past the window from the first press').toBeGreaterThanOrEqual(
+      PRESS_GUARD_WINDOW_MS,
+    );
+    // The premise: the dialog arrived 0–200 ms before the second press, which landed on Play
+    // again in it.
+    const arrived = endedAt === undefined ? null : downs[1]! - endedAt;
+    return {
+      premise:
+        arrived !== null && arrived > 0 && arrived < 200 && onPlay[1] === true
+          ? null
+          : `the dialog arrived ${arrived === null ? 'after' : `${ms(arrived)} before`} the second press, ${onPlay[1] === true ? 'which landed on Play again' : 'which missed Play again'}, not 0–200 ms before it on Play again`,
+    };
+  });
   await expectHeld(page, 'two clicks, the dialog arriving between them');
 });
 
