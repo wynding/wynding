@@ -25,13 +25,10 @@ export function snappedSpan(start: number, size: number, dpr: number): number {
 }
 
 /** What a `ResizeObserver` watching a canvas's `device-pixel-content-box` last reported: the
- *  device pixels the browser draws the canvas's content box into, the CSS size of that box,
- *  and the dpr at the time. */
+ *  device pixels the browser draws the canvas's content box into, and the dpr at the time. */
 export interface DevicePixelReport {
   readonly width: number;
   readonly height: number;
-  readonly cssWidth: number;
-  readonly cssHeight: number;
   readonly dpr: number;
 }
 
@@ -41,16 +38,17 @@ export interface DevicePixelReport {
  * one (`reported`, from a `device-pixel-content-box` observer — Chromium and Firefox),
  * counting pixels at the page's dpr (within one of the box's size × dpr, as any count of
  * where the box snaps to is), and the store is drawn at the device's own ratio
- * (`dpr === rawDpr`). The observer reports again whenever its count changes, and a report
- * taken just before a resize is corrected later in the same observer loop, so the CSS size
- * it was taken at is not compared (a layout reads two ways to a few thousandths of a pixel,
- * and the report keeps the size of its last change). Otherwise it is worked out
- * from where the box sits (`snappedSpan`): WebKit gives no such answer, the observer has not
- * yet answered for a box just resized, Chromium's device-scale emulation counts the screen's
- * own pixels rather than the emulated ones (a box 1072 CSS px wide read 1072 at an emulated
- * 2), and a store at a dpr clamped below the device's is deliberately fewer pixels than the
- * box, scaled up into it. `box` is the canvas's CSS box from its page position, as
- * `getBoundingClientRect` reads it. Never under one pixel.
+ * (`dpr === rawDpr`). The observer reports again whenever its count changes, so a report is
+ * never held to the CSS size it was taken at (a layout reads two ways, by up to a 64th of a
+ * pixel, and a resize that keeps the count brings no new report): one taken just before a
+ * resize stands until the new count comes, later in the same observer loop. Otherwise it is
+ * worked out from where the box sits (`snappedSpan`): WebKit gives no such answer, the
+ * observer has not answered yet (or the box was just resized more than a pixel from its
+ * last count), Chromium's device-scale emulation counts the screen's own pixels rather than
+ * the emulated ones (a box 1072 CSS px wide read 1072 at an emulated 2), and a store at a
+ * dpr clamped below the device's is deliberately fewer pixels than the box, scaled up into
+ * it. `box` is the canvas's CSS box from its page position, as `getBoundingClientRect` reads
+ * it. Never under one pixel.
  */
 export function backingStoreSize(
   box: {
@@ -86,15 +84,8 @@ export function devicePixelReport(
   const device = (
     entry.devicePixelContentBoxSize as readonly ResizeObserverSize[] | undefined
   )?.[0];
-  const css = entry.contentBoxSize[0];
-  if (device === undefined || css === undefined) return null;
-  return {
-    width: device.inlineSize,
-    height: device.blockSize,
-    cssWidth: css.inlineSize,
-    cssHeight: css.blockSize,
-    dpr,
-  };
+  if (device === undefined) return null;
+  return { width: device.inlineSize, height: device.blockSize, dpr };
 }
 
 /** Whether this window's `ResizeObserver` can watch a `device-pixel-content-box`. */

@@ -45,8 +45,6 @@ describe('backingStoreSize — as many pixels as the device pixels the box is dr
   const report = (over: Partial<DevicePixelReport> = {}): DevicePixelReport => ({
     width: 329,
     height: 201,
-    cssWidth: 328.5,
-    cssHeight: 200,
     dpr: 1,
     ...over,
   });
@@ -54,20 +52,6 @@ describe('backingStoreSize — as many pixels as the device pixels the box is dr
   it('takes the browser’s own count when it has given one at the page’s scale', () => {
     // A count unlike the arithmetic's, so the answer shows whose it is.
     expect(backingStoreSize(box, 1, 1, report())).toEqual({ width: 329, height: 201 });
-    // Whatever CSS size the report carries: a layout reads two ways to a few thousandths of a
-    // pixel, and after a resize that keeps the count the report keeps the old size — neither
-    // makes it any less the browser's count (QC round 5).
-    for (const css of [
-      { cssWidth: 328.5 + 1e-9 },
-      { cssWidth: 328.5 - 1 / 64 },
-      { cssHeight: 200 + 1 / 64 },
-      { cssWidth: 300, cssHeight: 180 },
-    ]) {
-      expect(backingStoreSize(box, 1, 1, report(css)), JSON.stringify(css)).toEqual({
-        width: 329,
-        height: 201,
-      });
-    }
   });
 
   it('works it out from where the box sits otherwise', () => {
@@ -108,7 +92,7 @@ describe('backingStoreSize — as many pixels as the device pixels the box is dr
   it('is never under one pixel', () => {
     const empty = { left: 10.5, top: 3, width: 0, height: 0 };
     expect(backingStoreSize(empty, 1, 1, null)).toEqual({ width: 1, height: 1 });
-    const answer = { width: 0, height: 0, cssWidth: 0, cssHeight: 0, dpr: 1 };
+    const answer = { width: 0, height: 0, dpr: 1 };
     expect(backingStoreSize(empty, 1, 1, answer)).toEqual({ width: 1, height: 1 });
   });
 });
@@ -119,18 +103,12 @@ describe('devicePixelReport and observesDevicePixels — the browser’s own cou
     blockSize,
   });
 
-  it('reads the device pixels and the CSS box from an entry, inline as width', () => {
+  it('reads the device pixels from an entry, inline as width', () => {
     const entry = {
       devicePixelContentBoxSize: [size(329, 201)],
       contentBoxSize: [size(328.5, 200)],
     } as unknown as ResizeObserverEntry;
-    expect(devicePixelReport(entry, 1.25)).toEqual({
-      width: 329,
-      height: 201,
-      cssWidth: 328.5,
-      cssHeight: 200,
-      dpr: 1.25,
-    });
+    expect(devicePixelReport(entry, 1.25)).toEqual({ width: 329, height: 201, dpr: 1.25 });
   });
 
   it('has none where the browser gives none', () => {
