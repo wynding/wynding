@@ -135,6 +135,15 @@ const recordedDowns = (page: Page): Promise<number[]> =>
 const recordedDownsOnPlay = (page: Page): Promise<boolean[]> =>
   page.evaluate(() => (window as unknown as { __downsOnPlay: boolean[] }).__downsOnPlay);
 
+/** A keyboard activation's focus-move check (`press-guard.ts`) runs a task later, or at the next
+ *  key. A scripted `focus()` made before it ran is taken for the activation's own focus move, and
+ *  the control it focused takes no Enter or Space for 500 ms. No player moves focus that way (a Tab
+ *  is a key, and its keydown runs the check before focus moves), so let the check run first: a
+ *  zero-delay timer queued now runs after the guard's. */
+async function afterKeyActivation(page: Page): Promise<void> {
+  await page.evaluate(() => new Promise<void>((resolve) => setTimeout(resolve, 0)));
+}
+
 /** A press held `hold` ms, then a single press `HELD_GAP` ms after its release (each its own
  *  click, `detail` 1): stamped in Chromium, as `stampedPair` explains. */
 const HELD_GAP = 135;
@@ -1149,9 +1158,11 @@ test('Enter on Send pressed twice in a row, or held down, starts no new run: Pla
     const dialog = await openResults(page, 'win');
     await dialog.getByRole('button', { name: 'Give feedback' }).focus();
     await page.keyboard.press('Enter');
+    await afterKeyActivation(page);
     const four = dialog.getByRole('radio', { name: '4' }).first();
     await four.focus();
     await page.keyboard.press('Space');
+    await afterKeyActivation(page);
     await expect(four).toBeChecked();
     await dialog.getByRole('button', { name: 'Send' }).focus();
     if (way === 'twice') {
@@ -1243,13 +1254,16 @@ for (const r of [
     const toggle = toggleOf(dialog);
     await toggle.focus();
     await page.keyboard.press('Enter');
+    await afterKeyActivation(page);
     await expect(toggle).toHaveAttribute('aria-expanded', 'true');
     await dialog.getByRole('button', { name: 'Give feedback' }).focus();
     await page.keyboard.press('Enter');
+    await afterKeyActivation(page);
     await expect(dialog.getByRole('button', { name: 'Send' })).toBeVisible();
     const four = dialog.getByRole('radio', { name: '4' }).first();
     await four.focus();
     await page.keyboard.press('Space');
+    await afterKeyActivation(page);
     await expect(four).toBeChecked();
     await dialog.getByRole('button', { name: 'Send' }).focus();
     await scrollToEnd(page);
@@ -1413,6 +1427,7 @@ test('Enter pressed twice on Not now, 150 ms apart: the second finds Give feedba
   const dialog = await openResults(page, 'win');
   await dialog.getByRole('button', { name: 'Give feedback' }).focus();
   await page.keyboard.press('Enter');
+  await afterKeyActivation(page);
   await expect(dialog.getByRole('button', { name: 'Send' })).toBeVisible();
   await dialog.getByRole('button', { name: 'Not now' }).focus();
   await page.keyboard.press('Enter', { delay: 60 });
@@ -1430,11 +1445,13 @@ test('a deliberate Enter on Give feedback 650 ms after Not now reopens the surve
   const dialog = await openResults(page, 'win');
   await dialog.getByRole('button', { name: 'Give feedback' }).focus();
   await page.keyboard.press('Enter');
+  await afterKeyActivation(page);
   await expect(dialog.getByRole('button', { name: 'Send' })).toBeVisible();
   await dialog.getByRole('button', { name: 'Not now' }).focus();
   await page.keyboard.press('Enter', { delay: 60 });
   await page.waitForTimeout(650);
   await page.keyboard.press('Enter', { delay: 60 });
+  await afterKeyActivation(page);
   await expect(dialog.getByRole('button', { name: 'Send' }), 'Enter reopened it').toBeVisible();
   // The form closed again by Not now, then Space on Give feedback, the same way.
   await dialog.getByRole('button', { name: 'Not now' }).focus();
@@ -1494,9 +1511,12 @@ test.describe('a slow tap, a burst of taps or a long touch on the board as the r
   const cases: {
     name: string;
     extra?: string;
+    /** How many of the taps' clicks reach Play again (a tap the dialog arrived during gives none). */
+    onPlay: number;
     taps: readonly { hold: number; after: number }[];
   }[] = [
     ...[450, 550, 800].map((hold) => ({
+      onPlay: 1,
       name: `a first tap held ${String(hold)} ms, then a second tap 135 ms after its release`,
       taps: [
         { hold, after: HELD_GAP },
@@ -1505,6 +1525,7 @@ test.describe('a slow tap, a burst of taps or a long touch on the board as the r
     })),
     {
       name: 'a triple-tap burst, 250 ms apart',
+      onPlay: 2,
       taps: [
         { hold: 90, after: 160 },
         { hold: 90, after: 160 },
@@ -1514,6 +1535,7 @@ test.describe('a slow tap, a burst of taps or a long touch on the board as the r
     {
       name: 'a touch held 2.3 s with the dialog arriving 2.1 s in, then a second tap 135 ms after its release',
       extra: '&endDelay=2100',
+      onPlay: 1,
       taps: [
         { hold: 2300, after: HELD_GAP },
         { hold: 90, after: 400 },
@@ -1531,11 +1553,16 @@ test.describe('a slow tap, a burst of taps or a long touch on the board as the r
         'a coarse pointer',
       ).toBe(true);
       const cdp = await page.context().newCDPSession(page);
+      await recordClicks(page);
       for (const tap of c.taps) {
         await cdpTap(page, cdp, spot, tap.hold);
         await page.waitForTimeout(tap.after);
       }
       await cdp.detach();
+      const onPlay = (await recordedClicks(page)).filter((k) => k.onPlay);
+      expect(onPlay, `${c.name}: the taps after the first reached Play again`).toHaveLength(
+        c.onPlay,
+      );
       await expectHeld(page, c.name);
     });
   }
