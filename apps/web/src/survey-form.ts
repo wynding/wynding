@@ -1,5 +1,6 @@
 // survey-form.ts — the end-of-run survey's DOM (ADR 0014 §1, §2, §6), rendered into the
-// results dialog's survey slot (`overlay.ts`).
+// results dialog's two survey slots (`results-panel.ts`): Give feedback in the dialog's action
+// row, and the form, expanded in place, below it.
 //
 // Every RULE lives in `survey.ts`'s model: what may be edited when, what a Send consumes,
 // when the idempotency key rotates, what a run start cancels. This module is the other
@@ -9,13 +10,12 @@
 // parallel copy, so what the player sees can only ever be the state the model holds.
 
 import { t } from './i18n/t';
-import {
-  SURVEY_TEXT_MAX,
-  type Survey,
-  type SurveyPayload,
-  type SurveyScale,
-  type SurveySendResult,
-} from './survey';
+import { SURVEY_TEXT_MAX, type SurveyPayload, type SurveyScale } from '@wynding/feedback';
+import { type Survey, type SurveySendResult } from './survey';
+import { focusAfterRender } from './focus-in-place';
+
+/** The privacy notice the survey is sent under (wynding-site ADR 0001 §5). */
+export const PRIVACY_HREF = '/privacy';
 
 /** What the form needs from the app (`main.ts`), and nothing else. */
 export interface SurveyFormHost {
@@ -43,7 +43,19 @@ export interface SurveyFormHost {
   /** The region is held (a send in flight) or released (its outcome announced): the
    *  dialog's other writers are locked exactly while it is held (§6). */
   setRegionHeld(held: boolean): void;
-  focusPlayAgain(): void;
+  /** Move focus to Play again, where an accepted Send sends it (§1). `preventScroll` after a
+   *  POINTER press: the retired form's collapse has already moved the panel under the pointer
+   *  (the results panel's press guard covers that), and scrolling Play again into view would
+   *  move it again. After a keyboard press, focus brings Play again into view. */
+  focusPlayAgain(preventScroll: boolean): void;
+}
+
+/** Where the survey renders (#181 H2). Give feedback is one of the results dialog's actions,
+ *  so it sits in their row; the form it expands is too tall for a row, so it opens below. Both
+ *  slots are hidden while the survey is absent — so a build with no survey shows neither. */
+export interface SurveySlots {
+  readonly opener: HTMLElement;
+  readonly form: HTMLElement;
 }
 
 export interface SurveyForm {
@@ -70,9 +82,19 @@ interface ScaleGroup {
   readonly inputs: readonly HTMLInputElement[];
 }
 
+/** The nearest ancestor of `el` that scrolls: the results panel's body. */
+function scrollerOf(el: HTMLElement): HTMLElement | null {
+  const view = el.ownerDocument.defaultView;
+  for (let up = el.parentElement; up !== null; up = up.parentElement) {
+    const overflow = view?.getComputedStyle(up).overflowY;
+    if (overflow === 'auto' || overflow === 'scroll') return up;
+  }
+  return null;
+}
+
 export function createSurveyForm(
   doc: Document,
-  slot: HTMLElement,
+  slots: SurveySlots,
   host: SurveyFormHost,
 ): SurveyForm {
   const { survey } = host;
@@ -143,7 +165,14 @@ export function createSurveyForm(
   const privacyEl = doc.createElement('p');
   privacyEl.className = 'wy-survey-note';
   privacyEl.id = `${groupPrefix}-privacy`;
-  privacyEl.textContent = t('survey.privacy');
+  // The notice lives on the site (wynding-site `/privacy`). Root-absolute like the home
+  // link, and a new tab, so reading it never navigates away from a half-written survey.
+  const privacyLink = doc.createElement('a');
+  privacyLink.href = PRIVACY_HREF;
+  privacyLink.target = '_blank';
+  privacyLink.rel = 'noopener';
+  privacyLink.textContent = t('survey.privacyLink');
+  privacyEl.append(t('survey.privacy'), ' ', privacyLink);
 
   const actions = doc.createElement('div');
   actions.className = 'wy-survey-actions';
@@ -171,7 +200,8 @@ export function createSurveyForm(
     privacyEl,
     actions,
   );
-  slot.append(openBtn, form);
+  slots.opener.append(openBtn);
+  slots.form.append(form);
 
   /** False from a dialog opening until its ask refresh settles: nothing shows until the
    *  model has decided presence against current storage. */
@@ -202,10 +232,11 @@ export function createSurveyForm(
     const state = survey.state();
     const { phase } = state;
     const shown = ready && phase !== 'absent' && phase !== 'retired';
-    slot.hidden = !shown;
+    slots.opener.hidden = !shown;
+    slots.form.hidden = !shown;
     // Presence is DECIDED once the ask refresh settles — shown or not. Exposed so a test can
     // tell "absent" from "not decided yet", which `hidden` alone cannot.
-    slot.toggleAttribute('data-ready', ready);
+    slots.form.toggleAttribute('data-ready', ready);
     const expanded = phase === 'open' || phase === 'sending';
     openBtn.hidden = expanded;
     form.hidden = !expanded;
@@ -290,17 +321,40 @@ export function createSurveyForm(
     render();
   });
 
-  openBtn.addEventListener('click', () => {
+  /** Bring the first question into view where it opened below the fold of the panel's scroller
+   *  (#181 H2): the whole question, legend and options, where it fits, else its legend at the
+   *  top. A press that opened the form must show it. After a POINTER press, only where the
+   *  first option is wholly or mostly below the fold: a question that mostly shows needs no
+   *  scroll moving the row under the pointer. After a keyboard press, wherever that option,
+   *  which has focus, is not wholly in view, as the browser's own focus scroll would do. */
+  const revealFirstQuestion = (byPointer: boolean): void => {
+    const option = rating.inputs[0]?.closest('label') ?? null;
+    const port = scrollerOf(form);
+    if (option === null || port === null) return;
+    const box = option.getBoundingClientRect();
+    const top = port.getBoundingClientRect().top;
+    const shown = Math.min(box.bottom, top + port.clientHeight) - Math.max(box.top, top);
+    if (shown >= (byPointer ? box.height / 2 : box.height - 0.5)) return;
+    rating.fieldset.scrollIntoView({ block: 'nearest' });
+  };
+
+  openBtn.addEventListener('click', (event) => {
     if (!survey.open()) return;
     // Opening CLEARS the region without claiming it (§6): a Verify result still showing has
     // no pending outcome to lose, and a Copy still awaiting the clipboard keeps its claim,
     // so its result lands after this. Only Send takes the region.
     say('');
     render();
-    rating.inputs[0]?.focus();
+    // Focus moves to the first question (§1), by keyboard and pointer alike, and never by the
+    // browser's own scroll, which differs between engines. Then the question is brought into
+    // view (`revealFirstQuestion`). That scroll moves the action row under a resting pointer,
+    // so the results panel's press guard keeps a double-click's second press off whatever
+    // arrives there. (`detail` counts a pointer press's clicks; a keyboard press has none.)
+    focusAfterRender(rating.inputs[0], true);
+    revealFirstQuestion(event.detail > 0);
   });
 
-  notNowBtn.addEventListener('click', () => {
+  notNowBtn.addEventListener('click', (event) => {
     if (notNowBtn.getAttribute('aria-disabled') === 'true') return;
     // The model's commit never rejects, but an injected ask is not ours to trust: a rejection
     // must not surface as an unhandled one. The accepted-Send path guards the same way.
@@ -309,8 +363,11 @@ export function createSurveyForm(
     // or a failure notice is about a submission that is no longer pending.
     if (ownMessage !== null && ownMessage !== '' && host.statusText() === ownMessage) say('');
     render();
-    // Give feedback stays present and live on this dialog (§3), so it is a real target.
-    openBtn.focus();
+    // Give feedback stays present and live on this dialog (§3), so it is a real target. After a
+    // POINTER press (`detail` counts its clicks) focus moves without scrolling: the form's
+    // collapse has already moved the panel under the pointer, and the press guard covers that.
+    // After a keyboard press, focus brings Give feedback into view.
+    focusAfterRender(openBtn, event.detail > 0);
   });
 
   const OUTCOME: Record<SurveySendResult, () => string> = {
@@ -319,9 +376,12 @@ export function createSurveyForm(
     offline: () => t('survey.offline'),
   };
 
-  sendBtn.addEventListener('click', () => {
+  sendBtn.addEventListener('click', (event) => {
     // In flight, Send is one of the controls the region's owner has locked: silent.
     if (locked()) return;
+    // Whether this Send was a POINTER press (`detail` counts its clicks), for where focus goes
+    // once it is accepted (`focusPlayAgain`).
+    const byPointer = event.detail > 0;
     const attempt = survey.send((key) => host.compose(key));
     if (attempt.kind === 'needsRating') {
       // §2's deliberate divergence from the Dock: an explicit submit attempt gets an answer.
@@ -344,12 +404,13 @@ export function createSurveyForm(
       host.setRegionHeld(false);
       ownMessage = OUTCOME[result]();
       announce(ownMessage);
-      const focusWasHere = slot.contains(doc.activeElement);
+      const focusWasHere =
+        slots.form.contains(doc.activeElement) || slots.opener.contains(doc.activeElement);
       render();
       // An accepted Send retires the control the player was on, so focus goes to Play
       // again (§1) — but only if it was in the survey: a player who had already moved on
       // is not pulled back.
-      if (result === 'accepted' && focusWasHere) host.focusPlayAgain();
+      if (result === 'accepted' && focusWasHere) host.focusPlayAgain(byPointer);
     });
   });
 
@@ -381,7 +442,8 @@ export function createSurveyForm(
     destroy(): void {
       dialogSeq++;
       survey.endDialog();
-      slot.replaceChildren();
+      slots.opener.replaceChildren();
+      slots.form.replaceChildren();
     },
   };
 }

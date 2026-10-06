@@ -1441,8 +1441,8 @@ export {
 } from './tower';
 // The support aura (M2-S8), on `forEachValidTower`'s own precedent: the render VM must
 // decide which towers are buffed by calling the SAME adjacency rule `runCombat` uses,
-// never a second copy of it — a divergent copy would draw a ✦ on a tower the sim is
-// not actually buffing (or omit one it is).
+// never a second copy of it — a divergent copy would draw the boost glow on a tower the
+// sim is not actually buffing (or omit it from one it is).
 export {
   buildAuraIndex,
   auraMulFor,

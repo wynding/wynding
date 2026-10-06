@@ -24,11 +24,13 @@ export const EN = {
   "app.title": "Wynding",
   "board.aria": "Game board. Arm a tower from the tower rail or its hotkey, then place it: with a mouse, click a cell; by touch, press to show the offset ghost, drag to adjust, then release; or with the keyboard, move the cursor with {move} and press {confirm}. Press {sell} to sell the selected tower.",
   "controls.callWave": "Call wave",
+  "controls.callWave.earlyBonus": "Calling now pays an early-call bonus",
   "controls.callWave.pending": "Launching…",
   "controls.copyRun": "Copy run data",
   "controls.pause": "Pause",
   "controls.playAgain": "Play again",
   "controls.resume": "Resume",
+  "controls.runData": "Run data",
   "controls.saveRun": "Save run data",
   "controls.settings": "Settings",
   "controls.speed": "Speed: {factor}x",
@@ -50,13 +52,12 @@ export const EN = {
   "hud.preview.armor": "armor {armor}",
   "hud.preview.armor.armored": "armor {armor} (subtracted from each direct hit; damage over time ignores it)",
   "hud.preview.armor.glance": "armor −{armor} direct",
+  "hud.preview.count": "×{count}",
   "hud.preview.domain.air": "air",
   "hud.preview.domain.ground": "ground",
   "hud.preview.entry": "{count} × {name} — {domain}, {armor}, {leakCost}, {immunities}",
   "hud.preview.entry.boss": "{count} × {name} — boss, {domain}, {armor}, {leakCost}, {immunities}",
-  "hud.preview.glance": "{count} × {name}",
   "hud.preview.glance.immune": "immune to {immunities}",
-  "hud.preview.glance.noted": "{count} × {name} — {notes}",
   "hud.preview.immunities.none": "no immunities",
   "hud.preview.immunity.slow": "slow",
   "hud.preview.immunity.stun": "stun",
@@ -65,14 +66,16 @@ export const EN = {
   "hud.preview.role.boss": "boss",
   "hud.preview.title": "Wave {waveNumber} of {waveCount}",
   "hud.score": "Score: {count}",
+  "hud.score.glance.label": "Score",
   "hud.stars": "Stars: {count} of 3",
+  "hud.stars.glance.max": "/ 3",
   "hud.statuses": "On the board: {statuses}",
   "hud.statuses.airborne": "{count} airborne",
   "hud.statuses.armored": "{count} armored",
   "hud.statuses.poisoned": "{count} poisoned",
   "hud.statuses.slowed": "{count} slowed",
   "hud.statuses.stunned": "{count} stunned",
-  "hud.wave.compact.countdown": "{s}s",
+  "hud.wave.glance.unit": "s",
   "install.banner.dismiss": "Dismiss install suggestion",
   "install.banner.how": "Show me how",
   "install.banner.install": "Install",
@@ -135,8 +138,16 @@ export const EN = {
   "playtrace.saved": "Run data saved as {filename}.",
   "preview.label": "Wave preview",
   "results.lost": "The creeps broke through.",
+  "results.score": "Score",
+  "results.stat.creepsStopped": "Creeps stopped",
+  "results.stat.leaks": "Leaks",
+  "results.stat.towersBuilt": "Towers built",
+  "results.stat.wavesCleared": "Waves cleared",
+  "results.stat.wavesCleared.value": "{cleared} / {count}",
+  "results.subtitle.lost": "Lost with {launched} of {count} waves launched",
+  "results.subtitle.won": "All {count} waves cleared",
   "results.summary": "Score {score} — {stars} of 3 stars",
-  "results.won": "You held the line!",
+  "results.won": "The maze held.",
   "rotate.message": "Wynding plays best in landscape. Rotate your device to continue.",
   "rotate.title": "Rotate your device",
   "settings.accessibility": "Accessibility",
@@ -160,6 +171,7 @@ export const EN = {
   "survey.offline": "You're offline, so your feedback wasn't sent.",
   "survey.open": "Give feedback",
   "survey.privacy": "Sending shares your answers and this run's details under the Wynding site privacy notice.",
+  "survey.privacyLink": "Read the privacy notice",
   "survey.rating": "How was it? (1 = poor, 5 = great)",
   "survey.reference": "Reference: {reference}. Quote it if you ask for this feedback to be deleted.",
   "survey.rejected": "Couldn't send your feedback.",
@@ -212,11 +224,13 @@ export interface MessageParams {
   "app.title": Record<never, never>;
   "board.aria": { "move": string | number; "confirm": string | number; "sell": string | number };
   "controls.callWave": Record<never, never>;
+  "controls.callWave.earlyBonus": Record<never, never>;
   "controls.callWave.pending": Record<never, never>;
   "controls.copyRun": Record<never, never>;
   "controls.pause": Record<never, never>;
   "controls.playAgain": Record<never, never>;
   "controls.resume": Record<never, never>;
+  "controls.runData": Record<never, never>;
   "controls.saveRun": Record<never, never>;
   "controls.settings": Record<never, never>;
   "controls.speed": { "factor": string | number };
@@ -238,13 +252,12 @@ export interface MessageParams {
   "hud.preview.armor": { "armor": string | number };
   "hud.preview.armor.armored": { "armor": string | number };
   "hud.preview.armor.glance": { "armor": string | number };
+  "hud.preview.count": { "count": string | number };
   "hud.preview.domain.air": Record<never, never>;
   "hud.preview.domain.ground": Record<never, never>;
   "hud.preview.entry": { "count": string | number; "name": string | number; "domain": string | number; "armor": string | number; "leakCost": string | number; "immunities": string | number };
   "hud.preview.entry.boss": { "count": string | number; "name": string | number; "domain": string | number; "armor": string | number; "leakCost": string | number; "immunities": string | number };
-  "hud.preview.glance": { "count": string | number; "name": string | number };
   "hud.preview.glance.immune": { "immunities": string | number };
-  "hud.preview.glance.noted": { "count": string | number; "name": string | number; "notes": string | number };
   "hud.preview.immunities.none": Record<never, never>;
   "hud.preview.immunity.slow": Record<never, never>;
   "hud.preview.immunity.stun": Record<never, never>;
@@ -253,14 +266,16 @@ export interface MessageParams {
   "hud.preview.role.boss": Record<never, never>;
   "hud.preview.title": { "waveNumber": string | number; "waveCount": string | number };
   "hud.score": { "count": string | number };
+  "hud.score.glance.label": Record<never, never>;
   "hud.stars": { "count": string | number };
+  "hud.stars.glance.max": Record<never, never>;
   "hud.statuses": { "statuses": string | number };
   "hud.statuses.airborne": { "count": string | number };
   "hud.statuses.armored": { "count": string | number };
   "hud.statuses.poisoned": { "count": string | number };
   "hud.statuses.slowed": { "count": string | number };
   "hud.statuses.stunned": { "count": string | number };
-  "hud.wave.compact.countdown": { "s": string | number };
+  "hud.wave.glance.unit": Record<never, never>;
   "install.banner.dismiss": Record<never, never>;
   "install.banner.how": Record<never, never>;
   "install.banner.install": Record<never, never>;
@@ -323,6 +338,14 @@ export interface MessageParams {
   "playtrace.saved": { "filename": string | number };
   "preview.label": Record<never, never>;
   "results.lost": Record<never, never>;
+  "results.score": Record<never, never>;
+  "results.stat.creepsStopped": Record<never, never>;
+  "results.stat.leaks": Record<never, never>;
+  "results.stat.towersBuilt": Record<never, never>;
+  "results.stat.wavesCleared": Record<never, never>;
+  "results.stat.wavesCleared.value": { "cleared": string | number; "count": string | number };
+  "results.subtitle.lost": { "launched": string | number; "count": string | number };
+  "results.subtitle.won": { "count": string | number };
   "results.summary": { "score": string | number; "stars": string | number };
   "results.won": Record<never, never>;
   "rotate.message": Record<never, never>;
@@ -348,6 +371,7 @@ export interface MessageParams {
   "survey.offline": Record<never, never>;
   "survey.open": Record<never, never>;
   "survey.privacy": Record<never, never>;
+  "survey.privacyLink": Record<never, never>;
   "survey.rating": Record<never, never>;
   "survey.reference": { "reference": string | number };
   "survey.rejected": Record<never, never>;

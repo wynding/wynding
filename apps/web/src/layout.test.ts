@@ -18,7 +18,6 @@ import {
   EXEMPT_FROM_DECLARATION,
   WALKED_CONTAINERS,
 } from './layout';
-import { PREVIEW_FLOAT_CAP_PX } from './preview-place';
 
 // `new URL('./ui.css', import.meta.url)` would normally suffice, but under the jsdom test
 // environment the global `URL` is jsdom's DOM implementation, not Node's — resolve via
@@ -226,33 +225,198 @@ describe('layout — the home link box model and visibility contract', () => {
   });
 });
 
-// The wave preview's band grants (#101): three custom properties `main.ts` writes and
-// `ui.css` reads. The DEFAULTS are what a pre-measurement pass (jsdom, a stage mid-resize)
-// renders with, and one of them carries a number `preview-place.ts` mirrors — so, exactly
-// like COMPACT_QUERY above, the duplication is made safe by asserting it rather than by
-// trusting it.
-describe('layout — the wave preview’s band grants (#101)', () => {
-  const preview = ruleBody(css, '.wy-wave-preview');
+// The wave preview's ONE home (#181 L1). Its stage-stability holds by CONSTRUCTION — the strip
+// is sized by the status row, never by the wave it shows — and these are the declarations that
+// construct it. `stage-stability.spec.ts` measures the result in a real browser; these fail
+// first, with the reason attached, when a mechanism is edited away.
+describe('layout — the wave strip’s one home (#181)', () => {
+  const uncommented = css.replace(/\/\*[\s\S]*?\*\//g, '');
+  const standard = uncommented.slice(uncommented.indexOf(`@media not all and ${COMPACT_QUERY}`));
 
-  it('reads all three band properties, each with its pre-measurement default', () => {
-    expect(preview).toContain('left: var(--wy-preview-left, 0.5rem)');
-    expect(preview).toContain('right: var(--wy-preview-right, auto)');
-    expect(preview).toContain('max-width: var(--wy-preview-max-w, min(256px, 45%))');
+  /** Every leaf rule whose SUBJECT is the strip itself — its modifiers included, its parts
+   *  (`-title`, `-list`) not. */
+  function stripRules(): { selector: string; body: string }[] {
+    const out: { selector: string; body: string }[] = [];
+    const re = /([^{}]+)\{([^{}]*)\}/g;
+    let m: RegExpExecArray | null;
+    while ((m = re.exec(uncommented)) !== null) {
+      for (const selector of (m[1] as string).split(',').map((x) => x.trim())) {
+        const subject = selector.split(/\s*[>+~]\s*|\s+/).pop() ?? '';
+        if (/\.wy-wave-preview(?:--[\w-]+)?(?![\w-])/.test(subject)) {
+          out.push({ selector, body: (m[2] as string).replace(/\s+/g, ' ').trim() });
+        }
+      }
+    }
+    return out;
+  }
+
+  it('never floats: no rule takes the strip out of flow, and #101’s band grants are gone', () => {
+    const rules = stripRules();
+    expect(rules.length, 'the strip has rules to check').toBeGreaterThan(2);
+    for (const r of rules)
+      expect(r.body, r.selector).not.toMatch(/position\s*:\s*(absolute|fixed)/);
+    expect(uncommented).not.toMatch(/--wy-preview-(?:left|right|max-w)\b/);
+    expect(uncommented).not.toContain('.wy-wave-preview--over-board');
   });
 
-  it('the stylesheet’s own width cap is the one preview-place.ts mirrors', () => {
-    // `preview-place.ts` clamps a band wider than the cap back to it, so the card can never
-    // be stretched past the box this stylesheet declares. A silent edit to either number
-    // would let a wide band grow the card beyond its declared cap with nothing failing.
-    expect(preview).toContain(`min(${PREVIEW_FLOAT_CAP_PX}px,`);
+  it('Standard: the strip takes the row’s LEFTOVER width and one fixed line of height', () => {
+    const strip = ruleBody(standard, '.wy-shell .wy-wave-preview');
+    // A zero basis plus inline-size containment keep the strip's content out of every
+    // intrinsic measure, so the row's line breaks never depend on what a wave contains.
+    expect(strip).toContain('flex: 1 1 0;');
+    expect(strip).toContain('container: wy-strip / inline-size;');
+    // A fixed height, not a content height: a long wave scrolls in place (the scroll form)
+    // or clips, and never grows the row.
+    expect(strip).toMatch(/(?:^|; )height: 2\.25rem;/);
+    expect(strip).toContain('overflow: hidden;');
+    expect(strip).toContain('white-space: nowrap;');
   });
 
-  it('the reduced-weight companion form exists and is scoped to its own class', () => {
-    // Candidate 5 (#101) applies ONLY while the card borrows the board's blocked border
-    // ring; `main.ts` toggles the class. An unconditional edit into the base rule above
-    // would paint it over the letterbox band too, where there is no board underneath.
-    expect(ruleBody(css, '.wy-wave-preview--over-board')).toContain('border-style: dashed');
-    expect(preview).not.toContain('border-style: dashed');
+  it('Standard: a hidden strip or chip keeps its box, so the run resolving never reflows the row', () => {
+    for (const selector of [
+      '.wy-shell .wy-wave-preview[hidden]',
+      '.wy-shell .wy-hud > .wy-chip[hidden]',
+    ]) {
+      const body = ruleBody(standard, selector);
+      expect(body, selector).toContain('visibility: hidden;');
+      expect(body, selector).not.toContain('display: none');
+    }
+  });
+});
+
+// #181 QC. The countdown dial, the hud's floor, and the two containing blocks that keep
+// visually-hidden text inside the scrollport that clips it. The specs measure each result in a
+// real browser (`dock-overlap.spec.ts`, `hud-strip.spec.ts`); these fail first, with the
+// reason attached, when a mechanism is edited away.
+describe('layout — the countdown dial, the hud floor, and hidden text’s containing blocks (#181 QC)', () => {
+  const uncommented = css.replace(/\/\*[\s\S]*?\*\//g, '');
+  const standard = uncommented.slice(uncommented.indexOf(`@media not all and ${COMPACT_QUERY}`));
+
+  /** The one rule that draws the dial: Standard's, keyed on the room the Dock pass MEASURED
+   *  (`wy-primary--dial`, #181 QC round 2) and on a running countdown. */
+  const DRAW = '.wy-shell .wy-dock .wy-primary.wy-primary--dial > .wy-dial:not([hidden])';
+  const ROOM = '.wy-shell .wy-dock .wy-primary.wy-primary--dial:has(> .wy-dial:not([hidden]))';
+
+  it('the dial is out of every layout measure, and drawn only where the Dock pass measured room for it', () => {
+    const dial = ruleBody(uncommented, '.wy-dial');
+    expect(dial).toContain('position: absolute;');
+    expect(dial).toContain('pointer-events: none;');
+    // Drawn nowhere by default: no measured room, no dial — so a page the pass has not reached
+    // yet, or cannot measure, never paints a dial over its label.
+    expect(dial).toContain('display: none;');
+    // Exactly ONE rule draws it, Standard's. It names the measured room AND `:not([hidden])`:
+    // without the latter an author `display` would out-rank the UA's `[hidden] { display: none }`
+    // and paint a stale dial while no countdown runs.
+    const drawing = [...uncommented.matchAll(/\.wy-dial(?![-\w])[^{]*\{([^}]*)\}/g)].filter(
+      ([, body]) => {
+        const display = /display:\s*([\w-]+)/.exec(body!)?.[1];
+        return display !== undefined && display !== 'none';
+      },
+    );
+    expect(drawing).toHaveLength(1);
+    expect(ruleBody(standard, DRAW)).toBe('display: block;');
+    // Measured in whole px by the Dock pass and sized from the control's own font.
+    expect(dial).toContain('width: var(--wy-dial-size, 0.9em);');
+    expect(dial).toContain('height: var(--wy-dial-size, 0.9em);');
+    expect(dial).toContain('inset-inline-start: var(--wy-dial-inset, 0.25em);');
+    // The control is the dial's containing block, so the dial is drawn inside it.
+    expect(ruleBody(uncommented, '.wy-dock .wy-primary')).toContain('position: relative;');
+  });
+
+  it('Standard makes the dial’s room by REDISTRIBUTING the control’s inline padding by one whole-px shift, never adding to it', () => {
+    const base = /padding:\s*([0-9.]+rem)\s+([0-9.]+rem);/.exec(ruleBody(uncommented, '.wy-btn'));
+    expect(base, 'the base .wy-btn padding shorthand').not.toBeNull();
+    const shifted =
+      /^padding-inline: calc\(([0-9.]+rem) \+ var\((--[\w-]+), 0px\)\) calc\(([0-9.]+rem) - var\((--[\w-]+), 0px\)\);$/.exec(
+        ruleBody(standard, ROOM),
+      );
+    expect(shifted, 'the Standard padding redistribution').not.toBeNull();
+    // Both sides start from the base padding and move by the SAME shift — added where the dial
+    // is drawn, taken from the end — so the control's box, and every Dock row, is the same with
+    // or without the dial. The shift is the Dock pass's whole-px value (`dock-reserve.ts`), so
+    // neither side gains a fraction of a layout unit the other loses.
+    expect(shifted![1]).toBe(base![2]);
+    expect(shifted![3]).toBe(base![2]);
+    expect(shifted![2]).toBe('--wy-dial-shift');
+    expect(shifted![4]).toBe('--wy-dial-shift');
+  });
+
+  it('the dial’s geometry is the SVG’s own: no rule sets a radius, a centre, a stroke width or a path', () => {
+    // `hud-icons.test.ts` reads the dial's geometry back from its attributes, which any rule
+    // here would out-rank — so none may set it.
+    const parts = [
+      ...uncommented.matchAll(/([^{}]*\.wy-dial-(?:ring|crown|track|wedge|svg)[^{}]*)\{([^}]*)\}/g),
+    ];
+    expect(parts.length).toBeGreaterThan(0);
+    for (const [, selector, body] of parts) {
+      expect(body, selector!.trim()).not.toMatch(
+        /(^|[;\s])(stroke-width|r|cx|cy|d|transform|stroke-dasharray)\s*:/,
+      );
+      expect(body, selector!.trim()).not.toMatch(
+        /(^|[;\s])(rotate|scale|translate|transform-origin|transform-box|stroke-dashoffset)\s*:/,
+      );
+    }
+  });
+
+  it('the primary control’s label paints no background of its own', () => {
+    // #181 QC round 2: a label "mask" (`background-color: inherit`) once covered the dial where
+    // a word spilled over it, and painted accent boxes OUTSIDE the rounded control where the word
+    // ran past its border. The measured room withholds the dial instead.
+    expect(uncommented).not.toMatch(
+      /\.wy-primary(?![\w-]|\))[^{}]*\.wy-btn-text\s*\{[^}]*background/,
+    );
+  });
+
+  it('Compact keeps its button as it is: no dial in the column', () => {
+    const compact = uncommented.slice(uncommented.indexOf(`@media ${COMPACT_QUERY}`));
+    expect(ruleBody(compact, '.wy-dial')).toContain('display: none;');
+  });
+
+  it('Compact’s chips column stops at the cut `hud-cut.ts` measures, and the Dock keeps its place under it', () => {
+    // #181 QC round 2: whole chips at rest. Unset, the column takes all its room as before.
+    const compact = uncommented.slice(uncommented.indexOf(`@media ${COMPACT_QUERY}`));
+    expect(ruleBody(compact, '.wy-hud')).toContain('max-height: var(--wy-hud-cut, none);');
+    // The room a cut gives up opens ABOVE the Dock, so the Dock never moves with it.
+    expect(ruleBody(compact, '.wy-dock')).toContain('margin-top: auto;');
+  });
+
+  it('Compact’s glances wrap — icon above value, the countdown’s seconds above its clock — and only a value’s `<wbr>` lets it wrap inside', () => {
+    // #181 QC round 2: the column's track does not grow with the text, so a one-line glance ran
+    // its value past the column's edge from 125–175% text. Standard's glance stays one line.
+    const compact = uncommented.slice(uncommented.indexOf(`@media ${COMPACT_QUERY}`));
+    expect(ruleBody(compact, '.wy-chip-glance')).toContain('flex-wrap: wrap;');
+    expect(ruleBody(compact, '.wy-chip-value')).toContain('white-space: normal;');
+    expect(ruleBody(compact, ".wy-chip[data-wy-chip='wave'] .wy-chip-glance")).toContain(
+      'flex-wrap: wrap-reverse;',
+    );
+    // Outside Compact's block — the base rule and Standard's — no glance ever wraps.
+    expect(ruleBody(uncommented, '.wy-chip-glance')).toContain('white-space: nowrap;');
+    const outside = uncommented.slice(0, uncommented.indexOf(`@media ${COMPACT_QUERY}`));
+    expect(outside).not.toMatch(/\.wy-chip-glance\s*\{[^}]*flex-wrap/);
+  });
+
+  it('the hud never shrinks below one whole chip beside the link (no sliver)', () => {
+    expect(ruleBody(standard, '.wy-shell .wy-hud')).toMatch(/min-width: min\(100%, [0-9.]+rem\);/);
+  });
+
+  it('a visually-hidden sentence resolves against its own chip or row, inside the scrollport', () => {
+    // Unpositioned, the absolute `.wy-chip-full` / `.wy-preview-full` resolved against
+    // `.wy-shell`, outside the hud and strip clips: page scroll range nobody could pan back.
+    expect(ruleBody(uncommented, '.wy-chip')).toContain('position: relative;');
+    expect(ruleBody(uncommented, '.wy-preview-entry')).toContain('position: relative;');
+    expect(ruleBody(uncommented, '.wy-chip-full')).toContain('position: absolute;');
+    expect(ruleBody(uncommented, '.wy-preview-full')).toContain('position: absolute;');
+  });
+
+  it('the narrow strip’s tightenings out-rank the rules they refine', () => {
+    const at = standard.indexOf('@container wy-strip (max-width: 22rem)');
+    expect(at, 'the narrow container query').toBeGreaterThan(-1);
+    const narrow = standard.slice(at);
+    // `.wy-shell` puts both at (0,2,0): above the title's base `margin: 0` (0,1,0, later in
+    // source) and level with the list's Standard gap (0,2,0, earlier in source).
+    expect(ruleBody(narrow, '.wy-shell .wy-wave-preview-title')).toContain('margin-inline-end:');
+    expect(ruleBody(narrow, '.wy-shell .wy-wave-preview-list')).toContain('gap:');
+    expect(standard.indexOf('.wy-shell .wy-wave-preview-list {')).toBeLessThan(at);
   });
 });
 
@@ -362,8 +526,11 @@ describe('layout — the safe-area seam (#136)', () => {
   });
 
   it('the three guards together account for every token read', () => {
-    // 16 axis-named + 3 vertical bounds + 2 track tokens + the inset probe = the 22 call sites
-    // (the probe joined in #152's review round: an out-of-flow `height` that exists only to
+    // 16 axis-named + 2 vertical bounds + 2 track tokens + the inset probe = the 21 call sites.
+    // #181 removed one: the wave preview's reserved hud row (`.wy-hud:has(> .wy-wave-preview)`,
+    // a `height` bound) went with the preview's floating placement chain, since the strip that
+    // replaced both is one fixed line tall and needs no viewport-relative budget. Before that,
+    // 22 (the probe joined in #152's review round: an out-of-flow `height` that exists only to
     // make the bottom inset observable, pinned by its own test below). Before it, 21 (20 before #153
     // too, by a different route: #153 added the Compact Rail's two top-inset reads, making
     // 22, and its third round routed the Rail's two scroll reserves through the named
@@ -372,17 +539,17 @@ describe('layout — the safe-area seam (#136)', () => {
     // partition means a NEW read cannot land in the gap between the guards: it either matches
     // one of them or fails this. Each guard's own count pins its share; this pins the whole.
     const reads = uncommented.match(/var\(--wy-safe-(?:top|right|bottom|left)\)/g) ?? [];
-    expect(reads).toHaveLength(22);
+    expect(reads).toHaveLength(21);
   });
 
   it('vertical bounds read a VERTICAL axis token', () => {
-    // The axis-named guard above matches `padding|margin|inset-<axis>` longhands, which three
-    // of the twenty-two call sites are not: two `max-height` bounds and one `height`, all
-    // subtracting `--wy-safe-top`. Two of those sit behind `:has()` selectors that are not
-    // exercised at page load (`.wy-shell:has(.wy-banner:not([hidden]))` and
-    // `.wy-hud:has(> .wy-wave-preview)`), so a top→left slip there would shrink the HUD by the
-    // wrong inset with the entire suite green — the exact failure the guard exists to catch,
-    // in the one place it could not see.
+    // The axis-named guard above matches `padding|margin|inset-<axis>` longhands, which two
+    // of the twenty-one call sites are not: the two `max-height` bounds, both subtracting
+    // `--wy-safe-top`. One of them sits behind a `:has()` selector that is not exercised at
+    // page load (`.wy-shell:has(.wy-banner:not([hidden]))`), so a top→left slip there would
+    // shrink the HUD by the wrong inset with the entire suite green — the exact failure the
+    // guard exists to catch, in the one place it could not see. (A third, the wave preview's
+    // reserved hud row `height`, went with #181's one-line strip.)
     // The inset PROBE is not a bound: it reads the BOTTOM inset on purpose and is pinned by
     // its own test below, so its one rule is set aside here — by selector, so any other
     // `height` reading an inset still lands in this guard.
@@ -395,15 +562,15 @@ describe('layout — the safe-area seam (#136)', () => {
       const token = /var\(--wy-safe-(top|right|bottom|left)\)/.exec(m[1] as string);
       if (token === null) continue;
       seen += 1;
-      // TOP specifically, not "any vertical axis" (Codex P2 on c9b1cfa). All three of these
+      // TOP specifically, not "any vertical axis" (Codex P2 on c9b1cfa). Both of these
       // are `calc(NNdvh - 3.5rem - var(--wy-safe-top))` — a budget measured DOWN from the top
       // edge, so `top` is the only correct axis. Accepting `bottom` as well let a slip pass
-      // this guard AND keep the 20-read partition intact, while the rendered spec probes only
-      // the base `.wy-hud` rule and never the two `:has()`-gated ones — so those bounds would
+      // this guard AND keep the read partition intact, while the rendered spec probes only
+      // the base `.wy-hud` rule and never the `:has()`-gated one — so that bound would
       // react to the wrong physical inset with the whole suite green.
       if (token[1] !== 'top') wrong.push(m[0].trim());
     }
-    expect(seen, 'expected the three vertical bounds that read an inset').toBe(3);
+    expect(seen, 'expected the two vertical bounds that read an inset').toBe(2);
     expect(wrong).toEqual([]);
   });
 

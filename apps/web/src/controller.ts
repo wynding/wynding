@@ -38,6 +38,7 @@ import {
   deriveViewModel,
   deriveHud,
   renderTimeOf,
+  isDetonation,
   type RenderVM,
   type HudVM,
   type GhostVM,
@@ -174,6 +175,28 @@ export interface VerifyResult {
   readonly matchedLive?: boolean;
 }
 
+/** A run's numbers for the results panel (#181 H2). Every field is READ from the
+ *  controller's own committed sim state — nothing here is a new sim fact, and nothing is
+ *  written back. See {@link Controller.runStats}. */
+export interface RunStats {
+  /** Waves on the board's schedule. */
+  readonly waveCount: number;
+  /** Waves launched so far: the sim's `waveCursor`. */
+  readonly wavesLaunched: number;
+  /** Waves the sim has settled (`waveResolved`): launched, every spawn drained, none left
+   *  on the board. A wave that leaked still settles, so it counts. */
+  readonly wavesCleared: number;
+  /** Creeps that left the board without reaching the exit: spawned, less leaked, less the
+   *  ones still on the board. */
+  readonly creepsStopped: number;
+  /** Creeps that reached the exit: the sim's `leakedCount`. */
+  readonly leaks: number;
+  /** Distinct towers committed to the board this run — a tower since sold, or a mine since
+   *  set off (even on the tick it was placed), still counts. A build sold again inside the
+   *  same pending buffer was undone before it committed, so it does not. */
+  readonly towersBuilt: number;
+}
+
 /** The three facts a playtrace capture pins to one moment. See {@link Controller.capture}. */
 export interface CaptureSnapshot {
   readonly ticksCompleted: number;
@@ -190,8 +213,9 @@ export interface Controller {
   /** Impact points resolved since the last call, then cleared. Accumulated per sim tick
    *  so a multi-tick catch-up frame still flashes every kill. `radiusFp` is `0` for a
    *  `targeted` impact (a spark) or a `blast`'s true radius (M2-S4a step 11, an
-   *  expanding-and-fading ring — `scene.ts`). */
-  drainSparks(): { x: number; y: number; radiusFp: number }[];
+   *  expanding-and-fading ring — `scene.ts`). `detonation` is `true` only on the landing
+   *  of a mine going off (`SparkPoint.detonation`). */
+  drainSparks(): { x: number; y: number; radiusFp: number; detonation?: boolean }[];
   /** Derived HUD fields for the DOM overlay. */
   hud(): HudVM;
   isPaused(): boolean;
@@ -303,6 +327,10 @@ export interface Controller {
   capture(): CaptureSnapshot;
   /** Dev-only: re-simulate the recorded log and confirm it reproduces the live score. */
   verifyRun(): VerifyResult;
+  /** The run's numbers for the results panel (#181 H2), read from the COMMITTED state (a
+   *  pending build is not a tower yet). Meaningful at any boundary; the panel reads it once,
+   *  at the terminal transition. */
+  runStats(): RunStats;
 }
 
 /** A tower's attack range (fixed-point sim units), by catalog id (M2-S3 — replaces the
@@ -549,7 +577,7 @@ export function createController(
   // selected — `selection` is only reassigned on aim/tick.
   let selOverlaySrc: (SelectionVM & { id: number }) | null = null;
   let selOverlay: SelectionVM | null = null;
-  let pendingSparks: { x: number; y: number; radiusFp: number }[]; // impact points resolved since the last drain
+  let pendingSparks: { x: number; y: number; radiusFp: number; detonation?: boolean }[]; // impact points resolved since the last drain
   // Live in-flight-shot list (Tracer, #32/P6): appended from each tick's drained `fired`
   // events, pruned in `frame()` once render time passes a flight's `impactTick` — no
   // tracer crosses run identity (cleared on `reset()`) or survives past terminal.
@@ -557,6 +585,12 @@ export function createController(
   // Bumped on every command actually queued into `buffer` (never on a rejected/duplicate
   // enqueue) — the paused-planning presentation's second memo key alongside `state.tick`.
   let bufferRev = 0;
+  // Every tower entity id committed to the board this run (#181 H2's "Towers built"), read at
+  // each input tick's boundary (see the step below). Entity ids are never reused within a run
+  // (`nextEntityId` only grows), so the set's size counts towers, and a sold or detonated tower
+  // stays counted. Cleared by `reset()` — declared above it for the temporal-dead-zone reason
+  // the memos below give.
+  const builtTowerIds = new Set<number>();
   // previewInputs() clones its towers container on every call (#30/P3), so both hot
   // paths memoize: aimAt caches the last placement-validity query (a pointermove that
   // stays in one cell re-uses it), and the refund is cached per selected tower id
@@ -690,12 +724,39 @@ export function createController(
     // bumps the revision — `pendingRevision`'s documented contract ("queued or
     // committed") now holds at the commit boundary too (QC r3), and the memo keys no
     // longer depend on `step` always advancing the tick.
-    if (inputs.length > 0) bufferRev += 1;
+    if (inputs.length > 0) {
+      bufferRev += 1;
+      // A tower only ever ARRIVES through a committed `placeTower`, so a tick with an empty
+      // buffer cannot add one: the scan runs on input ticks alone, which keeps it off the
+      // 20 Hz path a wave spends most of its time on. (Towers LEAVE without input — a mine
+      // detonates in combat — but a departure never needs recording: the id is already in.)
+      for (const id of state.towers.id) builtTowerIds.add(id);
+      // ...except a departure in the SAME step as the arrival. Placement runs before combat
+      // and a mine has no warm-up, so a mine dropped beside a creep can be placed and set off
+      // inside one `step()`, and its row is gone by the boundary. Its one discharge is not:
+      // an impact stays in flight for `travelTicks` (a positive integer, the schema's floor)
+      // and names its tower as `sourceId`. Only towers fire, so every `sourceId` is a tower.
+      for (const impact of state.impacts) builtTowerIds.add(impact.sourceId);
+    }
     prevVm = curVm;
     hooks?.begin('derive');
     curVm = deriveViewModel(state, ruleset);
     hooks?.end('derive');
-    for (const pt of events.impactPoints) pendingSparks.push(pt);
+    for (const pt of events.impactPoints) {
+      // A blast landing at a detonation tracer's origin (still listed: `frame()` prunes it,
+      // and a catch-up frame may never have drawn it) is that mine going off — mark it so
+      // the scorch survives the tracer being pruned unseen (`SparkPoint.detonation`).
+      const detonated =
+        pt.radiusFp > 0 &&
+        tracers.some(
+          (f) =>
+            isDetonation(f) &&
+            f.originX === pt.x &&
+            f.originY === pt.y &&
+            f.impactTick <= state.tick,
+        );
+      pendingSparks.push(detonated ? { ...pt, detonation: true } : pt);
+    }
     for (const f of events.fired) tracers.push(f);
     // Reconcile the selection with the post-step world: if the selected tower was sold or
     // destroyed this tick, drop the selection so the scene stops drawing a phantom range
@@ -747,6 +808,7 @@ export function createController(
     pendingSparks = [];
     tracers = []; // no tracer crosses run identity
     bufferRev = 0;
+    builtTowerIds.clear(); // "Towers built" is per run (#181 H2)
     previewMemo = null;
     hudMemo = null;
     towerIndexMemo = null;
@@ -1311,7 +1373,7 @@ export function createController(
         tracers,
       };
     },
-    drainSparks(): { x: number; y: number; radiusFp: number }[] {
+    drainSparks(): { x: number; y: number; radiusFp: number; detonation?: boolean }[] {
       if (pendingSparks.length === 0) return [];
       const out = pendingSparks;
       pendingSparks = [];
@@ -1482,7 +1544,7 @@ export function createController(
                 // where a queued build is part of the answer. This row answers a
                 // question about the SIM ("what damage does this tower deal"), and a
                 // queued beacon deals nothing yet: the sim still fires 10, and
-                // `deriveViewModel` draws neither its shell nor the recipient's ✦ from
+                // `deriveViewModel` draws neither its shell nor the recipient's boost glow from
                 // committed state. Projecting it here made the Panel the only surface of
                 // three claiming otherwise — for as long as the command sat in the
                 // buffer, which before Start is unbounded.
@@ -1563,6 +1625,29 @@ export function createController(
         score: result.score,
         stars: result.stars,
         matchedLive: outcomesMatch(result, liveScore, liveStars, liveFinalHash),
+      };
+    },
+    runStats(): RunStats {
+      let wavesCleared = 0;
+      for (const resolved of state.waveResolved) if (resolved) wavesCleared++;
+      // `waveSpawnCursor[k]` counts wave k's DRAINED spawn entries, and each drained entry
+      // pushes exactly one creep (the spawn phase in `step()`). The two ways an entry can
+      // drain without a creep — an id the catalog cannot resolve, or an exhausted entity-id
+      // space — cannot happen on a compiled ruleset inside `MAX_SAFE_INTEGER` ids, so the
+      // sum is the number of creeps that entered the board.
+      let spawned = 0;
+      for (const drained of state.waveSpawnCursor) spawned += drained;
+      // Every creep that entered left by exactly one door or is still on the board: it leaked
+      // (`leakedCount`), it died, or it is alive. So the dead are what is left over. (The
+      // sim's third removal path — dropping a corrupt row — is unreachable from a real run.)
+      const alive = state.creeps.id.length;
+      return {
+        waveCount: ruleset.waves.length,
+        wavesLaunched: state.waveCursor,
+        wavesCleared,
+        creepsStopped: spawned - state.leakedCount - alive,
+        leaks: state.leakedCount,
+        towersBuilt: builtTowerIds.size,
       };
     },
   };

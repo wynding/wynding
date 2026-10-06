@@ -14,11 +14,13 @@
 import { FP_ONE } from '@wynding/engine';
 import {
   COLOUR_MODES,
+  resolvePalette,
   type HudVM,
   type HudPreview,
   type PreviewEntryVM,
   type ColourMode,
   type CreepStatusCounts,
+  type Palette,
 } from '@wynding/render';
 import {
   MS_PER_TICK,
@@ -33,9 +35,12 @@ import type { SettingsStore } from './settings';
 import { ARM_TOWER_ACTIONS, GAME_ACTIONS, type GameAction, type Keymap } from './keymap';
 import { formatKeyLabel } from './keylabel';
 import { createModalOwner, type ModalOverlay, type ModalOwner } from './modal';
+import { dialDash, creepIcon, paintCreepIcon } from './hud-icons';
 import { dockButtonParts, type ShellChip, type ShellHandle } from './shell';
+import { createResultsPanel } from './results-panel';
 import type { InstallHandle, InstallState } from './install';
-import type { ArmedTower, UiState, PlacementOutcome } from './controller';
+import type { ArmedTower, UiState, PlacementOutcome, RunStats } from './controller';
+import type { SurveySlots } from './survey-form';
 
 /** A player intent emitted by the overlay for the app to route to the controller. */
 export type UiAction =
@@ -80,11 +85,17 @@ export interface Overlay {
    *  second, disconnected one. */
   readonly modal: ModalOwner;
   update(view: HudView): void;
+  /** Re-ink the wave strip's creep icons for a colour-vision mode change (#181 L1) — the
+   *  same hook `main.ts` repaints the Card swatches from. Repaints in place; never rebuilds
+   *  the strip's rows. */
+  setColourMode(mode: ColourMode): void;
   /** Open the leave-this-run confirm dialog. PRESENTATION ONLY — the decision to open it
    *  (the modified-activation check and the live-run state read) is `main.ts`'s, which owns
    *  the guard; this just shows the dialog and calls `onConfirm` if the player commits. */
   showLeave(onConfirm: () => void): void;
-  showResults(hud: HudVM): void;
+  /** Open the results dialog for a finished run: `hud` carries the outcome, score and stars,
+   *  `stats` the run's numbers (`Controller.runStats`, #181 H2). */
+  showResults(hud: HudVM, stats: RunStats): void;
   hideResults(): void;
   /** Write the results dialog's ONE shared status region — the `role="status"`
    *  `aria-live="polite"` paragraph every secondary action reports through (Verify, and
@@ -93,10 +104,11 @@ export interface Overlay {
   setResultsStatus(message: string): void;
   /** What the shared status region reads now. */
   resultsStatusText(): string;
-  /** The results dialog's survey slot (ADR 0014 §1): an empty container between the
-   *  secondary actions and the status region. `survey-form.ts` fills it; the overlay only
-   *  places it, so a build with no survey carries an empty, unrendered node. */
-  readonly resultsSurveySlot: HTMLElement;
+  /** The results dialog's survey slots (ADR 0014 §1, #181 H2): an empty container in the
+   *  action row for Give feedback, and one below the row, before the status region, for the
+   *  form. `survey-form.ts` fills them; the overlay only places them, so a build with no survey
+   *  carries two empty, unrendered nodes. */
+  readonly resultsSurveySlots: SurveySlots;
   /** ADR 0014 §6's single-owner handoff, enforced by control state: while the survey holds
    *  the shared status region (a send in flight), every OTHER action that writes it —
    *  Verify, and #133's two exports — is `aria-disabled` and its press does nothing. A press
@@ -104,8 +116,10 @@ export interface Overlay {
    *  each writer claims the region, silence the outcome entirely. */
   setResultsWritersLocked(locked: boolean): void;
   /** Focus Play again — where an accepted Send sends focus, since it retires the control
-   *  the player was on (ADR 0014 §1). */
-  focusPlayAgain(): void;
+   *  the player was on (ADR 0014 §1). Without scrolling after a pointer-pressed Send
+   *  (`SurveyFormHost.focusPlayAgain`, #181 H2), and taking no Enter or Space for a moment
+   *  (`ResultsPanel.focusPlayAgain`). */
+  focusPlayAgain(preventScroll: boolean): void;
   destroy(): void;
 }
 
@@ -218,20 +232,21 @@ function towerName(towerId: string): string {
   return t('tower.unknown.name', { id: towerId });
 }
 
-/** Glance-form glyphs for the Compact chips and Dock buttons (Story 11 P1).
+/** Glance-form glyphs for the Dock buttons (Story 11 P1) and the Panel's cost row.
  *
  *  These are PRESENTATION, not copy: every node they are written into is `aria-hidden`, and
  *  the full localized message sits alongside it as the element's actual accessible text. A
  *  glyph has no language, so routing it through the `t()` catalog would create a
  *  translatable entry with nothing to translate — the same exemption the codebase already
  *  applies to its other pure-glyph presentation (`.wy-rotate-icon`'s inline SVG). The one
- *  genuinely WORDED compact form (the wave slot's countdown) goes through the catalog, as
- *  `hud.wave.compact.countdown`. */
+ *  genuinely WORDED glance part, the countdown's unit, goes through the catalog, as
+ *  `hud.wave.glance.unit` — a static companion `shell.ts` writes once, like the stars' "/ 3".
+ *
+ *  The HUD chips no longer draw from here: since #181 (H1) their glances lead with inline-SVG
+ *  icons (`hud-icons.ts`, built once by `shell.ts`). `bounty` stays for the Panel's cost row,
+ *  which the rail's own redesign owns. */
 const ICONS = {
-  lives: '♥',
   bounty: '◈',
-  score: '✦',
-  stars: '★',
   settings: '⚙',
   pause: '⏸',
   resume: '⏵',
@@ -245,10 +260,11 @@ const ICONS = {
  *  same call, so the visible glance and the accessible full message can never disagree, and
  *  no caller can sentence-split a label away from its value. An empty full form means the
  *  slot has nothing to say and the whole chip hides (the wave slot pre-start and terminal)
- *  — the node itself is retained either way. */
-function setChip(chip: ShellChip, full: string, glance: string): void {
+ *  — the node itself is retained either way. The glance's VALUE leaf is what is written: its
+ *  icon sibling is static structure (`shell.ts`) and is never replaced. */
+function setChip(chip: ShellChip, full: string, value: string): void {
   setLabel(chip.full, full);
-  setLabel(chip.glance, glance);
+  setLabel(chip.value, value);
   chip.root.hidden = full === '';
 }
 
@@ -716,30 +732,21 @@ export function createOverlay(
   results.setAttribute('role', 'dialog');
   results.setAttribute('aria-modal', 'true');
   results.hidden = true;
-  const resultTitle = doc.createElement('h2');
-  const resultSummary = doc.createElement('p');
-  const playAgainBtn = button(doc, 'wy-btn wy-primary', t('controls.playAgain'));
-  const verifyBtn = button(doc, 'wy-btn', t('controls.verify'));
-  // ADR 0011's local export (#133), as two more NON-PRIMARY actions beside Verify. Play
-  // again keeps its primary styling and its initial focus; these simply join the dialog's
-  // tab order after it. Two buttons rather than one because the two destinations are
-  // genuinely different acts — a paste into an issue form, and a file to attach — and a
-  // single control could only ever guess which one the player meant.
-  const copyRunBtn = button(doc, 'wy-btn', t('controls.copyRun'));
-  const saveRunBtn = button(doc, 'wy-btn', t('controls.saveRun'));
-  // The results dialog's ONE shared status region. Named `.wy-verify` in the stylesheet
-  // since M1 and left that way on purpose: renaming a class costs a ui.css edit and buys
-  // nothing, and the ELEMENT's contract (one polite live region, cleared on every
-  // show/hide) is what the three actions share.
-  const resultsStatus = doc.createElement('p');
-  resultsStatus.className = 'wy-verify';
-  resultsStatus.setAttribute('role', 'status');
-  resultsStatus.setAttribute('aria-live', 'polite');
-  // ADR 0014 §1's survey, expanded IN PLACE: its slot joins the tab order after the other
-  // secondary actions and before the status region it reports through.
-  const surveySlot = doc.createElement('div');
-  surveySlot.className = 'wy-survey';
-  surveySlot.hidden = true; // until a survey renders into it — most builds never do
+  // Its content is the results PANEL (#181 H2, `results-panel.ts`): the outcome, the stars and
+  // score, the run's numbers, and the actions. Play again keeps its primary styling, and the
+  // initial focus wherever it is wholly in view as the panel opens (else the heading takes it,
+  // `resultsOverlay.show` below). Verify, Copy and Save (#133's local export) sit behind the
+  // panel's Run data disclosure, the same buttons with the same handlers below. The dialog's
+  // description is the panel's one sentence carrying the score and the stars.
+  const resultsPanel = createResultsPanel(doc, results);
+  results.setAttribute('aria-describedby', resultsPanel.description.id);
+  const {
+    playAgain: playAgainBtn,
+    verify: verifyBtn,
+    copyRun: copyRunBtn,
+    saveRun: saveRunBtn,
+    status: resultsStatus,
+  } = resultsPanel;
   // The status region's other writers, locked while the survey holds it (§6). Same
   // `aria-disabled` + click-site suppression as the Dock's primary control; unlike Send's
   // suppressed press, these stay SILENT, because the region they would announce into is
@@ -757,16 +764,6 @@ export function createOverlay(
   saveRunBtn.addEventListener('click', () => {
     if (!writerLocked(saveRunBtn)) onAction({ type: 'savePlaytrace' });
   });
-  results.append(
-    resultTitle,
-    resultSummary,
-    playAgainBtn,
-    verifyBtn,
-    copyRunBtn,
-    saveRunBtn,
-    surveySlot,
-    resultsStatus,
-  );
 
   // --- Modal owner: single authority over `.wy-shell`'s inert + focus save/restore ---
   const modal = createModalOwner(doc, shell.root, {
@@ -779,7 +776,12 @@ export function createOverlay(
   const resultsOverlay: ModalOverlay = {
     show(): void {
       results.hidden = false;
-      playAgainBtn.focus();
+      // The panel's press guard counts the dialog's arrival as the layout moving under any press
+      // made before it. Play again keeps initial focus (ADR 0014 §1) wherever it is wholly in
+      // view as the panel opens. Where it is not — a short window at heavy text zoom — focusing
+      // it would scroll the outcome out of view, so the heading takes focus instead (#181 H2,
+      // `results-panel.ts`).
+      resultsPanel.open();
     },
     hide(): void {
       results.hidden = true;
@@ -1274,14 +1276,14 @@ export function createOverlay(
    *  every variant reports as dead. */
   function glanceStatRows(stats: TowerStats): readonly string[] {
     const rows: string[] = [];
-    // Cost leads, in the `◈` vocabulary the Compact bounty chip already teaches — never a
-    // `g` suffix, which reintroduces exactly the gold/coin metaphor `docs/CONTEXT.md`'s
-    // Bounty entry avoids.
+    // Cost leads, with the `◈` glyph and never a `g` suffix, which reintroduces exactly the
+    // gold/coin metaphor `docs/CONTEXT.md`'s Bounty entry avoids.
     // The glyph comes from `ICONS`, which this file documents as owning it — never baked
     // into the catalog string. A glyph has no language, so a copy in `en.json` is not a
-    // translation, it is a SECOND source of truth: change `ICONS.bounty` and the Compact
-    // bounty chip renders the new mark while the Panel's cost line keeps the old one, on the
-    // same screen, with nothing to detect the drift.
+    // translation, it is a SECOND source of truth. The HUD's bounty chip no longer follows
+    // `ICONS.bounty`: it draws `hud-icons.ts`'s SVG gem. The Panel's cost row keeps `◈` because
+    // the rail-cards change (#181, D3) owns that row, so changing `ICONS.bounty` moves the
+    // Panel's glyph alone, not the chip.
     if (stats.damage === null) {
       rows.push(t('panel.glance.cost', { bounty: ICONS.bounty, cost: stats.cost }));
     } else if (stats.buffed) {
@@ -1462,6 +1464,9 @@ export function createOverlay(
    *  does both in one place. */
   const railAffordanceAbort = new AbortController();
   let railAffordanceObserver: ResizeObserver | null = null;
+  /** The wave strip's overflow observer (#181 L1) — created beside the Rail's, torn down with
+   *  it. */
+  let stripObserver: ResizeObserver | null = null;
 
   /** Recompute the Rail's scroll affordance, the focus reserve and the rows block's tab
    *  stop (M2-S12a P3/P4). Idempotent and cheap — three class/attribute toggles guarded on
@@ -1879,12 +1884,13 @@ export function createOverlay(
     return entry.boss ? t('hud.preview.entry.boss', params) : t('hud.preview.entry', params);
   }
 
-  /** THE VISIBLE FORM — the same row with every BASELINE-VALUED clause omitted, so what is
-   *  printed is exactly what deviates. M2-S10 ruling 3 was narrowed to the full form above
+  /** THE VISIBLE FORM'S CLAUSE — the row's stats with every BASELINE-VALUED clause omitted,
+   *  so what is printed is exactly what deviates. M2-S10 ruling 3 was narrowed to the full form above
    *  by the owner on 2026-08-16 (#101) on measured evidence: the preview is read to answer
    *  two questions — "is air next?" and "is a boss next?" — while a live wave runs, i.e. as
-   *  a threat-signature glance, not a stat-table read. Rendering four clauses a row to
-   *  answer that tripled the card's height, and the card floats over the playing field.
+   *  a threat-signature glance, not a stat-table read. Since #181 (L1) the strip answers the
+   *  first question with SHAPE — every entry's icon carries the board's airborne chevron —
+   *  and prints this clause only beside a single-entry wave, where there is room for it.
    *
    *  OMITTED BY SEMANTIC BASELINE, NOT BY FREQUENCY. Each omission means "nothing to say
    *  here": `ground` is the absence of the air threat, `armor 0` the absence of mitigation,
@@ -1893,7 +1899,7 @@ export function createOverlay(
    *  this correct for a MODDED bundle — a ruleset shipping nothing but armored creeps still
    *  reads correctly, where a rule tuned to "what today's catalog happens to make rare"
    *  would invert and print the common case while hiding the exception. */
-  function previewEntryGlance(entry: PreviewEntryVM): string {
+  function previewEntryNotes(entry: PreviewEntryVM): string[] {
     const notes: string[] = [];
     // Role leads — it is the heaviest thing about a row and the second of the two questions
     // the surface is read to answer. It is NOT part of the omit-at-baseline set below: a
@@ -1928,13 +1934,147 @@ export function createOverlay(
         }),
       );
     }
-    const count = entry.count;
-    const name = creepName(entry.creepId);
-    // The join separator is punctuation between already-translated fragments, not copy — the
-    // same posture the immunities list above has always taken with its `', '`.
-    return notes.length === 0
-      ? t('hud.preview.glance', { count, name })
-      : t('hud.preview.glance.noted', { count, name, notes: notes.join(' · ') });
+    return notes;
+  }
+
+  // The strip's creep icons are inked from the ACTIVE palette (#181 L1) so they follow the
+  // colour-vision mode like the board does. Read once here (this module never subscribes —
+  // `main.ts` owns the settings subscription and calls `setColourMode` on a change).
+  let palette: Palette = resolvePalette(settings.get().colourMode);
+
+  /** One strip entry's visible glance (#181 L1): the creep's icon — the board's own
+   *  silhouette, with the board's airborne chevron on an air entry (`hud-icons.ts`) — and
+   *  "×count". Only when the wave has a SINGLE entry does it add the creep's name and its
+   *  deviating clause, which `ui.css` drops whenever the strip has no room for them; a
+   *  multi-entry wave is read by shape and count alone. `aria-hidden`: the row's full sentence
+   *  is its accessible text. The same sentence is the glance's `title` tooltip — set HERE, on
+   *  the aria-hidden node, rather than on the row, because a `title` on the row would become
+   *  its accessible name or description and have assistive tech read the sentence twice (the
+   *  reason the Shell's home link carries none). */
+  function buildEntryGlance(entry: PreviewEntryVM, single: boolean, full: string): HTMLElement {
+    const parts = glanceParts(entry, single);
+    const glance = doc.createElement('span');
+    glance.className = 'wy-preview-glance';
+    glance.setAttribute('aria-hidden', 'true');
+    glance.title = full;
+    const count = doc.createElement('span');
+    count.className = 'wy-preview-count';
+    count.textContent = parts.count;
+    glance.append(creepIcon(doc, entry, palette), count);
+    if (single) {
+      const detail = doc.createElement('span');
+      detail.className = 'wy-preview-detail';
+      const name = doc.createElement('span');
+      name.className = 'wy-preview-name';
+      name.textContent = parts.name;
+      detail.append(name);
+      if (parts.clause !== '') {
+        const clause = doc.createElement('span');
+        clause.className = 'wy-preview-clause';
+        clause.textContent = parts.clause;
+        detail.append(clause);
+      }
+      glance.append(detail);
+    }
+    return glance;
+  }
+
+  /** The strings one glance is written from — the single source for `buildEntryGlance` and the
+   *  locale sentinel's `previewEntryGlanceText`, so the two cannot drift (a drift makes every
+   *  HUD refresh rebuild the list and reset a scrolled strip). `name` and `clause` are empty
+   *  unless the wave has a single entry; `clause` is also empty when the entry deviates in
+   *  nothing. The join separator is punctuation between already-translated fragments, not
+   *  copy — the same posture the immunities list has always taken with its `', '`. */
+  function glanceParts(
+    entry: PreviewEntryVM,
+    single: boolean,
+  ): { readonly count: string; readonly name: string; readonly clause: string } {
+    return {
+      count: t('hud.preview.count', { count: entry.count }),
+      name: single ? creepName(entry.creepId) : '',
+      clause: single ? previewEntryNotes(entry).join(' · ') : '',
+    };
+  }
+
+  /** The text `buildEntryGlance` writes, in document order — the locale sentinel's half of the
+   *  row comparison (the icon carries no text). */
+  function previewEntryGlanceText(entry: PreviewEntryVM, single: boolean): string {
+    const { count, name, clause } = glanceParts(entry, single);
+    return count + name + clause;
+  }
+
+  /** The scroll form's cue (`ui.css`): each edge with entries past it fades, because the
+   *  form hides its scrollbar and an entry ending exactly at the clipped edge would otherwise
+   *  leave a wave reading as fewer creep types than it holds. Read from the scroll position on
+   *  every trigger the form has plus the strip's own `scroll` event — the Rail's
+   *  `wy-rail-has-more` discipline, with the same 1px slack for fractional zoom. Class toggles
+   *  that do not change a class write nothing, so an idle strip costs no mutation. */
+  const STRIP_MORE_BEFORE_CLASS = 'wy-wave-preview--more-before';
+  const STRIP_MORE_AFTER_CLASS = 'wy-wave-preview--more-after';
+  function syncStripCue(scrollable: boolean): void {
+    const strip = previewEl.root;
+    const past = strip.scrollWidth - strip.clientWidth - strip.scrollLeft;
+    strip.classList.toggle(STRIP_MORE_BEFORE_CLASS, scrollable && strip.scrollLeft > 1);
+    strip.classList.toggle(STRIP_MORE_AFTER_CLASS, scrollable && past > 1);
+  }
+
+  /** One wheel notch in LINE mode, in px — the line height browsers themselves scroll by. */
+  const WHEEL_LINE_PX = 16;
+  function onStripWheel(event: WheelEvent): void {
+    const strip = previewEl.root;
+    // An event the browser will not let us cancel is already its scroll to perform (#181 QC
+    // round 2): moving the line too would spend one turn twice.
+    if (!event.cancelable) return;
+    if (!strip.classList.contains(STRIP_SCROLL_CLASS) || event.ctrlKey) return;
+    if (Math.abs(event.deltaY) <= Math.abs(event.deltaX)) return;
+    const unit =
+      event.deltaMode === 1 ? WHEEL_LINE_PX : event.deltaMode === 2 ? strip.clientWidth : 1;
+    const delta = event.deltaY * unit;
+    // The cue's 1px slack: at fractional zoom an end can sit a fraction of a pixel short.
+    const room =
+      delta > 0 ? strip.scrollWidth - strip.clientWidth - strip.scrollLeft : strip.scrollLeft;
+    if (!(room > 1)) return;
+    event.preventDefault();
+    strip.scrollLeft += delta;
+  }
+
+  /** The strip's overflow remedy, IN PLACE (#181 L1) — the rule every surface in this row
+   *  keeps: content never resizes the status row (that would re-project the board mid-run), so
+   *  a strip whose line is longer than its box (a narrow portrait window, heavy text zoom, a
+   *  modded wave with many entries) SCROLLS sideways instead. While it does, it is a labelled,
+   *  focusable region — the `.wy-hud` scrollport's own discipline, since a scrollable region
+   *  must be operable without a pointer — and it drops all three the moment the line fits.
+   *  Kept while the strip itself holds focus, so a resize can never pull the tab stop out from
+   *  under a keyboard user; the `focusout` listener settles it once focus moves on, and says so
+   *  through `focusLeaving` — the Rail's reason (`syncRailAffordances`): during a `focusout`
+   *  the document's `activeElement` can still be the outgoing strip, so inferring it there
+   *  would retain the very stop the listener exists to release. Changes no geometry, so it
+   *  cannot feed the observer that drives it. */
+  const STRIP_SCROLL_CLASS = 'wy-wave-preview--scroll';
+  function syncStripScroll(focusLeaving = false): void {
+    const strip = previewEl.root;
+    // Only a CLIPPING strip has a line to make reachable: Standard's one-line form, which
+    // `ui.css` clips (`overflow: hidden` at rest, `auto` in this form). The Compact column's
+    // strip is an in-flow block that clips nothing — its overflow is the chips list's to
+    // scroll — so a tab stop there would scroll nothing at all. An unknown value (no computed
+    // style to read) counts as not clipping: a tab stop is only ever granted on evidence.
+    const overflowX = doc.defaultView?.getComputedStyle(strip).overflowX ?? '';
+    const clips = overflowX !== '' && overflowX !== 'visible';
+    const scrollable = clips && !strip.hidden && strip.scrollWidth > strip.clientWidth + 1;
+    // The cue follows the line itself, whatever the tab-stop retention below decides.
+    syncStripCue(scrollable);
+    if (!scrollable && !focusLeaving && doc.activeElement === strip) return;
+    if (strip.classList.contains(STRIP_SCROLL_CLASS) === scrollable) return;
+    strip.classList.toggle(STRIP_SCROLL_CLASS, scrollable);
+    if (scrollable) {
+      strip.tabIndex = 0;
+      strip.setAttribute('role', 'group');
+      strip.setAttribute('aria-label', t('preview.label'));
+    } else {
+      strip.removeAttribute('tabindex');
+      strip.removeAttribute('role');
+      strip.removeAttribute('aria-label');
+    }
   }
 
   // The preview's content only changes when `waveCursor` moves — a handful of times per
@@ -1975,15 +2115,16 @@ export function createOverlay(
         ? t('hud.preview.lastWave')
         : t('hud.preview.title', { waveNumber: preview.waveNumber, waveCount: preview.waveCount });
     const firstEntry = preview.kind === 'upcoming' ? preview.entries[0] : undefined;
+    const single = preview.kind === 'upcoming' && preview.entries.length === 1;
     // `textContent` on a row concatenates BOTH forms in document order (full, then glance
     // — the append order below), so this sentinel covers every catalog key either form
     // reads. Comparing one side alone would let a locale swap self-heal that form while
-    // the other stayed stale: the two read DISJOINT key sets (`hud.preview.glance*` vs
-    // `hud.preview.entry`/`domain.ground`/`immunities.none`).
+    // the other stayed stale: the two read DISJOINT key sets (`hud.preview.count` and the
+    // clause notes vs `hud.preview.entry`/`domain.ground`/`immunities.none`).
     const expectedFirstRow =
       firstEntry === undefined
         ? null
-        : previewEntryFull(firstEntry) + previewEntryGlance(firstEntry);
+        : previewEntryFull(firstEntry) + previewEntryGlanceText(firstEntry, single);
     const firstRowCurrent = previewEl.list.firstElementChild?.textContent ?? null;
     if (
       key === lastPreviewKey &&
@@ -1993,9 +2134,13 @@ export function createOverlay(
       return;
     }
     lastPreviewKey = key;
+    // A new wave reads from its title: a strip the player scrolled through the last wave's
+    // entries would otherwise open this one part-way along its line.
+    previewEl.root.scrollLeft = 0;
     if (preview.kind === 'lastWave') {
       previewEl.title.textContent = t('hud.preview.lastWave');
       clearChildren(previewEl.list);
+      syncStripScroll();
       return;
     }
     previewEl.title.textContent = t('hud.preview.title', {
@@ -2006,21 +2151,83 @@ export function createOverlay(
     warnUnmappedCreeps(preview.entries); // dev diagnostic — rebuild path only
     for (const entry of preview.entries) {
       const li = doc.createElement('li');
+      li.className = 'wy-preview-entry';
       // Dual-form row, mirroring `shell.ts`'s `chip()` exactly: both nodes always exist,
       // the glance carries `aria-hidden` so assistive tech reads the full sentence and ONLY
       // the full sentence (never both, which is what an unhidden glance would produce), and
       // `ui.css` owns which one takes the visible slot. Append order is load-bearing for
       // the locale sentinel above.
+      const sentence = previewEntryFull(entry);
       const full = doc.createElement('span');
       full.className = 'wy-preview-full';
-      full.textContent = previewEntryFull(entry);
-      const glance = doc.createElement('span');
-      glance.className = 'wy-preview-glance';
-      glance.setAttribute('aria-hidden', 'true');
-      glance.textContent = previewEntryGlance(entry);
-      li.append(full, glance);
+      full.textContent = sentence;
+      li.append(full, buildEntryGlance(entry, single, sentence));
       previewEl.list.appendChild(li);
     }
+    syncStripScroll();
+  }
+
+  // --- The countdown dial inside the Dock's primary action (#181 H1, Standard only) ---
+  // Decoration: the wave chip is the accessible AND the readable countdown in both layouts, so
+  // the dial is `aria-hidden`, carries no text, and its writes are all change-gated — a value
+  // that did not move touches nothing (#98's discipline, applied to attributes as well as
+  // text). It lives out of the button's layout (`ui.css`), so showing or hiding it moves
+  // nothing.
+  const dial = dock.dial;
+  /** The current countdown's full length in whole seconds, from the ruleset's per-wave
+   *  `countdownTicks` — rounded UP like `HudVM.countdownSeconds` itself, so a full dial is
+   *  exactly the seconds the chip shows. */
+  function countdownTotalSeconds(cursor: number, fallback: number): number {
+    const wave = Number.isSafeInteger(cursor) ? ruleset.waves[cursor] : undefined;
+    return wave === undefined ? fallback : Math.ceil((wave.countdownTicks * MS_PER_TICK) / 1000);
+  }
+  function renderDial(hud: HudVM): void {
+    const seconds = hud.countdownSeconds;
+    // Down while a call is already launching: the wave goes on the next tick, not when the dial
+    // empties, so the dial would be a wrong answer.
+    const show = seconds !== null && !isTerminalPhase(hud.phase) && !hud.launchPending;
+    if (dial.root.hidden === show) dial.root.hidden = !show;
+    if (seconds === null || !show) return;
+    const total = countdownTotalSeconds(hud.waveCursor, seconds);
+    const dash = dialDash(total > 0 ? seconds / total : 0);
+    if (dial.progress.getAttribute('stroke-dasharray') !== dash) {
+      dial.progress.setAttribute('stroke-dasharray', dash);
+    }
+  }
+
+  /** Whether calling the counting-down wave NOW pays an early-call bonus — the claim the
+   *  primary control's description makes, so it is made only where it is TRUE. The sim pays
+   *  `floor(rem / earlyCallBountyDivisor)` Bounty from the ticks still remaining (its launch
+   *  branch, which a buffered call reaches on the next step without that step's decrement), pays
+   *  nothing for the OPENING launch (sv15, #70 — wave index 0), and nothing at all with a
+   *  zero divisor. The HUD sees only `countdownSeconds = ceil(rem × MS_PER_TICK / 1000)`, so
+   *  the gate uses the smallest `rem` those seconds allow — `(seconds − 1) × 1000 /
+   *  MS_PER_TICK + 1` — and stays silent through the second in which the bonus runs out,
+   *  rather than promise one the sim will not pay. */
+  function callPaysEarlyBonus(hud: HudVM): boolean {
+    const seconds = hud.countdownSeconds;
+    const divisor = ruleset.balance.earlyCallBountyDivisor;
+    if (seconds === null || hud.waveCursor <= 0 || !(divisor > 0)) return false;
+    const minRemainingTicks = Math.floor(((seconds - 1) * 1000) / MS_PER_TICK) + 1;
+    return minRemainingTicks >= divisor;
+  }
+
+  /** One CHANGE-GATED attribute write on the primary control, which renders on every HUD
+   *  refresh (~20×/s through a countdown): a value that did not move touches nothing (#98's
+   *  discipline, applied to attributes as well as text). */
+  function setPrimaryAttr(name: string, value: string | null): void {
+    if (value === null) {
+      if (primaryBtn.hasAttribute(name)) primaryBtn.removeAttribute(name);
+    } else if (primaryBtn.getAttribute(name) !== value) {
+      primaryBtn.setAttribute(name, value);
+    }
+  }
+
+  /** The primary control's note is its `title`: the tooltip, and also its accessible
+   *  DESCRIPTION — the button's name comes from its label, so a `title` is never taken for the
+   *  name and is read once, as the description. */
+  function setPrimaryNote(note: string | null): void {
+    setPrimaryAttr('title', note);
   }
 
   /** The morphing primary control's text + `aria-disabled` state (PLAN.md P3 step 17):
@@ -2036,17 +2243,26 @@ export function createOverlay(
   function renderPrimary(hud: HudVM, ui: UiState): void {
     if (isTerminalPhase(hud.phase)) {
       primaryBtn.hidden = true;
+      setPrimaryNote(null);
       return;
     }
     primaryBtn.hidden = false;
     if (!ui.started) {
       setLabel(primaryParts.text, t('controls.start'));
-      primaryBtn.setAttribute('aria-disabled', 'false');
+      setPrimaryAttr('aria-disabled', 'false');
+      setPrimaryNote(null); // Start claims wave 1, which pays nothing (sv15)
       return;
     }
     const label = hud.launchPending ? t('controls.callWave.pending') : t('controls.callWave');
     setLabel(primaryParts.text, label);
-    primaryBtn.setAttribute('aria-disabled', String(!ui.callWaveReady));
+    setPrimaryAttr('aria-disabled', String(!ui.callWaveReady));
+    // The early-call bonus, said where it is true and nowhere else (#181): only while a press
+    // would actually call the wave, and only while the call would actually pay.
+    setPrimaryNote(
+      !hud.launchPending && ui.callWaveReady && callPaysEarlyBonus(hud)
+        ? t('controls.callWave.earlyBonus')
+        : null,
+    );
   }
 
   function outcomeMessage(outcome: PlacementOutcome | null): string {
@@ -2134,8 +2350,43 @@ export function createOverlay(
     // scroll listener that would clear it.
     railAffordanceObserver.observe(shell.rail);
     for (const child of shell.rail.children) railAffordanceObserver.observe(child);
+    // The wave strip's overflow form (#181 L1) re-decides on BOTH boxes: the strip itself (its
+    // width is the status row's leftover, so a window resize or a chip growing moves it) and
+    // its entry list (sized to its content, so a rebuilt wave or a text-zoom reflow moves it
+    // while the strip's own box stays put).
+    stripObserver = new view.ResizeObserver(() => syncStripScroll());
+    stripObserver.observe(previewEl.root);
+    stripObserver.observe(previewEl.list);
   }
   syncRailAffordances();
+  // Focus leaving the strip settles a tab stop the retention rule in `syncStripScroll` kept.
+  // Wrapped, never the listener itself: the event object is truthy (the Rail's note above).
+  previewEl.root.addEventListener('focusout', () => syncStripScroll(true), {
+    signal: railAffordanceAbort.signal,
+  });
+  // A scroll moves the line under the strip's edges without resizing anything, so no
+  // observer sees it: the cue re-reads the position here, and only the cue (the form and its
+  // tab stop depend on the line's length, which a scroll never changes).
+  previewEl.root.addEventListener(
+    'scroll',
+    () => syncStripCue(previewEl.root.classList.contains(STRIP_SCROLL_CLASS)),
+    { signal: railAffordanceAbort.signal, passive: true },
+  );
+  // A plain mouse wheel scrolls the line too (#181 QC). The form hides its scrollbar, and a
+  // wheel reports VERTICAL movement, which a sideways scrollport ignores — so the line was
+  // reachable by touch, trackpad and keyboard but not by the commonest pointer. While the
+  // strip is in its scroll form, a vertical-dominant turn is spent sideways, but only while the
+  // line can still move that way: at either end the event is left alone, so the wheel goes on
+  // to whatever scrolls beyond the strip (the capped hud) rather than being trapped. A
+  // horizontal-dominant delta (a trackpad, a tilt wheel) is already the browser's to handle,
+  // and a ctrl+wheel is a pinch or a page zoom, never a scroll. Nor is an event that cannot be
+  // cancelled ours: once a wheel sequence has passed through to the hud, the browser latches it
+  // there and stops letting its events be cancelled — moving the line as well would scroll
+  // twice per turn.
+  previewEl.root.addEventListener('wheel', (event) => onStripWheel(event), {
+    signal: railAffordanceAbort.signal,
+    passive: false,
+  });
 
   return {
     resultsEl: results,
@@ -2145,28 +2396,26 @@ export function createOverlay(
     modal,
     update(view: HudView): void {
       const { hud } = view;
-      setChip(hudEls.lives, t('hud.lives', { count: hud.lives }), `${ICONS.lives} ${hud.lives}`);
-      setChip(
-        hudEls.bounty,
-        t('hud.bounty', { count: hud.bounty }),
-        `${ICONS.bounty} ${hud.bounty}`,
-      );
-      setChip(hudEls.score, t('hud.score', { count: hud.score }), `${ICONS.score} ${hud.score}`);
-      setChip(hudEls.stars, t('hud.stars', { count: hud.stars }), `${ICONS.stars} ${hud.stars}`);
+      // Raw digits in every glance value (no grouping separators): the value is the number the
+      // full message states, and the glance must never read differently from it.
+      setChip(hudEls.lives, t('hud.lives', { count: hud.lives }), String(hud.lives));
+      setChip(hudEls.bounty, t('hud.bounty', { count: hud.bounty }), String(hud.bounty));
+      setChip(hudEls.stars, t('hud.stars', { count: hud.stars }), String(hud.stars));
+      setChip(hudEls.score, t('hud.score', { count: hud.score }), String(hud.score));
       // Wave chip: COUNTDOWN-ONLY (M2-S2, PLAN.md P3 step 17 — the composition text moved
       // to its own preview surface below, so the chip no longer carries an "in progress"
       // fallback). VISIBLE PRE-START now too (`HudVM.countdownSeconds` reads the sim's real
       // `countdownRemaining`, which is meaningful before `start()` — the Start decouple —
       // not just after); hidden once every wave has launched (its preview surface shows the
       // last-wave marker instead) or the run is terminal.
+      // The glance's number only: its unit is static structure (`shell.ts`), after a `<wbr>`.
       setChip(
         hudEls.wave,
         hud.countdownSeconds !== null ? t('hud.countdown', { seconds: hud.countdownSeconds }) : '',
-        hud.countdownSeconds !== null
-          ? t('hud.wave.compact.countdown', { s: hud.countdownSeconds })
-          : '',
+        hud.countdownSeconds !== null ? String(hud.countdownSeconds) : '',
       );
       renderPreview(hud.preview);
+      renderDial(hud);
       // The pollable board summary (#79). CHANGE-GATED like every other per-tick leaf write
       // (`setLabel`): the counts move only when a status is applied or a creep leaves the
       // board, but this runs on every HUD refresh — 20-40× a second through a live wave.
@@ -2256,17 +2505,15 @@ export function createOverlay(
       leaveConfirmHandler = onConfirm;
       modal.open(leaveOverlay, { priority: 'settings', dismissOnEscape: true });
     },
-    showResults(hud: HudVM): void {
+    showResults(hud: HudVM, stats: RunStats): void {
       // Modal-family open lifecycle (same as settings/rotate): abort any in-flight
       // placement gesture first — the input manager's inert commit-guard is the net, but
       // every opener aborts for itself so the ghost never lingers behind the dialog.
       abortGesture();
       cancelCapture?.(); // a match can end mid-rebind — drop the armed capture so the first
       // Enter activates Play Again instead of being swallowed into a rebind.
-      const heading = hud.won ? t('results.won') : t('results.lost');
-      resultTitle.textContent = heading;
-      resultSummary.textContent = t('results.summary', { score: hud.score, stars: hud.stars });
-      results.setAttribute('aria-label', heading);
+      resultsPanel.render({ won: hud.won, score: hud.score, stars: hud.stars, stats });
+      results.setAttribute('aria-label', resultsPanel.title.textContent ?? '');
       resultsStatus.textContent = '';
       // Results is state-driven: Escape is consumed, never a dismissal (no `dismissOnEscape`).
       modal.open(resultsOverlay, { priority: 'results', backExits: true });
@@ -2281,12 +2528,18 @@ export function createOverlay(
     resultsStatusText(): string {
       return resultsStatus.textContent ?? '';
     },
-    resultsSurveySlot: surveySlot,
+    resultsSurveySlots: resultsPanel.surveySlots,
     setResultsWritersLocked(locked: boolean): void {
       for (const btn of regionWriters) btn.setAttribute('aria-disabled', String(locked));
     },
-    focusPlayAgain(): void {
-      playAgainBtn.focus();
+    focusPlayAgain(preventScroll: boolean): void {
+      resultsPanel.focusPlayAgain(preventScroll);
+    },
+    setColourMode(mode: ColourMode): void {
+      palette = resolvePalette(mode);
+      for (const icon of previewEl.list.querySelectorAll<SVGSVGElement>('.wy-creep-icon')) {
+        paintCreepIcon(icon, palette);
+      }
     },
     destroy(): void {
       cancelCapture?.(); // drop any in-flight rebind listener so it can't outlive the UI
@@ -2298,6 +2551,9 @@ export function createOverlay(
       railAffordanceAbort.abort();
       railAffordanceObserver?.disconnect();
       railAffordanceObserver = null;
+      stripObserver?.disconnect();
+      stripObserver = null;
+      resultsPanel.destroy();
       modal.destroy();
       results.remove();
       settingsDialog.remove();

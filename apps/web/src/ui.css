@@ -110,6 +110,18 @@
      the line between a floating overlay and the content beneath it. axe cannot evaluate a
      rendered boundary, so this pairing is gated numerically in `ui-contrast.test.ts`. */
   --wy-panel-edge: #5f7797;
+  /* The HUD's icon inks (#181 H1): the style frame's heart, gem and star, each gated against
+     the status row it sits on (`ui-contrast.test.ts`, non-text ≥ 3:1). The icons are
+     decorative — every chip's full message is its text alternative — so the gate is about the
+     icons staying legible, not about them carrying the value. The lives pill's fill is gated
+     as the surface its number is read on (text ≥ 4.5:1). */
+  --wy-lives: #ff6b81;
+  --wy-lives-pill: #3a1520;
+  --wy-bounty: #7fd3ff;
+  --wy-stars: #ffd166;
+  /* The gem's and star's outline and the gem's facets — ink ON the icon, gated against the
+     fills it outlines. */
+  --wy-icon-ink: #0b0e14;
   /* Compact status-column width (contract §2). vw-capped so 200% text zoom cannot starve
      the board: at 200% `4rem` would be 128px, but `10vw` holds it to ~66px on a 658px-wide
      phone. Content that no longer fits scrolls inside `.wy-hud` (the ADR 0003 doctrine)
@@ -148,6 +160,22 @@
      literal ring is no wider than the Card's. */
   --wy-card-ring-w: 3px;
   --wy-card-ring-offset: 2px;
+  /* The results panel (#181 H2), in the style frame's colours. The panel and its tiles are the
+     surfaces its text is read on, gated as such (text ≥ 4.5:1). Their own edges are decoration:
+     the panel is not a control, and neither is a tile. */
+  --wy-results-panel: #12233a;
+  --wy-results-edge: #2b4466;
+  --wy-results-tile: #0f1d31;
+  --wy-results-tile-edge: #22395a;
+  /* A loss's outcome band (a win's is `--wy-stars`). Decorative — the heading carries the
+     outcome — and gated ≥ 3:1 against the panel and the dialog's backdrop all the same. */
+  --wy-loss: #ff5a64;
+  /* A loss's Leaks number: text, gated on its tile. */
+  --wy-danger: #ff8a8a;
+  /* The Run data toggle's quieter label: text, gated on the panel. */
+  --wy-fg-quiet: #c3cfdc;
+  /* An unearned star's fill. Its outline, which carries the shape, is `--wy-panel-edge`. */
+  --wy-star-empty: #1b2a40;
 }
 
 html,
@@ -386,10 +414,90 @@ a.wy-home:focus-visible {
   outline-offset: 2px;
 }
 
-/* Dual-form chips (contract §4): the full ICU message is the accessible text in BOTH
-   layouts; the aria-hidden glance form (icon + value) only ever renders on Compact. */
+/* Dual-form chips (contract §4): the full ICU message is the chip's accessible text in BOTH
+   layouts, rendered visually hidden (`.wy-sr-only`'s rules, restated for the reason
+   `.wy-preview-full` gives); the aria-hidden glance — an inline-SVG icon and the value — is
+   what both layouts paint since #181 (H1). Before it, Standard painted the full message as
+   plain text ("Lives: 10 Bounty: 80") and only Compact the glance.
+
+   The chip is the hidden text's CONTAINING BLOCK (#181 QC). Unpositioned, the absolute
+   `.wy-chip-full` resolved against `.wy-shell` instead, outside `.wy-hud`'s scrollport, so the
+   hud's clip did not apply to it: a chip scrolled out of a capped hud left its 1px box at its
+   static position as scroll range on the PAGE, and a screen reader moving to it scrolled the
+   page rather than the hud. `.wy-preview-entry` does the same for the strip's rows. */
+.wy-chip {
+  position: relative;
+}
+
+.wy-chip-full {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+  border: 0;
+}
+
 .wy-chip-glance {
-  display: none;
+  display: inline-flex;
+  align-items: center;
+  gap: 0.3em;
+  white-space: nowrap;
+}
+
+.wy-chip-value {
+  font-weight: 700;
+  /* Every glyph the width of every other, so a value ticking down never jiggles its chip. */
+  font-variant-numeric: tabular-nums;
+}
+
+/* The score's "Score" and the stars' "/ 3" — the style frame's de-emphasis. */
+.wy-chip-label,
+.wy-chip-suffix {
+  color: var(--wy-fg-dim);
+}
+
+/* The chip icons (`hud-icons.ts`): the style frame's shapes, inked here so every colour is a
+   gated token — and re-inked in system colours under forced colors (after the countdown
+   dial's rules, below), because Chromium does not force SVG `fill` or `stroke` on its own. */
+.wy-icon {
+  flex: none;
+  width: 1.1em;
+  height: 1.1em;
+}
+
+.wy-icon--lives .wy-icon-body {
+  fill: var(--wy-lives);
+}
+
+.wy-icon--bounty .wy-icon-body {
+  fill: var(--wy-bounty);
+  stroke: var(--wy-icon-ink);
+}
+
+.wy-icon--bounty .wy-icon-facets {
+  fill: none;
+  stroke: var(--wy-icon-ink);
+  opacity: 0.55;
+}
+
+.wy-icon--stars .wy-icon-body {
+  fill: var(--wy-stars);
+  stroke: var(--wy-icon-ink);
+}
+
+.wy-icon--score .wy-icon-body {
+  fill: var(--wy-fg-dim);
+}
+
+.wy-icon--wave .wy-icon-line {
+  fill: none;
+  stroke: var(--wy-fg-dim);
+  stroke-linecap: round;
+  stroke-linejoin: round;
 }
 
 /* --- Install banner: the reserved pre-start suggestion row (Story 11 P3) --- */
@@ -448,6 +556,258 @@ a.wy-home:focus-visible {
 
   .wy-shell:has(.wy-banner:not([hidden])) .wy-banner {
     max-height: 15dvh;
+  }
+
+  /* --- THE ICON HUD AND THE WAVE STRIP, STANDARD FORM (#181 H1 + L1) ---
+     One line, as the style frame draws it: the home link, then the countdown (first since #181
+     QC, so the readable countdown is the chip a capped hud always shows), lives in its pill,
+     bounty and stars large, the score small, and the wave strip taking what is left. Selectors carry
+     `.wy-shell` for the `.wy-main .wy-board` reason above: this block sits ABOVE the base
+     rules it refines. Measured at 100% zoom the row is 52px — under `home.spec.ts`'s 56px
+     ceiling — and on a 1080×810 tablet it is one line, where #101's reserved hud row was
+     ~284px. */
+
+  /* The hud takes the row's LEFTOVER after the home link (`flex: 1 1 0`), so the strip — its
+     one flexible item — can take the space the chips leave. A zero basis keeps the hud BESIDE
+     the link: where the row cannot hold chips and strip on one line, the strip wraps onto a
+     line of its own inside the hud, under the chips, instead of the whole hud dropping below
+     the link and spending a line on the link alone. #101's hud home used the same basis for
+     the same reason; at 640×560 it is worth two to four board cells.
+
+     But never below a FLOOR of one whole chip (#181 QC). Beside a link that heavy text has
+     made wide, the leftover fell to a sliver — 14px at 320×640 and 200%, 54px at 360×640 (on
+     main as well) — where no chip could be read, the countdown included. 5rem holds every chip
+     but the score whole (measured at 100–300%: lives 4.6–4.75rem, bounty 4.2, the countdown
+     3.7–3.8); a row that cannot spare it sets the hud on a line of its own under the link,
+     where it takes the row. Across 168 portrait phones at 150–250% text that made the
+     countdown readable in 66 more, cost no board cell anywhere, and put the pre-start Dock in
+     its scroll form — the Dock's own remedy, with its cue — in 28 more, all but two of them
+     640–667px tall. */
+  .wy-shell .wy-hud {
+    flex: 1 1 0;
+    min-width: min(100%, 5rem);
+    align-items: center;
+  }
+
+  .wy-shell .wy-chip[data-wy-chip='lives'] .wy-chip-glance {
+    padding: 0.2rem 0.75rem 0.2rem 0.5rem;
+    border: 1.5px solid var(--wy-lives);
+    border-radius: 999px;
+    background: var(--wy-lives-pill);
+  }
+
+  .wy-shell
+    .wy-chip:is([data-wy-chip='lives'], [data-wy-chip='bounty'], [data-wy-chip='stars'])
+    .wy-chip-value {
+    font-size: 1.3rem;
+    font-weight: 800;
+    line-height: 1;
+  }
+
+  .wy-shell
+    .wy-chip:is([data-wy-chip='lives'], [data-wy-chip='bounty'], [data-wy-chip='stars'])
+    .wy-icon {
+    width: 1.25rem;
+    height: 1.25rem;
+  }
+
+  .wy-shell .wy-chip-suffix {
+    font-size: 0.85rem;
+    font-weight: 600;
+  }
+
+  .wy-shell .wy-chip[data-wy-chip='score'] {
+    font-size: 0.875rem;
+  }
+
+  /* Every value keeps the width of its realistic maximum, so a number ticking up mid-run
+     (bounty 99 → 100, the score's thousands) never widens its chip and re-wraps the row. */
+  .wy-shell .wy-chip[data-wy-chip='lives'] .wy-chip-value {
+    min-width: 2ch;
+  }
+
+  .wy-shell .wy-chip:is([data-wy-chip='bounty'], [data-wy-chip='wave']) .wy-chip-value {
+    min-width: 3ch;
+  }
+
+  .wy-shell .wy-chip[data-wy-chip='score'] .wy-chip-value {
+    min-width: 4ch;
+  }
+
+  /* THE COUNTDOWN CHIP KEEPS ITS SLOT. Its glance is the one readable countdown — always
+     shown while there is a countdown, at every size and in every Dock form — and its full
+     message the accessible one. Once every wave has launched there is none, and the chip
+     hides by VISIBILITY, keeping its box: collapsing it would re-wrap the row at heavy text
+     the moment the last wave launches (1512×854 at 200%: the status row would fall from 187.5px
+     to 104px and the board's cells grow from 25px to 28px — a re-projection mid-run). */
+  .wy-shell .wy-hud > .wy-chip[hidden] {
+    display: block;
+    visibility: hidden;
+  }
+
+  /* The strip. Its width is the row's LEFTOVER (`flex: 1 1 0`) between a floor and a cap
+     that keeps it the frame's compact box; `contain: inline-size` keeps its content out of
+     every intrinsic measure, so the row's line breaks never depend on what a wave contains.
+     One fixed line tall. Together those make the stage-stability invariant hold by
+     construction: no wave can resize the row or move the board.
+
+     THE FLOOR IS THE STRIP'S SMALLEST USEFUL FORM — the title and one entry whole — because
+     the floor's only job is to decide when the strip takes a line of its own, and a line is
+     paid for in board height. Measured in the narrow form below: a single entry fits in
+     ~11rem (its name and clause give way first), a two-entry wave needs 13.8–14.3rem on
+     macOS's font stack and 15.2–15.9rem on CI's Linux one, and wave 9's four entries
+     21.1–23rem — so no floor short of the cap spares the densest wave the scroll form, and a
+     strip squeezed under a wave's line scrolls (below, with a cue at the clipped edge) instead
+     of costing the board a line. A 20rem floor, measured against this one: 1280×720 at 150%
+     text kept a 141px status row where this keeps 78px, and at 800×501 at 150% the strip
+     sat on a third line, scrolled wholly out of the capped hud at rest. Where even the floor
+     exceeds the row (a narrow portrait window), the strip takes a line of its own — decided by
+     the viewport, never by the wave. It is a named size container (`wy-strip`) so its narrow
+     form below keys on the strip's own width. */
+  .wy-shell .wy-wave-preview {
+    --wy-strip-gap: 0.75rem;
+    --wy-strip-pad: 0.75rem;
+    --wy-strip-fade-w: 1.5rem;
+    flex: 1 1 0;
+    min-width: min(100%, 12rem);
+    max-width: 30rem;
+    container: wy-strip / inline-size;
+    box-sizing: border-box;
+    height: 2.25rem;
+    display: flex;
+    align-items: center;
+    gap: var(--wy-strip-gap);
+    padding: 0 var(--wy-strip-pad);
+    overflow: hidden;
+    font-size: 0.9rem;
+    white-space: nowrap;
+    background: var(--wy-surface);
+    border: 1px solid #33465f;
+    border-radius: 8px;
+  }
+
+  /* Hidden (once the run resolves) keeps the box: dropping it would let the row reflow. */
+  .wy-shell .wy-wave-preview[hidden] {
+    display: flex;
+    visibility: hidden;
+  }
+
+  .wy-shell .wy-wave-preview-title {
+    flex: none;
+  }
+
+  /* The list's box IS its line (`flex: none`): a multi-entry line longer than the strip
+     overflows it and the strip scrolls (below), and because the box tracks its content, the
+     strip's observer (`overlay.ts`) sees every change in the line's length — a reflow, a font
+     swap — not only the ones that also resize the strip. */
+  .wy-shell .wy-wave-preview-list {
+    display: flex;
+    align-items: center;
+    gap: 0.9rem;
+    flex: none;
+  }
+
+  /* A NARROW strip (squeezed beside the chips, or its own line in a portrait window's hud)
+     tightens its spacing, so a multi-entry wave needs the scroll form below as rarely as the
+     width allows. Each selector carries `.wy-shell` because the rules it refines out-rank a
+     bare class: the list's gap above is `(0,2,0)`, and the title's base `margin: 0` sits BELOW
+     this block in source, so a bare `.wy-wave-preview-title` here lost both (#181 QC). */
+  @container wy-strip (max-width: 22rem) {
+    .wy-shell .wy-wave-preview-title {
+      margin-inline-end: -0.35rem;
+    }
+
+    .wy-shell .wy-wave-preview-list {
+      gap: 0.55rem;
+    }
+
+    .wy-wave-preview-list .wy-creep-icon {
+      width: 1.15em;
+      height: 1.15em;
+    }
+  }
+
+  /* Only a single entry may shrink — its name and clause wrap away first — so only its list
+     shrinks with it. Entries of a multi-entry wave keep their icon and count whole; a line too
+     long for the strip scrolls (below), it never squeezes or clips an entry. */
+  .wy-shell .wy-wave-preview-list:has(> .wy-preview-entry:only-child) {
+    flex: 0 1 auto;
+    min-width: 0;
+  }
+
+  .wy-shell .wy-preview-entry:only-child,
+  .wy-shell .wy-preview-entry:only-child .wy-preview-glance {
+    min-width: 0;
+  }
+
+  /* THE SCROLL FORM — the strip's overflow remedy, in place (`overlay.ts`'s
+     `syncStripScroll`, on exactly while the line is longer than the box). The scrollbar is
+     hidden because a scrollbar gutter would take height from a box whose height is the
+     point; the region is still scrollable by touch, wheel and keyboard (it takes a tab stop
+     and a label while scrollable). */
+  .wy-shell .wy-wave-preview--scroll {
+    overflow-x: auto;
+    scrollbar-width: none;
+  }
+
+  .wy-shell .wy-wave-preview--scroll::-webkit-scrollbar {
+    display: none;
+  }
+
+  .wy-shell .wy-wave-preview--scroll:focus-visible {
+    outline: 3px solid var(--wy-focus);
+    outline-offset: -3px;
+  }
+
+  /* THE SCROLL FORM'S CUE. With its scrollbar hidden, a strip whose next entry happened to
+     end exactly at the clipped edge would read as a wave with fewer creep types — so each
+     edge with entries past it fades into the strip's surface (`wy-wave-preview--more-after`
+     / `--more-before`, set by `overlay.ts`'s `syncStripCue` from the scroll position, the
+     Rail's `wy-rail-has-more` pattern turned on its side). Sticky, so the fade rides the
+     visible edge while the line scrolls under it; positioned, so it paints over the entries;
+     and its negative margin cancels its own box AND the strip's gap beside it, so the cue
+     leaves `scrollWidth` — the quantity the cue is computed from — unchanged and can never be
+     the reason it shows. Decorative only: every entry's full sentence is in the accessible
+     text whether or not it is scrolled into view. */
+  .wy-shell .wy-wave-preview::before,
+  .wy-shell .wy-wave-preview::after {
+    content: '';
+    position: sticky;
+    z-index: 1;
+    flex: 0 0 var(--wy-strip-fade-w);
+    align-self: stretch;
+    pointer-events: none;
+    opacity: 0;
+  }
+
+  /* A sticky inset counts from the scroll container's padding edge inward, so each fade is
+     pulled out by the strip's padding to sit flush with the visible edge. */
+  .wy-shell .wy-wave-preview::before {
+    left: calc(-1 * var(--wy-strip-pad));
+    margin-right: calc(-1 * (var(--wy-strip-fade-w) + var(--wy-strip-gap)));
+    background: linear-gradient(to right, var(--wy-strip-fade-ink, var(--wy-surface)), transparent);
+  }
+
+  .wy-shell .wy-wave-preview::after {
+    right: calc(-1 * var(--wy-strip-pad));
+    margin-left: calc(-1 * (var(--wy-strip-fade-w) + var(--wy-strip-gap)));
+    background: linear-gradient(to left, var(--wy-strip-fade-ink, var(--wy-surface)), transparent);
+  }
+
+  .wy-shell .wy-wave-preview--more-before::before,
+  .wy-shell .wy-wave-preview--more-after::after {
+    opacity: 1;
+  }
+
+  /* Forced colors drop authored background images, so the fade would vanish; kept on the two
+     pseudo-elements alone (the Dock cue's remedy) and inked in `Canvas`, the colour the strip's
+     own surface takes under the user's theme. */
+  @media (forced-colors: active) {
+    .wy-shell .wy-wave-preview::before,
+    .wy-shell .wy-wave-preview::after {
+      --wy-strip-fade-ink: Canvas;
+      forced-color-adjust: none;
+    }
   }
 
   /* --- THE DOCK'S FOOTPRINT IS RESERVED, NOT OVERLAID (#152, owner ruling) ---
@@ -551,7 +911,7 @@ a.wy-home:focus-visible {
   }
 
   /* THE SCROLL FORM, set by `dock-reserve.ts` exactly while the bound holds fewer rows than the
-     Dock has (the `.wy-wave-preview--scroll` precedent). NOT unconditional, because `overflow:
+     Dock has (the wave preview's own in-place scroll form was the precedent). NOT unconditional, because `overflow:
      auto` clips ink overflow even when nothing scrolls: the Dock's box is flush with its
      controls, so a permanent scrollport would clip every Dock focus ring at 100% zoom.
 
@@ -646,8 +1006,8 @@ a.wy-home:focus-visible {
     outline-offset: -3px;
   }
 
-  /* The control's vertical chrome is px-capped (the `.wy-wave-preview` precedent: zoom grows
-     the label, never the box around it), so one control stays shorter than the bound it has
+  /* The control's vertical chrome is px-capped (zoom grows the label, never the box around
+     it), so one control stays shorter than the bound it has
      to fit inside. Identical at 100% zoom, where the 44px `min-height` governs both forms.
      Above ~116% text zoom the rem padding began growing the control; capped, it stays at 44px
      until ~174%, and at 200% a control measures 49px instead of 73px. Compact sets its own
@@ -667,6 +1027,32 @@ a.wy-home:focus-visible {
      changes. `.wy-shell` for specificity: the base `.wy-btn` 44px floor sits below this block. */
   .wy-shell .wy-dock .wy-btn {
     min-height: max(44px, var(--wy-dock-row-h, 0px));
+  }
+
+  /* THE COUNTDOWN DIAL'S ROOM (#181, QC round 2). The dial (`.wy-dial`, below) is drawn in the
+     primary control's inline-start padding, so while it shows the control moves
+     `--wy-dial-shift` of its END padding to its START — the base `.wy-btn` rule's 0.9rem +
+     0.9rem, redistributed, never added to. Same total, so the control's box, every Dock row,
+     and the reserve `dock-reserve.ts` measures from them are exactly what they are without the
+     dial: showing or hiding it can never move the Dock or the board. The shift is a whole px,
+     written by that pass, so each side keeps the base padding's own fraction of a layout unit
+     and the two always sum to the same width (a rem shift rounded each side separately, and
+     moved the control by 1/64px at 110–130% text).
+
+     Both the dial and its room are keyed on `wy-primary--dial`, which the pass sets only where
+     it MEASURED room: the label, moved by the shift, clears the dial by a real gap and stays
+     inside the control. A font assumption gated the dial before, and CI's font metrics broke it
+     — "Start" ran into the dial at 320×900 and 300% text, and narrower windows pushed the label
+     past the border. Where a word is that wide, the dial and the shift are both withheld and the
+     label sits exactly where it would with no dial. `:not([hidden])` leaves the UA's `[hidden]`
+     rule in charge of the countdown's own absence (no countdown, or a call already launching). */
+  .wy-shell .wy-dock .wy-primary.wy-primary--dial:has(> .wy-dial:not([hidden])) {
+    padding-inline: calc(0.9rem + var(--wy-dial-shift, 0px))
+      calc(0.9rem - var(--wy-dial-shift, 0px));
+  }
+
+  .wy-shell .wy-dock .wy-primary.wy-primary--dial > .wy-dial:not([hidden]) {
+    display: block;
   }
 }
 
@@ -758,164 +1144,15 @@ a.wy-home:focus-visible {
   pointer-events: none;
 }
 
-/* --- Wave preview: FLOATING over the Stage on Standard (playtest round). Living in the
-   status row made that row content-sized (the shell's first `auto` grid row), so every
-   preview change — a wave with more entry lines (1 on most waves, 4 on wave 9), a
-   font-stack-dependent wrap, the end-of-run hide — resized the row and re-projected the
-   whole board mid-run (cellPx 30 → 27 at a 1512×854 window, measured 2026-08-10).
-   Floating decouples it completely: absolutely positioned in `.wy-stage`
-   (position: relative), at the Stage's top-left — the Dock's corner-float precedent,
-   opposite corner. HONEST GEOMETRY (measured, this branch): the letterbox margin NEVER
-   hosts the card whole — margins run 46px (1280×900) to 110px (1512×854) against a
-   ~256px card, so a top-left overlap of roughly 7 columns × 3 rows of board cells is the
-   NORMAL Standard state, not a corner case. A recorded residual
-   (docs/accessibility-checklist.md, playtest round): `pointer-events: none` keeps every
-   overlapped pixel click-through and the entrance lane is mid-left so the path never
-   runs under it, but a tower built beneath is visually hidden while the preview shows.
-   The relations gate (`layout-probe.ts`) pins the float's grid clip to at most 40% of
-   the GRID'S AREA, confined to the grid's left half — and the card is PX-bounded (never
-   rem) precisely so text zoom cannot grow it into that budget — zoom grows only the
-   card's internal wrapping, and content-driven overflow at ANY zoom is handled IN PLACE
-   by the scroll form (the `--scroll` rule below), never by a re-home: the hud lives in
-   the content-sized status row, and moving there re-projects the board mid-run, the
-   exact defect this float exists to end (Codex #96 P1: the earlier ≥150% zoom bucket
-   re-homed there and reopened the bug for zoomed Standard — deleted; the float serves
-   every zoom level). Two homes remain hud-side — Compact, and (since #101) any Stage with
-   no dead band wide enough for a legible card — and there the hud reservation below keeps
-   the row content-invariant; the
-   `.wy-hud`-keyed rule restores the in-flow look wherever the node lives in the hud.
-   Opaque surface + border so it reads over whatever it lands on; no z-index needed — it
-   is a LATER sibling of `.wy-board` inside `.wy-stage`, so it paints above the canvas by
-   tree order (the board's `isolation` contains its own ::after ring, never its
-   siblings). --- */
+/* --- Wave preview: the STRIP (#181 L1) -------------------------------------------------
+   ONE home, inside `.wy-hud`: a one-line strip in the Standard status row (the Standard-only
+   block above) and an in-flow block in the Compact status column (the Compact fork below).
+   It replaced #101's floating card and its placement chain — letterbox, then the board's
+   border ring, then a hud row reserved at the full 40dvh — whose last link inflated a 1080×810
+   tablet's status row to ~284px and shrank the board from ~29px cells to ~19px. These are the
+   rules both forms share. --- */
 .wy-wave-preview {
-  position: absolute;
-  top: 0.5rem;
-  /* THE COMPLIANT BAND (#101). `main.ts` measures the stage's dead space each layout pass
-     and writes these three custom properties; `preview-place.ts` owns the geometry and the
-     ratified rule ("the preview never occludes a structurally buildable cell"). Exactly one
-     of left/right is a length and the other is `auto`, so the card is pinned to the stage
-     edge its band belongs to and still shrinks to fit its content.
-
-     THE DEFAULTS ARE LOAD-BEARING, not decoration: they are the pre-measurement placement,
-     which is what jsdom and a stage mid-resize get. `min(256px, 45%)` is the card's own
-     historical cap — px-capped against zoom growth, %-capped against tiny Standard stages
-     (a 360-wide portrait window is still Standard). `preview-place.ts` mirrors the 256 and
-     `layout.test.ts` asserts this declaration still carries it, so the two cannot drift. */
-  left: var(--wy-preview-left, 0.5rem);
-  right: var(--wy-preview-right, auto);
-  box-sizing: border-box;
-  max-width: var(--wy-preview-max-w, min(256px, 45%));
-  /* The clamp the scroll form scrolls WITHIN. Truncation is never a shipped state: the
-     moment content exceeds this box (scrollHeight > clientHeight — heavy zoom, a small
-     window, a four-entry wave, in any combination), `main.ts` flips the card to its
-     `--scroll` form below, in place (WCAG 1.4.4 — hidden+pointer-none text would be
-     unreachable by any input). */
-  max-height: 40%;
-  overflow: hidden;
-  padding: 0.5rem 0.75rem;
-  font-size: 0.95rem;
-  background: var(--wy-surface);
-  border: 1px solid #33465f;
-  border-radius: 6px;
-  pointer-events: none;
-  user-select: none; /* Shell chrome (PLAN.md P3), like the Dock it mirrors */
-}
-
-/* The float's SCROLL form (`main.ts`'s `applyPreviewHome`), on exactly while content
-   exceeds the clamp above — at any zoom level (the px-capped card never re-homes for
-   zoom): the card trades its click-through contract for scrollability —
-   wheel/drag via `pointer-events: auto`, keyboard via the tab stop main.ts sets with this
-   class (a focused scrollable div arrow-scrolls natively, like `.wy-hud`) — and trades it
-   back the moment content fits again. Toggling this class changes no geometry (the box is
-   already at its clamp), so the flip cannot feed back into the ResizeObserver that drives
-   it. The `.wy-hud`-keyed in-flow rule outranks this one on SPECIFICITY (0,2,0 vs
-   0,1,0), so it wins wherever both apply regardless of source order (main.ts also clears
-   the class on every re-home — belt and braces). Taking the pointer makes the card input
-   CHROME: input.ts's `CHROME_SELECTOR` lists `.wy-wave-preview`, so a captured board/Card
-   release delivered over the scrollable card cancels instead of placing a tower on the
-   cell behind it (Codex #96 P2 — capture routes the release here regardless of where the
-   gesture began; the resting form is hit-test-invisible, so that entry costs it nothing). */
-.wy-wave-preview--scroll {
-  overflow-y: auto;
-  pointer-events: auto;
-}
-
-/* Candidate 5 (#101), scoped exactly as the ratified plan scopes it: ON only while the card
-   borrows the board's BLOCKED BORDER ring — the second-preference band, where it still
-   covers board terrain (the ring and the two openings) even though it covers no buildable
-   cell. Nothing about the letterbox band needs this; there is no board underneath it.
-
-   AN OUTLINE, NOT TRANSLUCENCY, and the reason is measurability rather than taste. The
-   surface under this card is the Phaser canvas, whose colours change with the colour-vision
-   mode, and `e2e/contrast.ts`'s rendered-contrast probe reads `background-color` without
-   compositing alpha — so a translucent card would ship a text-contrast claim that no gate in
-   this repo can check. The dashed edge carries the same message (this is an overlay resting
-   on terrain, not a panel replacing it) at zero contrast risk. */
-.wy-wave-preview--over-board {
-  border-style: dashed;
-}
-
-.wy-wave-preview--scroll:focus-visible {
-  outline: 3px solid var(--wy-focus);
-  outline-offset: 2px;
-}
-
-/* The preview's IN-FLOW form, keyed on its HOME (`.wy-hud` hosts it on Compact and on any
-   Standard stage with no compliant dead band — `shell.placePreview`), never on a media
-   query: one rule serves both re-homing reasons and cannot drift from the reparent logic.
-   `pointer-events` back on so touch-dragging the scrollable chips column works over the
-   preview's own area. */
-.wy-hud .wy-wave-preview {
-  position: static;
-  max-width: none;
-  max-height: none;
-  overflow: visible;
-  padding: 0;
-  font-size: inherit;
-  background: none;
-  border: 0;
-  pointer-events: auto;
-}
-
-/* THE ROW RESERVATION (Codex #96 P1): while the hud HOSTS the preview node on Standard,
-   the hud is pinned at its cap instead of content-sizing — otherwise every wave's
-   entry-count change (1 line on most waves, 4 on wave 9) and the end-of-run hide would
-   resize the status row and re-project the board from this home too, the exact mid-run
-   movement the playtest round exists to end. The cost is honest and STATIC: the row spends
-   its full 40dvh budget whenever this home is in use.
-   MEASURED worst case vs a content-sized row: one cellPx (~7%) on stages 391-399px wide
-   under ~560px tall, where the pin flips the board from width- to height-limited; zero
-   at every wider or taller shape probed. A static 7% beats a mid-run re-projection.
-   #101 WIDENED WHO PAYS IT, and that is worth stating rather than leaving to the reader:
-   this home is now the escape hatch for any Standard stage with no compliant dead band,
-   where the full 40dvh IS expensive — measured cellPx 28 → 19 at 1000×720 and 34 → 25 at
-   1280×900/200%. `preview-place.ts` reaches for it last for exactly that reason; the
-   number recorded above describes the narrow-stage case it was originally sized for.
-   Keyed on `:has` (the
-   `.wy-banner` precedent above) so it engages exactly when the node lives here — hidden
-   or not, deliberately: `[hidden]` toggling must not resize the row either. The Compact
-   fork restores content-sizing: its status COLUMN is width-fixed, so preview growth
-   there scrolls inside the hud and cannot touch the board.
-
-   THE WIDTH NEEDED THE SAME TREATMENT, and until #101 nothing noticed (Codex, PR #164).
-   Pinning the height alone left the OTHER axis content-driven: `.wy-status` is a wrapping
-   flex row and this hud is an auto-basis item, so a four-entry wave's long rows grew the
-   hud's max-content width until the row wrapped and the home link took a line of its own.
-   Measured at 1000×720: `.wy-hud` held its 232px exactly as designed while `.wy-status`
-   went 248 → 288px and the board dropped 19 → 18 cellPx as wave 9 arrived — a mid-run
-   re-projection, i.e. precisely the defect the height pin above exists to prevent, arriving
-   through the axis it did not cover. It stayed invisible because this home used to serve
-   only narrow viewports, whose status COLUMN is width-fixed; #101 made it the escape hatch
-   for wide ones, where the row can wrap.
-   `flex: 1 1 0` is what closes it: a zero flex-basis takes the item's own content out of
-   the row's sizing entirely, so the hud measures the space left over rather than the text
-   inside it, and no wave can move it. The card then wraps within that width and scrolls
-   inside the height already reserved — the same "handle overflow IN PLACE, never by
-   resizing the row" contract the float form keeps with its own `--scroll` form. */
-.wy-hud:has(> .wy-wave-preview) {
-  height: max(2.5rem, calc(40dvh - 3.5rem - var(--wy-safe-top)));
-  flex: 1 1 0;
+  user-select: none; /* Shell chrome (PLAN.md P3) */
 }
 
 .wy-wave-preview-title {
@@ -924,27 +1161,19 @@ a.wy-home:focus-visible {
 }
 
 .wy-wave-preview-list {
-  margin: 0.25rem 0 0;
-  padding-left: 1.1rem;
+  margin: 0;
+  padding: 0;
+  list-style: none;
 }
 
-/* Dual-form preview rows (#101). The full ICU sentence stays the row's accessible text —
-   only its PRESENTATION changes; the glance form takes the visible slot. Same contract as
-   `.wy-chip-full`/`.wy-chip-glance`, with TWO deliberate differences:
-
-   1. That pair lives inside `@media (max-height: 500px)` because there the glance is a
-      Compact-only concession. This pair is UNSCOPED — the occlusion #101 reports is worst
-      on a large desktop Standard stage (measured at 1512x854: the card ran 256x277px, its
-      full width cap, and covered 7.7% of the Board), so a diet engaging only at the Compact
-      breakpoint would miss the very case that motivated it.
-   2. Like `.wy-chip-full`, this RESTATES `.wy-sr-only`'s rules rather than composing that
-      class onto the element — and unlike the chips, nothing about a media query forces it
-      here, so the reason is worth recording. `.wy-sr-only` is not a free-floating utility
-      in this codebase: it is used as an IDENTITY by `querySelector('.wy-sr-only')`, which
-      resolves the HUD's live-region announcer. Composing it onto every preview row was
-      tried and made that selector resolve to a preview row instead, turning a nine-line CSS
-      saving into action at a distance across two modules. Ten duplicated declarations are
-      the cheaper half of that trade. */
+/* Dual-form preview rows (#101, kept by #181). The full ICU sentence stays the row's
+   accessible text — only its PRESENTATION changes; the aria-hidden glance takes the visible
+   slot: the creep's icon and count, plus the name and deviating clause beside a single-entry
+   wave. Like `.wy-chip-full`, this RESTATES `.wy-sr-only`'s rules rather than composing that
+   class onto the element: `.wy-sr-only` is used as an IDENTITY by
+   `querySelector('.wy-sr-only')`, which resolves the HUD's live-region announcer. Composing it
+   onto every preview row was tried and made that selector resolve to a preview row instead —
+   action at a distance across two modules for a nine-line saving. */
 .wy-preview-full {
   position: absolute;
   width: 1px;
@@ -957,8 +1186,61 @@ a.wy-home:focus-visible {
   border: 0;
 }
 
+.wy-preview-entry {
+  /* The row's hidden sentence resolves against the row, inside the strip's clip — see
+     `.wy-chip`. Unpositioned, a row past the strip's visible end was horizontal scroll range
+     on the page (131px at 360×640, 200% text) that no one could pan back. */
+  position: relative;
+  display: flex;
+  align-items: center;
+}
+
 .wy-preview-glance {
-  display: block;
+  display: flex;
+  align-items: center;
+  gap: 0.3em;
+  white-space: nowrap;
+}
+
+/* The creep icon (`hud-icons.ts`): the board's own silhouette. `overflow: visible` lets a
+   boss's larger silhouette and an air entry's chevron use the line's spare height rather than
+   shrinking every other icon to make room. */
+.wy-creep-icon {
+  flex: none;
+  width: 1.3em;
+  height: 1.3em;
+  overflow: visible;
+}
+
+.wy-preview-count {
+  flex: none;
+  font-weight: 700;
+}
+
+/* The name and deviating clause beside a SINGLE-entry wave, shown only where they fit — by
+   WRAPPING away, not by a breakpoint: the box is one line tall and clips whatever wraps, and
+   the empty `::before` keeps that line occupied so an item too wide for what is left wraps
+   instead of overflowing. The clause goes first, then the name, at whatever width the strip
+   has, and nothing is ever cut mid-word. Both are presentation; the row's full sentence still
+   carries them. */
+.wy-preview-detail {
+  display: flex;
+  flex-wrap: wrap;
+  flex: 0 1 auto;
+  min-width: 0;
+  height: 1.4em;
+  overflow: hidden;
+  color: var(--wy-fg-dim);
+}
+
+.wy-preview-detail::before {
+  content: '';
+}
+
+.wy-preview-name,
+.wy-preview-clause {
+  margin-inline-start: 0.6em;
+  white-space: nowrap;
 }
 
 /* The pollable board summary (#79) — live creep-status counts inside the labelled HUD
@@ -1530,6 +1812,94 @@ a.wy-home:focus-visible {
   display: none;
 }
 
+/* --- The countdown dial inside the primary action (#181 H1; Standard — Compact hides it) ---
+   A small STOPWATCH face (`hud-icons.ts`, #181 QC round 2): a ring with a crown on top, the
+   remaining time a wedge that shrinks back to twelve o'clock over a dim face. The crown makes a
+   silhouette no letter has — the closed ring it replaced read as an "O" beside the label
+   ("O Start"). Decoration: the wave chip's glance is the readable countdown and its full message
+   the accessible one, so the dial is `aria-hidden`, carries no text and takes no pointer events.
+   It is OUT OF EVERY LAYOUT MEASURE — absolutely positioned against the control, in the
+   inline-start padding Standard's rule above makes room in without resizing the control — so
+   showing or hiding it can never move the Dock or the board. Its size and inset are whole px
+   the Dock pass derives from the control's font size (`dock-reserve.ts`), so it grows with text
+   like the label beside it, at every size. Drawn by Standard's `wy-primary--dial` rule above
+   and nowhere else: `display: none` here, so no room measured means no dial. No animation of
+   any kind — the wedge only takes a new value each second — so reduced motion needs nothing. */
+.wy-dock .wy-primary {
+  position: relative;
+}
+
+.wy-dial {
+  display: none;
+  position: absolute;
+  inset-block: 0;
+  inset-inline-start: var(--wy-dial-inset, 0.25em);
+  width: var(--wy-dial-size, 0.9em);
+  height: var(--wy-dial-size, 0.9em);
+  margin-block: auto;
+  pointer-events: none;
+}
+
+.wy-dial-svg {
+  display: block;
+  width: 100%;
+  height: 100%;
+}
+
+/* The face's INKS. Its geometry — radii, centres, stroke widths, the crown's path — is the SVG's
+   own (`hud-icons.ts`, whose tests read it back), so no rule here sets any. The ring, the crown
+   and the wedge are the control's own text ink, `currentColor`, in every state and theme; the
+   spent part of the face is that ink, dimmed (both pairings gated in `ui-contrast.test.ts`). */
+.wy-dial-ring,
+.wy-dial-crown,
+.wy-dial-wedge {
+  stroke: currentColor;
+}
+
+.wy-dial-track {
+  fill: currentColor;
+  fill-opacity: 0.3;
+}
+
+/* FORCED COLORS (#181). Chromium leaves SVG `fill` and `stroke` unforced, so the icons would
+   keep their authored inks on the user's Canvas — the countdown clock and the chips' icons
+   near-white on white. Every SVG ink takes a system colour instead. The shapes carry the
+   meaning (heart, gem, star; a creep's silhouette and its airborne chevron), so they read in
+   the one colour the user's theme draws text in. The creep icons' palette inks are
+   presentation attributes, which any rule here outranks. The countdown dial is in the
+   control's own system ink, `ButtonText`, over its face in `ButtonFace` — the control's own
+   system ground, so the remaining wedge reads at the full contrast of the control's text
+   (`GrayText` under it measured 1.5:1 in the contrast themes), and the ring and crown still
+   outline the face. */
+@media (forced-colors: active) {
+  .wy-icon .wy-icon-body,
+  .wy-creep-icon .wy-creep-body {
+    fill: CanvasText;
+    stroke: CanvasText;
+  }
+
+  .wy-icon .wy-icon-line,
+  .wy-creep-icon .wy-creep-chevron {
+    stroke: CanvasText;
+  }
+
+  /* The gem's facets are drawn ON its body, so they take the colour around it. */
+  .wy-icon .wy-icon-facets {
+    stroke: Canvas;
+  }
+
+  .wy-dial-ring,
+  .wy-dial-crown,
+  .wy-dial-wedge {
+    stroke: ButtonText;
+  }
+
+  .wy-dial-track {
+    fill: ButtonFace;
+    fill-opacity: 1;
+  }
+}
+
 .wy-btn-icon {
   display: none;
 }
@@ -1632,7 +2002,16 @@ a.wy-home:focus-visible {
   border-color: var(--wy-focus);
 }
 
-/* --- Results dialog --- */
+/* --- Results dialog: the results panel (#181 H2) ---
+   The dialog is the full-screen scrim it always was; its one child is the style frame's
+   panel, centred on it (`results-panel.ts` builds it). The panel is capped to the room below
+   its resting place (`max-height: calc(100% - rest)`, below), and when its content is taller —
+   the expanded survey, the Run data group on a short screen, heavy text zoom — its BODY
+   scrolls inside it, with the band and the panel's edge staying put around it. So the heading
+   and Play again are always at the top of the body's scroll range, and placement can never
+   push them out of reach: the panel is never taller than the dialog that places it. (That
+   retires the auto-margin workaround the survey needed for older WebKit, which drops
+   `justify-content: safe center`.) */
 
 .wy-results {
   position: fixed;
@@ -1641,10 +2020,11 @@ a.wy-home:focus-visible {
   display: flex;
   flex-direction: column;
   align-items: center;
-  justify-content: center;
-  gap: 1rem;
-  padding: 2rem;
-  text-align: center;
+  box-sizing: border-box;
+  padding: 1.5rem 1rem;
+  /* A net, not the mechanism: nothing should overflow the scrim (the panel is capped to it),
+     but anything that ever did stays reachable rather than clipped. */
+  overflow: auto;
   background: rgba(6, 12, 22, 0.94);
 }
 
@@ -1652,34 +2032,309 @@ a.wy-home:focus-visible {
   display: none;
 }
 
-.wy-verify {
-  max-width: 30rem;
-  font-size: 1rem;
+/* The panel's RESTING place: a spacer above it, sized by `results-panel.ts` (`settle`) to
+   centre the panel as it stands with nothing open below its action row, and FIXED: it never
+   gives way. The panel is capped to the room left below it, so whatever opens — the Run data
+   group, the survey form, a status message — grows the panel downward into that room and then
+   scrolls inside its body. Opening something never moves the panel itself: a panel that moved
+   instead (re-centred, or pushed up to fit) would put another control under the pointer on
+   every open. What can still move content under a pointer (a scrolled body clamping as
+   something closes, the survey bringing its first question into view) is the press guard's
+   to catch (`press-guard.ts`). */
+.wy-results::before {
+  content: '';
+  flex: none;
+  height: var(--wy-results-rest, 0px);
 }
 
-/* ADR 0014's survey, expanded in place inside the results dialog. The expanded form is
-   taller than a compact landscape viewport, so the dialog scrolls — and it must centre only
-   while it fits, or its top (title, Play again) is clipped out of reach. Auto margins on the
-   first and last child do that in every engine; `justify-content: safe center` would too,
-   but older WebKit (the Capacitor WebView) drops it and falls back to the unsafe `center`. */
-.wy-results {
+.wy-results-panel {
+  position: relative;
+  display: flex;
+  flex: none;
+  flex-direction: column;
+  box-sizing: border-box;
+  width: min(100%, 32.5rem);
+  max-height: calc(100% - var(--wy-results-rest, 0px));
+  /* A size container, so its body's scrollbar gutter can follow the panel's width (below). */
+  container: wy-results-panel / inline-size;
+  border: 1.5px solid var(--wy-results-edge);
+  border-radius: 14px;
+  background: var(--wy-results-panel);
+  color: var(--wy-fg);
+}
+
+/* The outcome band: the frame's 5px line along the panel's top edge, inset by the corner
+   radius and round-capped — yellow for a win, red for a loss. Decoration: the heading carries
+   the outcome. Offsets are from the padding box, inside the 1.5px border. */
+.wy-results-panel::before {
+  content: '';
+  position: absolute;
+  top: -3.25px;
+  right: 12.5px;
+  left: 12.5px;
+  height: 5px;
+  border-radius: 2.5px;
+  background: var(--wy-results-band, var(--wy-stars));
+  pointer-events: none;
+}
+
+.wy-results-panel[data-outcome='lost'] {
+  --wy-results-band: var(--wy-loss);
+}
+
+/* The scroller. Its inline size is the panel's, never its content's, so it can be the
+   container the tiles' Compact row and the stars query. Its scrollbar's gutter is always
+   reserved: where scrollbars take room, something opening below the row would otherwise narrow
+   the body the moment it overflows, and reflow the row out from under the pointer. Reserved on
+   both edges, so the centred heading, stars and score stay centred on the panel and its band,
+   except on a narrow panel (below). */
+.wy-results-body {
+  flex: 0 1 auto;
+  min-height: 0;
   overflow-y: auto;
-  justify-content: flex-start;
+  /* No scroll anchoring. Chromium would pick the status region as the anchor and, as the survey
+     form above it collapses, scroll the body up to hold the region still, which brings Play
+     again down under the pointer that pressed Send. Without it the body only clamps to the end
+     of its shorter range, as WebKit (which has no anchoring) already does. */
+  overflow-anchor: none;
+  scrollbar-gutter: stable both-edges;
+  container: wy-results / inline-size;
+  padding: 1.75rem clamp(1rem, 6vw, 2.75rem) 1.25rem;
+  /* The panel's radius inside its border, so a scrollbar keeps to the rounded corners. */
+  border-radius: 12.5px;
+  text-align: center;
 }
 
-.wy-results > :first-child {
-  margin-top: auto;
+/* A word longer than the line breaks rather than scrolling the body sideways: the loss heading's
+   "through." is wider than a 320px window's panel at 200% text in a wide font (DejaVu Sans). */
+.wy-results-title {
+  margin: 0;
+  font-size: 1.625rem;
+  font-weight: 800;
+  line-height: 1.2;
+  overflow-wrap: anywhere;
 }
 
-.wy-results > :last-child {
-  margin-bottom: auto;
+/* The heading takes first focus where Play again is below the fold (`results-panel.ts`), so it
+   wears the app's focus ring, as every control does, rather than the browser's default. */
+.wy-results-title:focus-visible {
+  outline: 3px solid var(--wy-focus);
+  outline-offset: 2px;
+  border-radius: 4px;
 }
 
-.wy-survey {
+.wy-results-subtitle {
+  margin: 0.5rem 0 0;
+  font-size: 0.875rem;
+  color: var(--wy-fg-dim);
+}
+
+.wy-results-grade {
+  margin-top: 1.25rem;
+}
+
+/* The stars and their gaps are capped by the body's width (`cqi`, its inline-size container) as
+   well as by type size: three stars and two gaps take at most 74% of the row, so heavy text
+   zoom on a narrow window shrinks them rather than pushing the first one off the body's left
+   edge, where a centred row that overflows cannot be scrolled to. */
+.wy-results-stars {
+  display: flex;
+  justify-content: center;
+  gap: min(0.625rem, 4cqi);
+}
+
+/* The HUD's star (`hud-icons.ts`) at the frame's results size. An unearned star keeps the
+   shape — outlined, unfilled — so the grade reads by shape and not by colour alone (ADR 0003);
+   its outline is the gated `--wy-panel-edge`, not the frame's 2.2:1 slate. */
+.wy-results-stars .wy-icon {
+  width: min(2.75rem, 22cqi);
+  height: min(2.75rem, 22cqi);
+}
+
+.wy-results-star[data-earned='false'] .wy-icon-body {
+  fill: var(--wy-star-empty);
+  stroke: var(--wy-panel-edge);
+}
+
+.wy-results-score {
   display: flex;
   flex-direction: column;
   align-items: center;
-  width: min(100%, 30rem);
+  margin-top: 0.875rem;
+}
+
+.wy-results-score-label {
+  font-size: 0.8125rem;
+  letter-spacing: 0.09em;
+  text-transform: uppercase;
+  color: var(--wy-fg-dim);
+}
+
+.wy-results-score-value {
+  font-size: 2.125rem;
+  font-weight: 800;
+  line-height: 1.15;
+  font-variant-numeric: tabular-nums;
+}
+
+/* The run's numbers: four labelled tiles, two by two. */
+.wy-results-stats {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0.625rem;
+  margin: 1.25rem 0 0;
+}
+
+/* A label and its number share the tile's line where the label's longest word and the number fit
+   on it: the label takes the room left and wraps at its spaces, and the number stands at the
+   end. Where even that is too wide (a narrow panel at heavy text zoom: "stopped" and "117" in
+   a wide font), the number wraps to a line of its own, still at the end, rather than running
+   out of the tile. The label's zero basis is what lets it wrap at its spaces before the number
+   moves: the line break counts its longest word, not its whole text. */
+.wy-results-stat {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.125rem 0.75rem;
+  box-sizing: border-box;
+  min-height: 3rem;
+  padding: 0.375rem 0.875rem;
+  border: 1px solid var(--wy-results-tile-edge);
+  border-radius: 8px;
+  background: var(--wy-results-tile);
+  text-align: left;
+}
+
+.wy-results-stat dt {
+  flex: 1 1 0;
+  font-size: 0.8125rem;
+  color: var(--wy-fg-dim);
+}
+
+.wy-results-stat dd {
+  margin: 0 0 0 auto;
+  font-size: 1.0625rem;
+  font-weight: 800;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+/* A loss's leaks read in the danger ink — emphasis only: the label says what the number is. */
+.wy-results-panel[data-outcome='lost'] .wy-results-stat[data-stat='leaks'] dd {
+  color: var(--wy-danger);
+}
+
+/* One row of actions, as the frame draws it: Play again leads and takes the room; Give
+   feedback (where the survey renders) and Run data keep the frame's smaller type and their own
+   width, Run data always at the row's end, over the group it opens. Under pressure (a narrow
+   window, heavy zoom) the row wraps. */
+.wy-results-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.625rem;
+  margin-top: 1.25rem;
+}
+
+.wy-results-actions .wy-btn {
+  min-height: 3rem;
+}
+
+.wy-results-actions .wy-primary {
+  flex: 1 1 9rem;
+  font-weight: 800;
+}
+
+/* The survey's Give feedback slot is a row member, not a box: its button is the item. */
+.wy-survey-opener {
+  display: contents;
+}
+
+.wy-survey-opener[hidden] {
+  display: none;
+}
+
+.wy-survey-opener > .wy-btn {
+  padding-inline: 0.75rem;
+  font-size: 0.875rem;
+  font-weight: 700;
+}
+
+/* While its form is open the survey hides Give feedback (ADR 0014 §1), and here the button
+   keeps its box, invisibly. An emptied slot would let Play again widen under the pointer that
+   just pressed Give feedback: the press guard (`press-guard.ts`) would swallow a second press
+   there, but the row would still jump. It is hidden from sight, focus and assistive tech
+   alike, and a press on its place lands on nothing. */
+.wy-survey-opener > .wy-btn[hidden] {
+  display: inline-block;
+  visibility: hidden;
+}
+
+/* The Run data toggle: the frame's quieter secondary button, with a chevron that turns over
+   while the group is open — instantly, so there is no motion for reduced motion to stop. */
+.wy-results-more {
+  display: inline-flex;
+  flex: none;
+  align-items: center;
+  justify-content: center;
+  gap: 0.375rem;
+  margin-left: auto;
+  padding-inline: 0.625rem;
+  border-color: var(--wy-panel-edge);
+  color: var(--wy-fg-quiet);
+  font-size: 0.8125rem;
+  font-weight: 600;
+}
+
+.wy-results-chevron {
+  flex: none;
+  width: 0.75rem;
+  height: 0.75rem;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.5;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+.wy-results-more[aria-expanded='true'] .wy-results-chevron {
+  transform: rotate(180deg);
+}
+
+/* The disclosed group: under the toggle at the row's end, in the frame's menu box. */
+.wy-results-run-data {
+  display: flex;
+  flex-direction: column;
+  box-sizing: border-box;
+  width: fit-content;
+  min-width: min(100%, 11rem);
+  max-width: 100%;
+  margin: 0.625rem 0 0 auto;
+  padding: 0.25rem;
+  border: 1px solid var(--wy-panel-edge);
+  border-radius: 8px;
+  background: var(--wy-results-tile);
+}
+
+.wy-results-run-data[hidden] {
+  display: none;
+}
+
+/* Its actions are the menu box's items: the box is their boundary, so each drops its own
+   border (its label identifies it, WCAG 1.4.11) and keeps the 44px target and focus ring. */
+.wy-results-item {
+  border-color: transparent;
+  background: transparent;
+  text-align: left;
+}
+
+.wy-results-item:hover {
+  background: var(--wy-results-panel);
+}
+
+/* ADR 0014's survey form, expanded in place below the action row. */
+.wy-survey {
+  width: 100%;
 }
 
 .wy-survey[hidden],
@@ -1687,12 +2342,85 @@ a.wy-home:focus-visible {
   display: none;
 }
 
+/* Its text breaks where a word is wider than the panel: the reference is a UUID, which may hold
+   no break opportunity at all, and "Something broke" beside its checkbox outgrows a 320px
+   window's panel at 200% text. */
 .wy-survey-form {
   display: flex;
   flex-direction: column;
   gap: 0.75rem;
   width: 100%;
+  margin-top: 1rem;
   text-align: left;
+  overflow-wrap: anywhere;
+}
+
+/* The shared status region closes the panel. Never hidden, not even empty: a live region has
+   to be in the accessibility tree BEFORE its text arrives, or the arrival goes unannounced.
+   Within one dialog it never shrinks (`results-panel.ts` holds its tallest message's height as
+   a `min-height`, measured as a border box). Its messages break where a word is wider than the
+   panel: Save's names the file it wrote and an accepted Send's quotes the reference, neither of
+   which wraps at a space. */
+.wy-verify {
+  box-sizing: border-box;
+  max-width: 30rem;
+  margin: 0.75rem auto 0;
+  font-size: 1rem;
+  overflow-wrap: anywhere;
+}
+
+/* A narrow panel (a narrow window, heavy text zoom) stacks the tiles, so a label and its
+   number never have to share less than a whole row — and where even a whole row is too narrow,
+   the number takes a line of its own below the label, wrapping at its spaces ("8 / 10") only
+   where even that line is too narrow, rather than overflowing the body. A stacked tile also
+   takes tighter padding: at 200% text on a 320px window the default padding left "117" no room
+   beside its label. */
+@container wy-results (max-width: 16rem) {
+  .wy-results-stats {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .wy-results-stat {
+    column-gap: 0.375rem;
+    padding-inline: 0.5rem;
+  }
+
+  .wy-results-stat dd {
+    white-space: normal;
+  }
+}
+
+/* On a narrow panel (18rem: the width at which its tiles stack, with the body's padding), the
+   body reserves its scrollbar's gutter on that edge only, and takes tighter side padding.
+   Where a scrollbar takes room (a classic 15–17px one), a gutter on both edges and the full
+   padding would cost more width than a 320px window at 200% text has. The centred content then
+   sits half a scrollbar off the band's centre, on a narrow panel only. The padding is sized so
+   that at 200% text on a 320px window the loss heading's "through." stays whole, and "117"
+   beside its label, in the platform font. A wider font (DejaVu Sans) breaks the one and moves
+   the other below its label, rather than scrolling the body sideways. */
+@container wy-results-panel (max-width: 18rem) {
+  .wy-results-body {
+    scrollbar-gutter: stable;
+    padding-inline: 0.625rem;
+  }
+}
+
+/* FORCED COLORS for the panel (the HUD icons' block above sets the star's base inks). An earned
+   star takes `CanvasText` from that block; an UNEARNED one drops its fill and keeps its
+   outline, so the grade still reads by shape when every ink is the user's one text colour. The
+   outcome band is painted as a background, which forced colors would reset to the Canvas it
+   sits on, so it opts out and takes the text colour. The chevron needs nothing: it strokes in
+   its button's own colour, which forced colors already set. */
+@media (forced-colors: active) {
+  .wy-results-star[data-earned='false'] .wy-icon-body {
+    fill: Canvas;
+    stroke: CanvasText;
+  }
+
+  .wy-results-panel::before {
+    forced-color-adjust: none;
+    background: CanvasText;
+  }
 }
 
 .wy-survey-scale {
@@ -1747,6 +2475,17 @@ a.wy-home:focus-visible {
   margin: 0;
   color: var(--wy-fg-dim);
   font-size: 0.9rem;
+}
+
+/* The privacy-notice link (#158, wynding-site ADR 0001 step 7). Without a rule it renders
+   in the UA's default link blue, about 2:1 on the results dialog, and axe cannot see it
+   there (the canvas behind the dialog makes `color-contrast` incomplete). `--wy-accent` is
+   gated at >= 4.5:1 on `--wy-bg` in `ui-contrast.test.ts`, and the dialog is darker still.
+   `:visited` keeps it: the UA's visited purple is as low-contrast as its blue. */
+.wy-survey-note a,
+.wy-survey-note a:visited {
+  color: var(--wy-accent);
+  text-decoration: underline;
 }
 
 .wy-survey-actions {
@@ -1976,39 +2715,91 @@ a.wy-home:focus-visible {
   }
 
   /* Chips: the `flex: 1` scrollport. The Dock is a separately bounded block BELOW it, so
-     chips can never scroll behind the controls (chip–Dock disjointness is asserted). */
+     chips can never scroll behind the controls (chip–Dock disjointness is asserted).
+
+     WHOLE ITEMS AT REST (#181 QC round 2). The room the column leaves the chips ends wherever
+     the mark and the Dock put it — at 658×320 it cut the fifth chip through its icon and value.
+     `hud-cut.ts` measures where the last whole chip (or wave-strip line) ends and writes it as
+     `--wy-hud-cut`: the scrollport stops there, and the room below it stays empty above the
+     Dock (whose `margin-top: auto` keeps it where it was). Where no item fits whole — a wrapped
+     countdown after Start at 150–200% text — it stops at that item's last whole line. Unset —
+     every item fits, not one line does, or the pass has not run — the scrollport takes all the
+     room, as before. */
   .wy-hud {
     flex: 1 1 auto;
     flex-direction: column;
     flex-wrap: nowrap;
     align-items: stretch;
     gap: 0.35rem;
-    max-height: none;
+    max-height: var(--wy-hud-cut, none);
     font-size: 0.875rem;
   }
 
-  /* The full ICU message stays the chip's accessible text — only its PRESENTATION changes
-     (identical rules to `.wy-sr-only`); the glance form takes the visible slot. */
-  .wy-chip-full {
-    position: absolute;
-    width: 1px;
-    height: 1px;
-    padding: 0;
-    margin: -1px;
-    overflow: hidden;
-    clip-path: inset(50%);
-    white-space: nowrap;
-    border: 0;
+  /* The column has no room for the score's word or the stars' "/ 3": icon and value only, as
+     the phone frame draws them (#181 H1). */
+  .wy-chip-label,
+  .wy-chip-suffix {
+    display: none;
   }
 
+  /* THE GLANCE WRAPS, ICON ABOVE VALUE (#181 QC round 2). The column's track is vw-capped and
+     does not grow with the text, so from 125–175% text (by width) an icon and its value no
+     longer fit side by side: the one-line glance ran its value past the column's edge, where
+     the scrollport clipped it — at 568×320 and 150% the countdown read "1" for 14s. Wrapped,
+     the icon keeps the line above its value, as main's glances do, so no value loses its icon.
+     Where even the value is wider than the column (the countdown at 568×320 and 175–200%, and
+     658×320 at 200%), its unit wraps under the digits at its `<wbr>` (`shell.ts`), never a
+     digit. The value's `white-space: normal` is what lets WebKit break there: it honours the
+     glance's `nowrap` at a `<wbr>`, while Chromium breaks at one regardless, so no e2e test can
+     see this line go and only `layout.test.ts` pins it. Taller chips change no rule of the cut:
+     `hud-cut.ts` measures the real boxes. */
   .wy-chip-glance {
-    display: block;
+    flex-wrap: wrap;
+    row-gap: 0;
   }
 
-  /* Dock: a static, separately bounded block at the bottom of the column. */
+  .wy-chip-value {
+    white-space: normal;
+  }
+
+  /* …except the countdown, whose seconds wrap ABOVE its clock. After Start at 150–200% text on a
+     320px-tall phone the Dock leaves the chips room for one line, and the column rests on the
+     first item's last whole line (`hud-cut.ts`): that line should be the seconds — a number
+     counting down explains itself, a clock alone tells the player nothing. `wrap-reverse`
+     reverses the order of the lines and nothing else: the DOM, the reading order and the
+     accessible text are unchanged, and on one line the clock still leads. Lives, bounty, stars
+     and score keep their icon above the value, so each stays labelled. */
+  .wy-chip[data-wy-chip='wave'] .wy-chip-glance {
+    flex-wrap: wrap-reverse;
+  }
+
+  /* The wave strip's Compact form (#181 L1): an in-flow block in the column — the title, then
+     one icon + count row per entry. The column is too narrow for names, so the single-entry
+     detail never renders here; each row's full sentence is still its accessible text. */
+  .wy-wave-preview-list {
+    display: flex;
+    flex-direction: column;
+    gap: 0.15rem;
+    margin-top: 0.25rem;
+  }
+
+  .wy-preview-detail {
+    display: none;
+  }
+
+  /* No dial in the column: Start keeps its button exactly as it was — its padding is
+     Compact's own, with no room made — and the countdown chip's glance shows the seconds. */
+  .wy-dial {
+    display: none;
+  }
+
+  /* Dock: a static, separately bounded block at the bottom of the column — pinned there by
+     `margin-top: auto`, so the room a chips cut gives up (above) opens over it, never under it:
+     the Dock does not move when the chips stop at a whole item. */
   .wy-dock {
     position: static;
     flex: 0 0 auto;
+    margin-top: auto;
     flex-direction: column;
     flex-wrap: nowrap;
     gap: 0.25rem;
@@ -2161,28 +2952,95 @@ a.wy-home:focus-visible {
   /* The swatch is COMPACT-gated for the same reason as the hotkey badge (space, not
      capability): the Compact Rail is ~144px wide, and a 36px tile would force every name
      to wrap harder inside the space the board contract protects. The glyph still exists
-     where it teaches — on the board itself. (The preview's in-flow form needs no rule
-     here — it is keyed on its `.wy-hud` HOME, not on this fork.) */
+     where it teaches — on the board itself. */
   .wy-card-swatch {
     display: none;
   }
 
-  /* The Standard row reservation does not apply here: the Compact status COLUMN is
-     width-fixed, so hud content growth scrolls internally and cannot move the board —
-     content-sizing is safe and the column's own budget (contract §2) governs.
-     BOTH halves are reset, not just the height. `flex: 1 1 0` is a ROW measure: this fork's
-     status is a flex COLUMN, where a zero BASIS makes the hud size to its content instead of
-     to the space left over — the opposite of what the column wants.
-     RESTORE `1 1 auto`, which is `.wy-hud`'s own Compact value above, NOT the `0 1 auto`
-     initial (CodeRabbit, PR #164). This selector outranks that base rule on specificity, and
-     on Compact the preview ALWAYS lives in the hud, so this fork always wins — writing the
-     initial here would drop `flex-grow` to 0 and leave the chips scrollport content-sized,
-     silently un-filling the column it is supposed to own. "Compact's in-flow home is
-     unchanged by #101" is only true if this line says so exactly; `compact.spec.ts` now pins
-     the grow so a third value cannot land here unnoticed. */
-  .wy-hud:has(> .wy-wave-preview) {
-    height: auto;
-    flex: 1 1 auto;
+  /* --- The results panel, Compact (#181 H2) ---
+     The frame's panel restacked for a short screen, so it fits whole at 658×320 and 740×360
+     with Run data closed: the stars and the score share a line, the four tiles share one where
+     the panel is wide enough (two by two where it is not, and at heavy zoom), and the type
+     steps down. Anything taller — the survey, or the open Run data group where there is no
+     room for it — scrolls in the panel's body, as on Standard. */
+  .wy-results {
+    padding: 0.5rem;
+  }
+
+  .wy-results-panel {
+    width: min(100%, 40rem);
+  }
+
+  .wy-results-body {
+    padding: 0.75rem 1.25rem;
+  }
+
+  .wy-results-title {
+    font-size: 1.25rem;
+  }
+
+  .wy-results-subtitle {
+    margin-top: 0.25rem;
+    font-size: 0.8125rem;
+  }
+
+  /* The stars and the score share a line where it fits, and stack where it does not. */
+  .wy-results-grade {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    justify-content: center;
+    gap: 0.25rem 1.25rem;
+    margin-top: 0.5rem;
+  }
+
+  .wy-results-stars .wy-icon {
+    width: min(1.875rem, 22cqi);
+    height: min(1.875rem, 22cqi);
+  }
+
+  .wy-results-score {
+    flex-direction: row;
+    align-items: baseline;
+    gap: 0.5rem;
+    margin-top: 0;
+  }
+
+  .wy-results-score-value {
+    font-size: 1.625rem;
+  }
+
+  .wy-results-stats {
+    gap: 0.5rem;
+    margin-top: 0.625rem;
+  }
+
+  @container wy-results (min-width: 34rem) {
+    .wy-results-stats {
+      grid-template-columns: repeat(4, minmax(0, 1fr));
+    }
+  }
+
+  .wy-results-stat {
+    min-height: 2.5rem;
+    padding: 0.125rem 0.625rem;
+  }
+
+  .wy-results-actions {
+    gap: 0.5rem;
+    margin-top: 0.625rem;
+  }
+
+  .wy-results-actions .wy-btn {
+    min-height: 44px;
+  }
+
+  /* The group's three actions lie in a row here: a column would cost the short screen two
+     more rows of height. */
+  .wy-results-run-data {
+    flex-direction: row;
+    flex-wrap: wrap;
+    margin-top: 0.5rem;
   }
 }
 

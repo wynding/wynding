@@ -1,6 +1,6 @@
-import { test, expect } from '@playwright/test';
+import { test, expect, chromium, type Page } from '@playwright/test';
 import { PNG } from 'pngjs';
-import { createProjection, resolvePalette } from '@wynding/render';
+import { createProjection, resolvePalette, roleColour, towerRoleFor } from '@wynding/render';
 import { GRID } from './layout-probe';
 
 // HiDPI backing-store gates (#28/P5). Runs ONLY under the chromium-dpr1/2/3 projects
@@ -9,7 +9,12 @@ import { GRID } from './layout-probe';
 // default `chromium` project explicitly ignores this file (`testIgnore`).
 //
 // Three gates, each catching a distinct failure mode a size check alone can't:
-//   (a) backing store  — the canvas' actual pixel buffer sizes to CSS-rect × clamped dpr.
+//   (a) backing store  — the canvas' actual pixel buffer is the device pixels the browser
+//       draws its CSS rect into: by the browser's OWN count (a `device-pixel-content-box`
+//       observer the test makes itself, never the renderer's arithmetic) in browsers really
+//       running at a device scale, below; under emulation, whose count is the screen's own
+//       pixels and not the emulated ones, to within a pixel of the rect × the clamped dpr.
+//       Its CSS size stays the rect.
 //   (b) rendered alignment — a real screenshot, decoded with pngjs (the existing DOM
 //       "rendered-contrast" spot checks in smoke.spec.ts read computed CSS on DOM
 //       elements and cannot sample the canvas), pins that a known floor cell and a known
@@ -44,8 +49,362 @@ function sampleCssPoint(
   return [png.data[idx] as number, png.data[idx + 1] as number, png.data[idx + 2] as number];
 }
 
+/** The board canvas's backing store, and the device pixels the browser draws its box into
+ *  by its own count: a `device-pixel-content-box` observer made here, independent of the
+ *  renderer's. (Through the getter `hideDevicePixels` keeps, where it has hidden it.) */
+async function storeAndBrowserCount(
+  page: Page,
+): Promise<{ store: [number, number]; browser: [number, number]; css: [number, number] }> {
+  return page.evaluate(
+    () =>
+      new Promise((resolve) => {
+        const canvas = document.querySelector<HTMLCanvasElement>('.wy-board canvas')!;
+        const kept = (
+          window as unknown as {
+            __wyDevicePixels?: (e: ResizeObserverEntry) => readonly ResizeObserverSize[];
+          }
+        ).__wyDevicePixels;
+        const observer = new ResizeObserver((entries) => {
+          const entry = entries[entries.length - 1]!;
+          const device = (kept ? kept(entry) : entry.devicePixelContentBoxSize)[0]!;
+          const rect = canvas.getBoundingClientRect();
+          observer.disconnect();
+          resolve({
+            store: [canvas.width, canvas.height],
+            browser: [device.inlineSize, device.blockSize],
+            css: [rect.width, rect.height],
+          });
+        });
+        observer.observe(canvas, { box: 'device-pixel-content-box' });
+      }),
+  );
+}
+
+/** Polls until the store is the browser's own count, or fails with the last reading. */
+async function expectStoreIsBrowserCount(page: Page, label: string, log = true): Promise<void> {
+  let last = '';
+  let held = false;
+  await expect
+    .poll(
+      async () => {
+        const r = await storeAndBrowserCount(page);
+        last = JSON.stringify(r);
+        return r.store[0] === r.browser[0] && r.store[1] === r.browser[1];
+      },
+      { message: `${label}: the backing store is the browser's count`, timeout: 5_000 },
+    )
+    .toBe(true)
+    .then(() => (held = true))
+    .finally(() => {
+      if (log || !held) console.log(`[hidpi] ${label}: ${last}`);
+    });
+}
+
+/** Init script: keep the browser's `devicePixelContentBoxSize` getter for the test's own
+ *  observer, and with `hide`, take it away from the page — as a browser without it (WebKit),
+ *  so the renderer works its store out from where the box sits. */
+function hideDevicePixels({ hide }: { hide: boolean }): void {
+  const proto = ResizeObserverEntry.prototype;
+  const getter = Object.getOwnPropertyDescriptor(proto, 'devicePixelContentBoxSize')?.get;
+  if (getter === undefined) return;
+  (
+    window as unknown as {
+      __wyDevicePixels: (e: ResizeObserverEntry) => readonly ResizeObserverSize[];
+    }
+  ).__wyDevicePixels = (e) => getter.call(e) as readonly ResizeObserverSize[];
+  if (hide)
+    delete (proto as unknown as { devicePixelContentBoxSize?: unknown }).devicePixelContentBoxSize;
+}
+
+/** Init script: make the board canvas's `devicePixelContentBoxSize` read the box's OTHER whole
+ *  pixel width — one off the browser's own count, still within the pixel the renderer's scale
+ *  guard allows — keeping the real getter for the test's own observer (`hideDevicePixels`,
+ *  which runs first, keeps it). A store that is the fake count is the app taking the
+ *  browser's report; one that is the real count means it set the report aside (QC round 5:
+ *  a CSS-size comparison did, at most fractional scales). */
+function fakeBoardCount(): void {
+  const getter = Object.getOwnPropertyDescriptor(
+    ResizeObserverEntry.prototype,
+    'devicePixelContentBoxSize',
+  )?.get;
+  if (getter === undefined) return;
+  Object.defineProperty(ResizeObserverEntry.prototype, 'devicePixelContentBoxSize', {
+    configurable: true,
+    get(this: ResizeObserverEntry) {
+      const real = getter.call(this) as readonly ResizeObserverSize[];
+      if (!(this.target as Element).closest?.('.wy-board')) return real;
+      const v = this.target.getBoundingClientRect().width * devicePixelRatio;
+      return [
+        {
+          inlineSize: real[0]!.inlineSize >= v ? Math.floor(v) : Math.ceil(v),
+          blockSize: real[0]!.blockSize,
+        },
+      ];
+    },
+  });
+}
+
+/** The board canvas's backing store, the browser's own count (through the real getter), and
+ *  the fake width `fakeBoardCount` makes the app see, from the box's width × dpr. */
+async function storeAndFakeCount(
+  page: Page,
+): Promise<{ store: [number, number]; real: [number, number]; fakeWidth: number; v: number }> {
+  return page.evaluate(
+    () =>
+      new Promise((resolve) => {
+        const canvas = document.querySelector<HTMLCanvasElement>('.wy-board canvas')!;
+        const kept = (
+          window as unknown as {
+            __wyDevicePixels: (e: ResizeObserverEntry) => readonly ResizeObserverSize[];
+          }
+        ).__wyDevicePixels;
+        const observer = new ResizeObserver((entries) => {
+          const device = kept(entries[entries.length - 1]!)[0]!;
+          const v = canvas.getBoundingClientRect().width * devicePixelRatio;
+          observer.disconnect();
+          resolve({
+            store: [canvas.width, canvas.height],
+            real: [device.inlineSize, device.blockSize],
+            fakeWidth: device.inlineSize >= v ? Math.floor(v) : Math.ceil(v),
+            v,
+          });
+        });
+        observer.observe(canvas, { box: 'device-pixel-content-box' });
+      }),
+  );
+}
+
+/** Runs `body` on the app in a browser really running at device scale `dsf`, its window
+ *  `width`×`height`: `--force-device-scale-factor` lays the page out in device pixels and
+ *  draws the canvas into the pixels its box snaps to — which Playwright's `deviceScaleFactor`
+ *  does not: it lays the page out in CSS px and scales its picture. With `fallback`, the app
+ *  sees no `device-pixel-content-box` (`hideDevicePixels`); with `fakeCount`, the count it sees
+ *  is one pixel off (`fakeBoardCount`). */
+async function atRealScale(
+  {
+    dsf,
+    width,
+    height,
+    fallback,
+    fakeCount = false,
+  }: { dsf: number; width: number; height: number; fallback: boolean; fakeCount?: boolean },
+  baseURL: string | undefined,
+  body: (page: Page) => Promise<void>,
+): Promise<void> {
+  const browser = await chromium.launch({
+    args: [`--force-device-scale-factor=${dsf}`, `--window-size=${width},${height}`],
+  });
+  try {
+    // `deviceScaleFactor: undefined` keeps Playwright Test from filling in the project's
+    // emulated scale, which a context without a viewport refuses.
+    const context = await browser.newContext({
+      viewport: null,
+      deviceScaleFactor: undefined,
+      baseURL,
+    });
+    await context.addInitScript(hideDevicePixels, { hide: fallback });
+    if (fakeCount) await context.addInitScript(fakeBoardCount);
+    const page = await context.newPage();
+    await page.goto('/');
+    await expect
+      .poll(() => page.locator('.wy-board canvas').evaluate((c: HTMLCanvasElement) => c.width))
+      .toBeGreaterThan(1);
+    const [innerW, innerH, dpr100] = await page.evaluate(() => [
+      innerWidth,
+      innerHeight,
+      Math.round(devicePixelRatio * 100),
+    ]);
+    expect(dpr100, 'the device scale').toBe(Math.round(dsf * 100));
+    // The window, to within a CSS px: at a fractional scale the browser sizes it in whole
+    // device pixels (asked for 525 wide at 1.25, it is 526).
+    expect(Math.abs(innerW! - width), `inner width ${innerW}`).toBeLessThanOrEqual(1);
+    expect(Math.abs(innerH! - height), `inner height ${innerH}`).toBeLessThanOrEqual(1);
+    expect(
+      await page.evaluate(() => 'devicePixelContentBoxSize' in ResizeObserverEntry.prototype),
+      'the app sees the device-pixel box exactly when it should',
+    ).toBe(!fallback);
+    await body(page);
+  } finally {
+    await browser.close();
+  }
+}
+
+test.describe('the backing store against the browser’s own count, at a real device scale', () => {
+  // Worked out from where the box sits (as in WebKit): at each scale, at two window sizes —
+  // 525×320 puts the board at x = 52.5 — and again after the board is resized by a fraction.
+  for (const dsf of [0.8, 0.9, 1, 1.1, 1.25, 1.5, 2]) {
+    test(`worked out from where the box sits, at ${dsf}: the browser's count, before and after a fractional resize`, async ({
+      baseURL,
+    }, testInfo) => {
+      // A real-scale launch is its own browser: once, not once per emulated project.
+      test.skip(testInfo.project.name !== 'chromium-dpr1', 'launches its own browser: run once');
+      test.setTimeout(90_000);
+      for (const [width, height] of [
+        [525, 320],
+        [1280, 720],
+      ] as const) {
+        await atRealScale({ dsf, width, height, fallback: true }, baseURL, async (page) => {
+          const at = `${width}×${height} @${dsf}, worked out`;
+          await expectStoreIsBrowserCount(page, at);
+          // Narrower and shorter by fractions of a pixel: the ResizeObserver's sync.
+          await page.evaluate(() => {
+            const board = document.querySelector<HTMLElement>('.wy-board')!;
+            board.style.right = '0.3px';
+            board.style.top = '0.45px';
+          });
+          await expectStoreIsBrowserCount(page, `${at}, resized`);
+        });
+      }
+    });
+  }
+
+  // The worked-out count's tie rule: layout puts an edge on a half device pixel at some
+  // positions, and rounds it up — and an edge there, read back in CSS px and multiplied out
+  // again, can come out a hair under the half, where plain rounding goes down. The sizes above
+  // put an edge on a half only at 1 (the 525×320 board's x = 52.5), which reads back exactly,
+  // so this walks the board across every 1/64 CSS px over two device pixels and holds the store
+  // to the browser's count at each, and needs a tie read back under its half, or it has tested
+  // nothing plain rounding gets wrong. (Not at 0.8: every tie this walk reaches there reads
+  // back over its half.)
+  for (const dsf of [0.9, 1.1]) {
+    test(`worked out at ${dsf}: the browser's count at every 1/64 px position, half-pixel ties included`, async ({
+      baseURL,
+    }, testInfo) => {
+      // A real-scale launch is its own browser: once, not once per emulated project.
+      test.skip(testInfo.project.name !== 'chromium-dpr1', 'launches its own browser: run once');
+      test.setTimeout(240_000);
+      await atRealScale({ dsf, width: 525, height: 320, fallback: true }, baseURL, async (page) => {
+        let ties = 0;
+        let under = 0;
+        const steps = Math.ceil(128 / dsf) + 2; // two device pixels of travel
+        for (let n = 1; n <= steps; n++) {
+          // Move the Stage n/64 CSS px; then resize the board by a whole CSS px and back,
+          // two frames each, so the size observer has synced at the FINAL position (1/64 of
+          // a CSS px of `right` need not resize the board at all at a fractional scale, so
+          // no sync happens, and a move alone is not followed here).
+          await page.evaluate(async (k) => {
+            const frame = (): Promise<void> => new Promise((r) => requestAnimationFrame(() => r()));
+            const board = document.querySelector<HTMLElement>('.wy-board')!;
+            document.querySelector<HTMLElement>('.wy-stage')!.style.left = `${k / 64}px`;
+            board.style.right = '1px';
+            await frame();
+            await frame();
+            board.style.right = '0px';
+            await frame();
+            await frame();
+          }, n);
+          await expectStoreIsBrowserCount(page, `${dsf} step ${n}`, false);
+          // Each edge as the renderer reads it (start, start + size), in device pixels.
+          const edges = await page.evaluate(() => {
+            const r = document.querySelector('.wy-board canvas')!.getBoundingClientRect();
+            return [r.left, r.left + r.width, r.top, r.top + r.height].map(
+              (v) => v * devicePixelRatio,
+            );
+          });
+          for (const x of edges) {
+            const onGrid = Math.round(x * 64) / 64; // where layout put it
+            if (Math.abs((((onGrid % 1) + 1) % 1) - 0.5) > 1e-9) continue;
+            ties++;
+            if (x < onGrid) under++;
+          }
+        }
+        console.log(
+          `[hidpi] ${dsf}: ${steps} steps, ${ties} edges on a half pixel, ${under} under it`,
+        );
+        expect(under, 'the sweep reached a tie read back under its half').toBeGreaterThan(0);
+      });
+    });
+  }
+
+  // The browser's own count (Chromium, Firefox), which it reports again when it changes —
+  // after a move that changes it, too, which no size observer sees.
+  for (const dsf of [0.8, 1, 1.25, 1.75]) {
+    test(`the browser's own count at ${dsf}, followed through a move that does not resize the board`, async ({
+      baseURL,
+    }, testInfo) => {
+      // A real-scale launch is its own browser: once, not once per emulated project.
+      test.skip(testInfo.project.name !== 'chromium-dpr1', 'launches its own browser: run once');
+      test.setTimeout(60_000);
+      await atRealScale(
+        { dsf, width: 525, height: 320, fallback: false },
+        baseURL,
+        async (page) => {
+          const at = `525×320 @${dsf}`;
+          await expectStoreIsBrowserCount(page, at);
+          const counts = new Set<string>();
+          // The Stage nudged across two device pixels, at most a 16th of one at a time (in the
+          // page's own 64ths of a CSS px): the board keeps its size and moves, and its two
+          // edges cross a pixel's middle at different nudges — where the count changes, which
+          // a few coarse nudges can step over (at 1.75 the board spans 575.11 device pixels,
+          // so the count changes only within an 0.11-pixel window per pixel).
+          const step = Math.max(1, Math.floor(4 / dsf));
+          for (let i = 1; i * step * dsf <= 128; i++) {
+            const nudge = (i * step) / 64;
+            await page.evaluate((n) => {
+              document.querySelector<HTMLElement>('.wy-stage')!.style.left = `${n}px`;
+            }, nudge);
+            await expectStoreIsBrowserCount(page, `${at}, moved ${nudge}px`, false);
+            counts.add(JSON.stringify((await storeAndBrowserCount(page)).browser));
+          }
+          console.log(`[hidpi] ${at}, through the moves: ${[...counts].join(' ')}`);
+          // ... at least one of which changed the count, or this tested nothing.
+          expect(counts.size, 'a move that changes the device-pixel count').toBeGreaterThan(1);
+        },
+      );
+    });
+  }
+
+  // The browser's count is taken as it reports it: its width made one pixel off the real one
+  // (still within the scale guard's pixel), the store is that, not the arithmetic's or the
+  // real count — at every fractional scale, where a comparison of the CSS size the report was
+  // taken at set it aside (QC round 5). A layout whose width × dpr is whole has no other
+  // whole pixel: there the fake is the real count, and it is skipped.
+  for (const dsf of [0.9, 1, 1.1, 1.25, 1.5, 1.75]) {
+    test(`the browser's report is taken, not set aside, at ${dsf}`, async ({
+      baseURL,
+    }, testInfo) => {
+      // A real-scale launch is its own browser: once, not once per emulated project.
+      test.skip(testInfo.project.name !== 'chromium-dpr1', 'launches its own browser: run once');
+      test.setTimeout(60_000);
+      let tested = 0;
+      for (const [width, height] of [
+        [525, 320],
+        [1280, 720],
+      ] as const) {
+        await atRealScale(
+          { dsf, width, height, fallback: false, fakeCount: true },
+          baseURL,
+          async (page) => {
+            let last = '';
+            let fractional = false;
+            await expect
+              .poll(
+                async () => {
+                  const r = await storeAndFakeCount(page);
+                  last = JSON.stringify(r);
+                  // Whole: the fake is the real count, which proves nothing.
+                  if (Math.abs(r.v - Math.round(r.v)) < 1e-6) return true;
+                  fractional = true;
+                  return r.store[0] === r.fakeWidth && r.store[1] === r.real[1];
+                },
+                { message: `${width}×${height} @${dsf}: the store is the report`, timeout: 5_000 },
+              )
+              .toBe(true)
+              .finally(() =>
+                console.log(`[hidpi] ${width}×${height} @${dsf}, fake count: ${last}`),
+              );
+            // Once per layout, not once per poll attempt.
+            if (fractional) tested++;
+          },
+        );
+      }
+      expect(tested, 'a layout with a fake count to take').toBeGreaterThan(0);
+    });
+  }
+});
+
 test.describe('HiDPI backing store + alignment (#28/P5)', () => {
-  test('backing store sizes to CSS-rect × clamped dpr; CSS size stays pinned to the rect', async ({
+  test('backing store sizes to the device pixels the CSS rect snaps to at the clamped dpr; CSS size stays pinned to the rect', async ({
     page,
   }, testInfo) => {
     await page.goto('/');
@@ -67,11 +426,29 @@ test.describe('HiDPI backing store + alignment (#28/P5)', () => {
 
     const canvas = await canvasLocator.evaluate((el: HTMLCanvasElement) => {
       const rect = el.getBoundingClientRect();
-      return { width: el.width, height: el.height, cssWidth: rect.width, cssHeight: rect.height };
+      return { cssWidth: rect.width, cssHeight: rect.height };
     });
 
-    expect(canvas.width).toBe(Math.round((box as { width: number }).width * effectiveDpr));
-    expect(canvas.height).toBe(Math.round((box as { height: number }).height * effectiveDpr));
+    // The backing store is the device pixels the browser draws the canvas's box into — which
+    // can be a pixel off round(width × dpr), what the store was once sized to; a store scaled
+    // into its box smears every one-pixel line (`plate-rim.spec.ts`). Under emulation the
+    // browser's own count is no oracle: Chromium counts the screen's own pixels, not the
+    // emulated ones (a 1072 × 804 CSS box read 1072 × 804 at an emulated 2 — the count the
+    // app once took for its store there, halving the board's resolution: QC round 4). So it
+    // is the oracle only where the emulated scale is the screen's own, 1; elsewhere the store
+    // is held within a pixel of the box × the clamped dpr — past the clamp (a 3× screen)
+    // drawn at 2, fewer pixels than the box by design. The real-scale launches above hold it
+    // to the browser's own count, exactly.
+    if (rawDpr === 1) {
+      await expectStoreIsBrowserCount(page, 'dpr 1');
+    } else {
+      const store = await canvasLocator.evaluate((el: HTMLCanvasElement) => [el.width, el.height]);
+      console.log(
+        `[hidpi] dpr ${rawDpr}: store ${store.join('×')} for the CSS box ${canvas.cssWidth}×${canvas.cssHeight}`,
+      );
+      expect(Math.abs(store[0]! - canvas.cssWidth * effectiveDpr), 'store width').toBeLessThan(1);
+      expect(Math.abs(store[1]! - canvas.cssHeight * effectiveDpr), 'store height').toBeLessThan(1);
+    }
     // CSS size stays pinned to the container rect regardless of dpr/clamp.
     expect(Math.round(canvas.cssWidth)).toBe(Math.round((box as { width: number }).width));
     expect(Math.round(canvas.cssHeight)).toBe(Math.round((box as { height: number }).height));
@@ -83,21 +460,23 @@ test.describe('HiDPI backing store + alignment (#28/P5)', () => {
     await page.goto('/');
     const board = page.locator('.wy-board');
     await expect(board).toBeVisible();
-    // The floating wave preview (playtest round) is DOM chrome over the stage's top-left —
-    // display-only and click-through, but opaque, and this tall 1280×900 viewport is
-    // width-limited (≈10px of letterbox margin), so the card sits exactly over the corner
-    // cells sampled below. Canvas backing-store alignment is this test's subject, not DOM
-    // chrome occlusion (`stage-stability.spec.ts` owns the preview), so it is hidden for
-    // the sampling.
-    await page.evaluate(() => {
-      (document.querySelector('.wy-wave-preview') as HTMLElement).hidden = true;
-    });
     const box = (await board.boundingBox()) as {
       x: number;
       y: number;
       width: number;
       height: number;
     };
+    // The wave preview used to float over the Stage's top-left (playtest round, #101) — exactly
+    // over the corner cells sampled below on this width-limited 1280×900 viewport — so this test
+    // hid it. Since #181 it is a strip in the status row, and nothing is hidden any more: the
+    // sampled cells must be clear of it as rendered. Asserted rather than assumed, so a strip
+    // that drifted back over the board fails HERE, by name, instead of corrupting the samples.
+    const strip = await page.locator('.wy-wave-preview').boundingBox();
+    expect(strip, 'the wave strip is laid out pre-start').not.toBeNull();
+    expect(
+      strip!.y + strip!.height,
+      'the wave strip must sit wholly above the board it previews',
+    ).toBeLessThanOrEqual(box.y + 0.5);
 
     // M1's "Open Field" board is 28×24 (entrance/exit on row 11) — the dims come from
     // `layout-probe.ts`'s shared `GRID`, the single mirror of content's boards.ts (e2e stays
@@ -224,9 +603,9 @@ test.describe('HiDPI backing store + alignment (#28/P5)', () => {
       }, 'first frame painted: neighbour cell reads as pal.floor')
       .toBe(true);
 
-    // Press Start first (PLAN.md P4): a build on a held run is Pending (rendered as an
-    // outline, not the filled `pal.tower` this test samples) — the run must actually be
-    // stepping for the build to commit and paint solid.
+    // Press Start first (PLAN.md P4): a build on a held run is Pending (drawn translucent,
+    // not the solid art this test samples) — the run must actually be stepping for the
+    // build to commit and paint solid.
     await page.getByRole('button', { name: 'Start' }).click();
 
     // Desktop input is armed-click-to-place (PLAN.md P2): arm the Card first, then a
@@ -234,22 +613,31 @@ test.describe('HiDPI backing store + alignment (#28/P5)', () => {
     await page.getByRole('button', { name: /Basic Tower/ }).click();
     await page.mouse.click(box.x + targetPx.x + cellPx / 2, box.y + targetPx.y + cellPx / 2);
 
-    // The build paints on a later animation frame — poll the tower centre until it
-    // reads as pal.tower, keeping the last decoded screenshot for the assertions below.
+    // Two points the basic tower's art guarantees (`tower-art.ts`, a 64-unit box over the
+    // 2×2 footprint, so one design unit is cellPx / 32 CSS px):
+    //  - its HEAD: a role-coloured ring around an ink core, 3.6 to 11.5 units from the
+    //    footprint centre — sampled 7.5 units straight below the centre (the barrel points
+    //    up), in basic's role colour;
+    //  - its PLATE: the slate inside the rim, at (12, 50) — 8 units in from the rim's inner
+    //    edge, 13 from the head.
+    const unit = cellPx / 32;
+    const ringPoint = { x: targetPx.x + 32 * unit, y: targetPx.y + 39.5 * unit };
+    const platePoint = { x: targetPx.x + 12 * unit, y: targetPx.y + 50 * unit };
+    const roleRgb = toRgb(roleColour(pal, towerRoleFor('basic')));
+
+    // The build paints on a later animation frame — poll the head's ring until it reads
+    // as basic's role colour, keeping the last decoded screenshot for the assertions below.
     let png!: PNG;
     await expect
       .poll(async () => {
         const buf = await page.screenshot({ clip, scale: 'css' });
         png = PNG.sync.read(buf);
-        return closeTo(
-          sampleCssPoint(png, clipX, clipY, targetPx.x + cellPx, targetPx.y + cellPx),
-          toRgb(pal.tower),
-        );
-      }, 'build painted: tower centre reads as pal.tower')
+        return closeTo(sampleCssPoint(png, clipX, clipY, ringPoint.x, ringPoint.y), roleRgb);
+      }, 'build painted: the head’s ring reads as basic’s role colour')
       .toBe(true);
 
-    // Centre of the built tower's 2×2 footprint (the shared corner of the four cells).
-    const towerCentre = sampleCssPoint(png, clipX, clipY, targetPx.x + cellPx, targetPx.y + cellPx);
+    const ringSample = sampleCssPoint(png, clipX, clipY, ringPoint.x, ringPoint.y);
+    const plateSample = sampleCssPoint(png, clipX, clipY, platePoint.x, platePoint.y);
     // Same offset applied to the untouched neighbour cell — must still read as floor.
     const neighbourSample = sampleCssPoint(
       png,
@@ -259,9 +647,17 @@ test.describe('HiDPI backing store + alignment (#28/P5)', () => {
       neighbourPx.y + cellPx / 2,
     );
 
-    expect(closeTo(towerCentre, toRgb(pal.tower)), `tower sample ${towerCentre.join(',')}`).toBe(
+    expect(closeTo(ringSample, roleRgb), `head sample ${ringSample.join(',')}`).toBe(true);
+    // The plate is deliberately quiet against the floor (its rim carries the edge), so the
+    // plate sample must match the plate AND not pass for the floor — at the ±24 tolerance
+    // the two are told apart by the blue channel alone (69 against 42).
+    expect(closeTo(plateSample, toRgb(pal.plate)), `plate sample ${plateSample.join(',')}`).toBe(
       true,
     );
+    expect(
+      closeTo(plateSample, toRgb(pal.floor)),
+      `plate sample ${plateSample.join(',')} must not read as floor`,
+    ).toBe(false);
     expect(
       closeTo(neighbourSample, toRgb(pal.floor)),
       `neighbour sample ${neighbourSample.join(',')} should still be floor`,

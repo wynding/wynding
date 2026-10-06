@@ -4,16 +4,19 @@
   "private": true,
   "type": "module",
   "license": "AGPL-3.0-or-later",
-  "description": "AWS Lambda score-validation handler: re-simulates a submitted replay.",
+  "description": "AWS Lambda handlers: score validation (re-simulates a submitted replay) and the end-of-run survey endpoint.",
   "scripts": {
-    "build": "rm -rf dist && esbuild src/handler.ts --bundle --platform=node --format=esm --target=node22 --outfile=dist/handler.mjs --sourcemap && mkdir -p dist/rulesets && cp ../../packages/content/src/rulesets/*.json dist/rulesets/",
+    "build": "rm -rf dist && esbuild src/handler.ts --bundle --platform=node --format=esm --target=node22 --outfile=dist/handler.mjs --sourcemap && esbuild src/survey.ts --bundle --platform=node --format=esm --target=node22 --outfile=dist/survey.mjs --sourcemap \"--banner:js=import { createRequire } from 'node:module'; const require = createRequire(import.meta.url);\" && mkdir -p dist/rulesets && cp ../../packages/content/src/rulesets/*.json dist/rulesets/",
     "typecheck": "tsc --noEmit -p tsconfig.json && tsc --noEmit -p tsconfig.scripts.json",
     "lint": "eslint src scripts",
     "test": "vitest run --coverage",
     "clean": "rm -rf dist *.tsbuildinfo"
   },
   "dependencies": {
+    "@aws-sdk/client-dynamodb": "3.1142.0",
+    "@aws-sdk/client-ssm": "3.1142.0",
     "@wynding/content": "workspace:*",
+    "@wynding/feedback": "workspace:*",
     "@wynding/replay": "workspace:*",
     "@wynding/sim": "workspace:*"
   },

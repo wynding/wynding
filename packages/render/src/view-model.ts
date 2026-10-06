@@ -47,6 +47,13 @@ function stunnedNow(stunUntilTick: number | undefined, tick: number): boolean {
   );
 }
 
+/** A tower's `targetId` column entry as the VM carries it: the locked creep's id, or 0 for
+ *  none — and 0 for a forged or ragged (non-safe-integer) entry, as the sim's fire step
+ *  reads the same column. */
+function lockedTarget(targetId: number | undefined): number {
+  return Number.isSafeInteger(targetId) ? (targetId as number) : 0;
+}
+
 /** Project every live creep/tower of `state` into a render snapshot. */
 export function deriveViewModel(state: SimState, ruleset: CompiledRuleset): RenderVM {
   const grid = ruleset.board.grid;
@@ -109,8 +116,8 @@ export function deriveViewModel(state: SimState, ruleset: CompiledRuleset): Rend
   //
   // `support`/`buffed` are CATALOG + GEOMETRY joins, not sim state — derived here by
   // calling the sim's OWN `buildAuraIndex`/`auraMulFor` (M2-S8), never a second copy of
-  // the adjacency rule living in the render package. One implementation means the ✦ can
-  // never mark a tower `runCombat` is not actually buffing.
+  // the adjacency rule living in the render package. One implementation means the boost glow
+  // (the ✦ before the visual pass) can never mark a tower `runCombat` is not actually buffing.
   const auraIndex = buildAuraIndex(grid, state.towers, ruleset.towerById);
   const towers: TowerVM[] = [];
   forEachValidTower(grid, state.towers, ruleset.towerById, (i, id, col, row) => {
@@ -126,17 +133,21 @@ export function deriveViewModel(state: SimState, ruleset: CompiledRuleset): Rend
       // would draw a chaining buff the sim never applies.
       //
       // WHAT THIS FLAG CLAIMS, stated because the Panel's "(boosted)" label deliberately
-      // claims something else: the ✦ means "an aura REACHES this tower", keyed on the
+      // claims something else: the boost glow means "an aura REACHES this tower", keyed on the
       // multiplier. `panel.damageBuffed` means "the damage NUMBER changed", keyed on the
       // number, because `buffAmount` floors and the schema admits a multiplier (257,
       // ×1.004) that floors away on small amounts. On such a modded bundle the board
-      // shows the ✦ while the Panel declines to say "boosted" — and both are telling the
+      // shows the glow while the Panel declines to say "boosted" — and both are telling the
       // truth about different things. Not reachable with the shipped catalog (the beacon
       // is 384 and the smallest direct amount is `venom`'s 2). Deliberately NOT unified
       // by recomputing per-effect amounts here: that would put floor arithmetic on the
       // per-tower render path to change a cue nothing in the shipped game can observe.
       buffed:
         def?.attack !== undefined && auraMulFor(auraIndex, grid, col, row) > SUPPORT_MUL_IDENTITY,
+      // The sim's own target lock, read as-is (visual pass T3): the creep this tower's head
+      // turns toward. Guarded like every other column this module reads — a forged or ragged
+      // entry is "no lock", the same 0 the sim's own read of the column falls back to.
+      targetId: lockedTarget(state.towers.targetId[i]),
     });
   });
 

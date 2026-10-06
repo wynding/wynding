@@ -81,16 +81,18 @@ export default defineConfig({
         deviceScaleFactor: 3,
       },
     },
-    // The WebKit regression arm for #98 (a held press straddling a mid-run HUD label
-    // refresh) — scoped to this one spec, not a whole-suite duplication: the rest of the
-    // suite is chromium-calibrated (SwiftShader timings, device profiles), and this defect
-    // class is pinned by `slow-press.spec.ts` plus the browser-agnostic unit invariant
-    // (`overlay.test.ts`). The default `chromium` project deliberately ALSO runs this spec
-    // (its `testIgnore` above doesn't exclude it) as the control arm — Chromium synthesizes
-    // `click` across mutations, so it passes even before the P1 fix lands.
+    // The WebKit regression arms — scoped to the specs that need them, not a whole-suite
+    // duplication: the rest of the suite is chromium-calibrated (SwiftShader timings, device
+    // profiles). `slow-press.spec.ts` is #98's (a held press straddling a mid-run HUD label
+    // refresh), pinned beside the browser-agnostic unit invariant (`overlay.test.ts`); the
+    // default `chromium` project deliberately ALSO runs it (its `testIgnore` above doesn't
+    // exclude it) as the control arm — Chromium synthesizes `click` across mutations, so it
+    // passes even before the P1 fix lands. `results-pointer.spec.ts` is #181's: the results
+    // panel under a real pointer, where WebKit differs from Chromium in ways that move content
+    // (it scrolls a `preventScroll` focus made over dirty layout); it runs in both projects.
     {
       name: 'webkit',
-      testMatch: /slow-press\.spec\.ts/,
+      testMatch: /slow-press\.spec\.ts|results-pointer\.spec\.ts/,
       use: { ...devices['Desktop Safari'] },
     },
   ],
@@ -119,7 +121,8 @@ export default defineConfig({
   // the host arm would silently assert against the perf bundle instead of `dist-host`.
   //
   // 4176 is the survey harness's (#158): ADR 0014's survey is offered only where a transport
-  // is injected and production injects none, so `survey.spec.ts` runs against its own build
+  // is injected, and the shipped entry injects one only on https://wynding.net, so
+  // `survey.spec.ts` runs against its own build
   // (`vite.e2e.config.ts` → `dist-e2e`) that boots the real app with a fake transport.
   webServer: [
     {

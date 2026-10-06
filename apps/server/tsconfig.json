@@ -23,6 +23,7 @@
   "references": [
     { "path": "../../packages/sim" },
     { "path": "../../packages/replay" },
+    { "path": "../../packages/feedback" },
     { "path": "../../packages/content" }
   ]
 }

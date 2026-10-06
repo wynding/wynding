@@ -1,11 +1,13 @@
 import { defineConfig } from 'vite';
 import { gameVersionDefine, hostedDefine } from './build-config';
 
-// vite.e2e.config.ts — the e2e survey harness's OWN build (#158), on the perf harness's
-// pattern (`vite.perf.config.ts`): a separate config, a separate entry
-// (`e2e-harness/survey.html`) and a separate output (`dist-e2e`). Nothing in
-// `vite.config.ts`'s module graph reaches the harness, so its fake survey transport is
-// structurally incapable of entering the shipped artifact.
+// vite.e2e.config.ts — the e2e harnesses' OWN build (#158), on the perf harness's pattern
+// (`vite.perf.config.ts`): a separate config, separate entries (`e2e-harness/survey.html`; since
+// #181 H2 `e2e-harness/results.html`, which plays a scripted run to its results; and
+// `e2e-harness/turned-heads.html`, #181's renderer-only page for turned heads) and a separate
+// output (`dist-e2e`). Nothing in `vite.config.ts`'s module graph reaches a harness, so their
+// fake survey transports and the scene hook are structurally incapable of entering the
+// shipped artifact.
 //
 // That structure is also CHECKED, not only argued: `scripts/check-build-layering.mjs` builds
 // this config in CI's e2e job and uses `dist-e2e` as a positive control — the harness's
@@ -29,7 +31,11 @@ export default defineConfig({
     target: 'es2022',
     outDir: 'dist-e2e',
     rollupOptions: {
-      input: ['e2e-harness/survey.html'],
+      input: [
+        'e2e-harness/survey.html',
+        'e2e-harness/results.html',
+        'e2e-harness/turned-heads.html',
+      ],
     },
   },
 });

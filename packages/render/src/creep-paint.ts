@@ -4,6 +4,8 @@
 // WebGL). No sim import: keyed purely on the catalog id string the render VM already
 // carries (`CreepVM.creepId`).
 
+import { ART_INK } from './art-ink';
+
 /** The silhouette shapes the scene can draw. `'triangle'` is the pre-M2-S3 creep shape;
  *  `'diamond'` is `fast`'s visibly-distinct-at-cell-scale shape; `'square'` is `swarm`'s
  *  (M2-S4a) — a small, blocky silhouette that reads as fragile/numerous rather than fast,
@@ -40,6 +42,18 @@
  *  the union below, which has five members. Two docstrings in this file said "fourth"
  *  and one said "sixth"; the S7 accessibility audit copied the wrong one — #126.) */
 export type CreepShape = 'triangle' | 'diamond' | 'square' | 'hexagon' | 'pentagon';
+
+/** Every `CreepShape`, as a value — the board atlas bakes one silhouette frame per shape
+ *  (`art-frames.ts`). Keyed on the union, so a sixth shape that is not listed here fails to
+ *  compile rather than baking no frame. */
+const ALL_SHAPES: Readonly<Record<CreepShape, true>> = {
+  triangle: true,
+  diamond: true,
+  square: true,
+  hexagon: true,
+  pentagon: true,
+};
+export const CREEP_SHAPE_VALUES: readonly CreepShape[] = Object.keys(ALL_SHAPES) as CreepShape[];
 
 const CREEP_SHAPES: Readonly<Partial<Record<string, CreepShape>>> = {
   normal: 'triangle',
@@ -408,6 +422,12 @@ export interface AirborneCuePaintOp {
   readonly rightY: number;
   readonly colour: number;
   readonly alpha: number;
+  /** The light strokes' width, CSS px. */
+  readonly strokePx: number;
+  /** The ink outline: drawn UNDER the light strokes, `outlinePx` wider on each side and
+   *  `outlinePx` past each end, in `outlineColour`. */
+  readonly outlinePx: number;
+  readonly outlineColour: number;
 }
 
 // THE CUE-RADIUS ORDERING (read before changing any number here). Every other cue in
@@ -499,12 +519,18 @@ export interface AirborneCuePaintOp {
 // (1) The clearances are RATIOS while `r` floors at 3px and the stroke/pip widths do not,
 //     so the tightest pair is whichever one the pixel floors bite hardest — and #126 MOVED
 //     which pair that is. It used to be airborne-vs-ward, ~1.2px at the clamp; with the tips
-//     now at r×3.23 that gap is ≈3.1px and no longer the constraint. The tight pair is now
-//     airborne-vs-drift at +0.348px (r = 3) / +0.823px (r = 3.5) — the numbers the test
-//     above prints, and the reason it prints them rather than merely asserting a sign. No
-//     size-independent radius fixes this class of tightness; only the layout pass can.
+//     now at r×3.23, and moved out a further `AIRBORNE_OUTLINE_SHIFT_PX` for the outline,
+//     that gap is 1.26px (r = 3) / 1.78px (r = 3.5) between the DRAWN edges, outline
+//     included, and no longer the constraint. The tight pair is now
+//     airborne-vs-drift: +0.348px (r = 3) / +0.823px (r = 3.5) for the light stroke alone,
+//     and — since the ink outline widened the drawn cue by 1px each side and the chevron
+//     moved out `AIRBORNE_OUTLINE_SHIFT_PX` to make room for it — +0.534px / +1.008px for
+//     the outline's edge: the numbers the test above prints, and the reason it prints them
+//     rather than merely asserting a sign. No size-independent radius fixes this class of
+//     tightness; only the layout pass can.
 // (2) THIS ANALYSIS COVERS SAME-CREEP COLLISIONS ONLY. With `r = cellPx × 0.35`
-//     (`board-draw.ts`), an apex at r×3.4 sits ≈1.19 × cellPx above the creep centre —
+//     (`board-draw.ts`), an apex at r×3.4 (plus the outline's shift) sits ≈1.2 × cellPx
+//     above the creep centre (1.32 at the 10px floor, where the shift weighs most) —
 //     i.e. the chevron renders in the cell to the NORTH, where ANOTHER creep's
 //     silhouette, HP pip or telegraph rings may already be. On the shipped board every
 //     creep walks the row-11 lane, so a flyer's cue lands across row 10. That is a real
@@ -512,13 +538,23 @@ export interface AirborneCuePaintOp {
 //     radius both clears every same-creep cue AND stays inside the cell. The #126 move
 //     from r×2.9 to r×3.4 deepens this residual without changing its CHARACTER — 1.19
 //     cellPx still lands in the row-10 cell (leaving it would take 1.5), so it is the same
-//     one cell, further into it. SHAPE still carries the load there,
+//     one cell, further into it. Except at the 10px floor: there the ink outline's drawn
+//     top (its 1px run past the apex, and its half-width) reaches 1.536 cells, 0.36px
+//     into the cell beyond. SHAPE still carries the load there,
 //     not colour: the cell it lands in is usually a tower footprint, so no footprint mark
 //     may be this glyph — `antiair` (the tower that co-occurs with flyers by definition)
 //     therefore draws the `'arrow'` mark, a shafted arrow, rather than the bare "^" it
-//     first shipped as (see `drawArrow` in `board-draw.ts`). The airborne colour is
-//     additionally contrast-gated against `tower` as well as the floor
-//     (`palette.test.ts`) so the two remain separable once overlaid.
+//     first shipped as (since the visual pass, #181, the arrow is antiair's head,
+//     `HEAD_ART` in `tower-art.ts`). WHAT IS GATED (`palette.test.ts`), exactly: the light stroke
+//     (`pal.airborne`) ≥ 3:1 against the floor, the plate and the plate's rim (`tower`) —
+//     the dark surfaces it lands on — and its INK OUTLINE (`ART_INK`, drawn under it 1px
+//     wider on each side and 1px past each end) ≥ 3:1 against every role colour and the
+//     rim, in every mode. The outline exists because the visual pass made light
+//     role-coloured heads a surface the cue lands on as the ordinary case (a flyer one row
+//     under a tower), and over them the light stroke alone measures as little as 1.05:1
+//     (the default support white) — it is not gated against the heads and cannot be. So
+//     the cue reads by its light core on dark ground and by its ink edge on a light head.
+//     The flyer cue's redraw (C4) replaces this chevron; the outline holds until then.
 //     The same offset puts the chevron OFF-BOARD for a flyer on row 0, on a board whose
 //     opening sits on the top border — legal in principle, unreachable on the shipped
 //     board (every creep walks the row-11 lane), and called out here because an earlier
@@ -532,6 +568,17 @@ const AIRBORNE_WING_Y_MUL = 3.1; // tips sit 0.3r lower than the apex, so the ch
 // with the apex this far out the nearest point of either stroke to the creep centre is
 // the tip itself (at r×2.9 it was an interior point of the stroke, at r×2.751).
 const AIRBORNE_WING_SPAN_MUL = 0.9;
+/** The chevron's light strokes, CSS px wide. */
+export const AIRBORNE_STROKE_PX = 2;
+/** The ink outline drawn under them: this many CSS px wider on each side, and past each end,
+ *  so every edge of the cue — tips and apex included — is ringed in ink (QC round 1, #181). */
+export const AIRBORNE_OUTLINE_PX = 1;
+/** How much further out the chevron sits than its radius multipliers say, CSS px, to make
+ *  room for the outline: the outline brings the drawn cue 1px closer to everything around
+ *  it, and the closest of those, the DoT drift, is met DIAGONALLY from the tips, so moving
+ *  the chevron out by the outline's own width would not restore the gap. 1.25px does — and
+ *  slightly widens it (`creep-paint.test.ts` measures it). */
+export const AIRBORNE_OUTLINE_SHIFT_PX = 1.25;
 
 /**
  * The airborne cue's paint plan (M2-S7): a wing chevron — two strokes fanning DOWN and
@@ -583,10 +630,10 @@ export function airborneCuePaintOps(
   // from ground, and ADR 0003 requires the shape cue to be PRESENT, not merely
   // specified. Mirroring preserves every radius — and so every clearance derived in the
   // CUE-RADIUS ORDERING block — because only the sign changes.
-  const flip = creep.y - r * AIRBORNE_APEX_R_MUL < minY;
+  const flip = creep.y - (r * AIRBORNE_APEX_R_MUL + AIRBORNE_OUTLINE_SHIFT_PX) < minY;
   const sign = flip ? 1 : -1;
-  const apexY = creep.y + sign * r * AIRBORNE_APEX_R_MUL;
-  const wingY = creep.y + sign * r * AIRBORNE_WING_Y_MUL;
+  const apexY = creep.y + sign * (r * AIRBORNE_APEX_R_MUL + AIRBORNE_OUTLINE_SHIFT_PX);
+  const wingY = creep.y + sign * (r * AIRBORNE_WING_Y_MUL + AIRBORNE_OUTLINE_SHIFT_PX);
   return [
     {
       kind: 'wingspan',
@@ -598,6 +645,9 @@ export function airborneCuePaintOps(
       rightY: wingY,
       colour: airborneColour,
       alpha: 1,
+      strokePx: AIRBORNE_STROKE_PX,
+      outlinePx: AIRBORNE_OUTLINE_PX,
+      outlineColour: ART_INK,
     },
   ];
 }

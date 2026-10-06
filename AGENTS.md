@@ -34,6 +34,7 @@ packages/
   render   Phaser 3 presentation layer (reads sim state, never mutates it)
   content  board / wave data
   replay   replay format + re-simulation validator
+  feedback end-of-run survey wire contract (payload + validation), shared with the endpoint
   types    shared types
   perf     ADR 0005 perf gate + stress scenes — most-downstream, never shipped
 apps/
@@ -51,7 +52,7 @@ docs/      prd/  adr/  CONTEXT.md
   floats (use fixed-point), no Phaser, no DOM. Same inputs → byte-identical state.
 - **Layering.** Render/input read sim state; they never mutate it. The dependency
   graph flows one way:
-  `{types, engine} <- sim <- {render, replay, content} <- perf <- apps`
+  `{types, engine} <- sim <- {render, replay, content, feedback} <- perf <- apps`
   — read as layering shorthand: each layer MAY depend on anything to its left, not
   that every drawn edge exists (`perf`, for instance, does not import `render`).
   `types` and `engine` are both roots — `engine` depends only on `@noble/hashes`;

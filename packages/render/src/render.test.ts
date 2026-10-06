@@ -212,7 +212,8 @@ describe('view-model + hud derivation', () => {
   });
 
   // M2-S8. The view model must classify support/buffed by calling the SIM's own aura
-  // rule, so the ✦ can never mark a tower `runCombat` is not actually buffing.
+  // rule, so the boost glow (once the ✦) can never mark a tower `runCombat` is not
+  // actually buffing.
   it('marks a support tower and the attackers its aura reaches (M2-S8)', () => {
     let s = createInitialState(1, ruleset);
     // `beacon` at (4,12) occupies cols 4-5, rows 12-13; its ring includes (6,12), so the
@@ -512,6 +513,42 @@ describe('view-model + hud derivation', () => {
     expect(poisonedById.get(ids[2]!)).toBe(true);
     expect(poisonedById.get(ids[3]!)).toBe(false);
     expect(poisonedById.get(ids[4]!)).toBe(false);
+  });
+
+  // Visual pass T3: an aiming head turns toward the creep the SIM's own target lock names —
+  // read off its `towers.targetId` column, never re-derived here.
+  it('carries each tower’s target lock from the sim’s own column: 0 for none, else a creep it draws', () => {
+    let s = createInitialState(1, ruleset);
+    // A basic tower beside the row-11 lane every creep walks, then wave 1.
+    s = step(s, ruleset, [{ kind: 'placeTower', anchor: { col: 6, row: 12 }, towerId: 'basic' }]);
+    expect(deriveViewModel(s, ruleset).towers[0]!.targetId).toBe(0); // nothing in range yet
+    s = step(s, ruleset, [{ kind: 'callWaveEarly' }]);
+    let n = 0;
+    while (s.towers.targetId[0] === 0 && n < 2000) {
+      s = step(s, ruleset, []);
+      n++;
+    }
+    const vm = deriveViewModel(s, ruleset);
+    const locked = vm.towers[0]!.targetId;
+    expect(locked).not.toBe(0);
+    expect(locked).toBe(s.towers.targetId[0]);
+    expect(vm.creeps.some((c) => c.id === locked)).toBe(true);
+    // ... and it follows the column tick to tick: whatever the sim names next, the VM names.
+    for (let i = 0; i < 40; i++) {
+      s = step(s, ruleset, []);
+      expect(deriveViewModel(s, ruleset).towers[0]?.targetId).toBe(s.towers.targetId[0]);
+    }
+  });
+
+  it('reads a forged or ragged target-lock entry as no lock, as the sim’s fire step does', () => {
+    let s = createInitialState(1, ruleset);
+    s = step(s, ruleset, [{ kind: 'placeTower', anchor: { col: 3, row: 3 }, towerId: 'basic' }]);
+    for (const forged of [Number.NaN, 1.5, Number.MAX_SAFE_INTEGER + 2, undefined]) {
+      s.towers.targetId[0] = forged as unknown as number;
+      expect(deriveViewModel(s, ruleset).towers[0]!.targetId, String(forged)).toBe(0);
+    }
+    s.towers.targetId[0] = 42; // a lock on a creep that is not on the board stays as read
+    expect(deriveViewModel(s, ruleset).towers[0]!.targetId).toBe(42);
   });
 
   it('does not draw a sim-invalid tower row (Codex R3-2: forged towerId is never drawn)', () => {
@@ -1155,9 +1192,29 @@ describe('palette — colourblind modes (GAG §2)', () => {
     }
   });
 
-  it('shifts the tower/creep hues off the red–green axis for protan/deutan', () => {
+  it('re-tunes the tower role colours for protan/deutan, off the red–green axis', () => {
     expect(resolvePalette('protan')).toEqual(resolvePalette('deutan'));
-    expect(resolvePalette('protan').tower).not.toBe(resolvePalette('default').tower);
+    // Before the visual pass this pinned `protan.tower !== default.tower`: the one tower
+    // colour, moved off the red–green axis. Towers are coloured by ROLE now, and `tower` is
+    // the plate's rim — a neutral slate, one value in every mode. What each mode re-tunes is
+    // the six role colours, and `palette.test.ts` holds the stronger property directly:
+    // under SIMULATED protanopia and deuteranopia the protan/deutan six stay ≥ 25 ΔE76
+    // apart, where the default six fall to 20.40 and 11.23.
+    const protan = resolvePalette('protan');
+    const def = resolvePalette('default');
+    for (const key of [
+      'roleDamage',
+      'roleControl',
+      'rolePoison',
+      'roleAir',
+      'roleSupport',
+      'roleBurst',
+    ] as const) {
+      expect(protan[key], key).not.toBe(def[key]);
+    }
+    for (const m of ['protan', 'deutan', 'tritan'] as const) {
+      expect(resolvePalette(m).tower, m).toBe(def.tower);
+    }
   });
 
   it('falls back to the base palette for an unknown mode', () => {
@@ -1172,5 +1229,17 @@ describe('render barrel', () => {
     expect(barrel.deriveHud).toBeTypeOf('function');
     expect(barrel.interpolateCreeps).toBeTypeOf('function');
     expect(barrel.resolvePalette).toBeTypeOf('function');
+    // The tower art kit the Card swatches draw through (visual pass T1/T2, #181).
+    expect(barrel.towerLookFor).toBeTypeOf('function');
+    expect(barrel.artGraphics).toBeTypeOf('function');
+    expect(barrel.paintTowerArt).toBeTypeOf('function');
+    // What the e2e pixel specs sample the art through (`hidpi`, `touch`, `arming`).
+    expect(barrel.roleColour).toBeTypeOf('function');
+    expect(barrel.towerRoleFor).toBeTypeOf('function');
+    expect(barrel.towerArtFit).toBeTypeOf('function');
+    // What the web app's fire-rate test holds every shipped tower to (visual pass T3).
+    expect(barrel.flashesPerSecond).toBeTypeOf('function');
+    expect(barrel.FIRE_FEEDBACK_TICKS).toBeTypeOf('number');
+    expect(barrel.MAX_FLASHES_PER_SECOND).toBe(3);
   });
 });

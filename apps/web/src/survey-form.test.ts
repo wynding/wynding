@@ -1,12 +1,14 @@
 import { describe, it, expect, vi, afterEach } from 'vitest';
-import { createSurveyForm, type SurveyFormHost } from './survey-form';
+import { createSurveyForm, PRIVACY_HREF, type SurveyFormHost } from './survey-form';
 import {
   buildSurveyPayload,
-  createSurvey,
   SURVEY_TEXT_MAX,
-  type SurveyAsk,
   type SurveyPayload,
   type SurveyRunIdentity,
+} from '@wynding/feedback';
+import {
+  createSurvey,
+  type SurveyAsk,
   type SurveySendResult,
   type SurveyTransport,
 } from './survey';
@@ -49,9 +51,12 @@ function setup(options: { offered?: boolean } = {}) {
   const doc = document;
   const dialog = doc.createElement('div');
   const playAgain = doc.createElement('button');
+  // The results dialog's two survey slots (#181 H2): Give feedback in the action row beside
+  // Play again, the form below it.
+  const opener = doc.createElement('div');
   const slot = doc.createElement('div');
   const elsewhere = doc.createElement('button');
-  dialog.append(playAgain, elsewhere, slot);
+  dialog.append(playAgain, opener, elsewhere, slot);
   doc.body.append(dialog);
   mounted.push(dialog);
 
@@ -80,6 +85,8 @@ function setup(options: { offered?: boolean } = {}) {
   let status = '';
   let seq = 0;
   const held: boolean[] = [];
+  /** Each `focusPlayAgain` call's `preventScroll`. */
+  const focusPlayAgainCalls: boolean[] = [];
   const host: SurveyFormHost = {
     survey,
     refreshAsk: () => ask.refresh(),
@@ -95,15 +102,21 @@ function setup(options: { offered?: boolean } = {}) {
     writeStatus: (message) => void (status = message),
     statusText: () => status,
     setRegionHeld: (h) => void held.push(h),
-    focusPlayAgain: () => playAgain.focus(),
+    focusPlayAgain: (preventScroll) => {
+      focusPlayAgainCalls.push(preventScroll);
+      playAgain.focus();
+    },
   };
-  const form = createSurveyForm(doc, slot, host);
+  const form = createSurveyForm(doc, { opener, form: slot }, host);
   const q = <T extends Element>(selector: string): T => {
     const el = slot.querySelector<T>(selector);
     if (el === null) throw new Error(`no ${selector}`);
     return el;
   };
-  const buttons = (): HTMLButtonElement[] => [...slot.querySelectorAll('button')];
+  const buttons = (): HTMLButtonElement[] => [
+    ...opener.querySelectorAll('button'),
+    ...slot.querySelectorAll('button'),
+  ];
   const button = (label: string): HTMLButtonElement => {
     const b = buttons().find((x) => x.textContent === label);
     if (b === undefined) throw new Error(`no button ${label}`);
@@ -129,8 +142,11 @@ function setup(options: { offered?: boolean } = {}) {
   }
   return {
     doc,
+    dialog,
     slot,
+    opener,
     playAgain,
+    focusPlayAgainCalls,
     elsewhere,
     form,
     survey,
@@ -169,16 +185,31 @@ describe('survey form — presence (ADR 0014 §1, §3)', () => {
   it('shows nothing until the dialog’s ask refresh settles, then Give feedback', async () => {
     const h = setup();
     expect(h.slot.hidden).toBe(true);
+    expect(h.opener.hidden).toBe(true);
     let release = (): void => {};
     h.setRefreshGate(new Promise<void>((r) => (release = r)));
     h.form.dialogOpened();
     await flush();
     expect(h.slot.hidden, 'presence is decided after the refresh, not before').toBe(true);
+    expect(h.opener.hidden, 'Give feedback waits for the same decision').toBe(true);
     release();
     await vi.waitFor(() => expect(h.slot.hidden).toBe(false));
+    expect(h.opener.hidden).toBe(false);
     expect(h.button('Give feedback').hidden).toBe(false);
     expect(h.formEl().hidden).toBe(true);
     expect(h.ask.refresh).toHaveBeenCalledTimes(1);
+  });
+
+  it('puts Give feedback in the action row’s slot and the form in the slot below it (#181 H2)', async () => {
+    const h = setup();
+    await h.expand();
+    expect(h.opener.contains(h.button('Give feedback'))).toBe(true);
+    expect(h.slot.contains(h.formEl())).toBe(true);
+    expect(h.opener.contains(h.formEl())).toBe(false);
+    // Expanded, the button gives way to the form it opened; the row's slot stays present.
+    expect(h.button('Give feedback').hidden).toBe(true);
+    expect(h.formEl().hidden).toBe(false);
+    expect(h.opener.hidden).toBe(false);
   });
 
   it('is absent when the ask is consumed', async () => {
@@ -188,6 +219,7 @@ describe('survey form — presence (ADR 0014 §1, §3)', () => {
     await flush();
     expect(h.survey.state().phase).toBe('absent');
     expect(h.slot.hidden).toBe(true);
+    expect(h.opener.hidden).toBe(true);
   });
 
   it('a refresh that settles after the dialog closed begins nothing', async () => {
@@ -202,6 +234,7 @@ describe('survey form — presence (ADR 0014 §1, §3)', () => {
     expect(h.survey.state().phase).toBe('absent');
     expect(h.slot.hasAttribute('data-ready'), 'never decided').toBe(false);
     expect(h.slot.hidden).toBe(true);
+    expect(h.opener.hidden).toBe(true);
   });
 
   it('two forms in one document never share a radio group', () => {
@@ -224,6 +257,113 @@ describe('survey form — expansion, rating gate and Not now (§1, §2, §3)', (
     expect(h.slot.textContent).toContain(`Reference: ${REFERENCE}.`);
     expect(h.slot.textContent).toContain('privacy notice');
     expect(h.textarea().maxLength).toBe(SURVEY_TEXT_MAX);
+  });
+
+  /** Press `el` as the browser delivers it: `detail` 1 for a pointer, 0 for a keyboard. */
+  const pressWith = (el: Element, detail: number): void =>
+    void el.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true, detail }));
+
+  /** Watch `el` for a layout read and a focus, in order, and answer the focus's options. */
+  function watchFocus(el: HTMLElement) {
+    const order: string[] = [];
+    Object.defineProperty(el, 'offsetHeight', {
+      configurable: true,
+      get: () => {
+        order.push('layout');
+        return 0;
+      },
+    });
+    const focus = vi.spyOn(el, 'focus').mockImplementation(() => void order.push('focus'));
+    return { order, focus };
+  }
+
+  /** Lay out what jsdom cannot: the form scrolls in its dialog, a 300px scrollport from y=100,
+   *  and the first option's 44px label stands at `optionTop`. Returns the question's reveal. */
+  function inScroller(h: ReturnType<typeof setup>, optionTop: number) {
+    h.dialog.style.overflowY = 'auto';
+    Object.defineProperty(h.dialog, 'clientHeight', { configurable: true, value: 300 });
+    h.dialog.getBoundingClientRect = () => new DOMRect(0, 100, 400, 300);
+    h.radios(0)[0]!.closest('label')!.getBoundingClientRect = () =>
+      new DOMRect(0, optionTop, 60, 44);
+    const reveal = vi.fn();
+    h.slot.querySelector('fieldset')!.scrollIntoView = reveal;
+    return reveal;
+  }
+
+  it('opening focuses the first question without the browser’s scroll, by pointer and keyboard alike (#181 H2)', async () => {
+    // The form brings the question into view itself (below). A focus that scrolled would do it
+    // differently in each engine, and WebKit scrolls even a `preventScroll` focus made while the
+    // layout the render has just dirtied is pending, so layout is read first.
+    for (const detail of [1, 0]) {
+      const h = setup();
+      await h.open();
+      const first = watchFocus(h.radios(0)[0]!);
+      pressWith(h.button('Give feedback'), detail);
+      expect(first.focus).toHaveBeenCalledExactlyOnceWith({ preventScroll: true });
+      expect(first.order, 'layout is read before the focus').toEqual(['layout', 'focus']);
+    }
+  });
+
+  it('brings the first question into view: after a pointer press where it opened mostly below the fold, after a keyboard press wherever it is not wholly in view (#181 H2)', async () => {
+    const reveals = async (optionTop: number, detail: number): Promise<boolean> => {
+      const h = setup();
+      await h.open();
+      const reveal = inScroller(h, optionTop);
+      pressWith(h.button('Give feedback'), detail);
+      if (reveal.mock.calls.length > 0)
+        expect(reveal).toHaveBeenCalledExactlyOnceWith({
+          block: 'nearest',
+        });
+      return reveal.mock.calls.length > 0;
+    };
+    // The scrollport ends at y=400; the first option's label is 44px tall.
+    expect(await reveals(380, 1), 'pointer, 20px shown: mostly below the fold').toBe(true);
+    expect(await reveals(380, 0), 'keyboard, 20px shown').toBe(true);
+    expect(await reveals(376, 1), 'pointer, 24px shown: mostly in view, nothing moves').toBe(false);
+    expect(await reveals(376, 0), 'keyboard, 24px shown: not wholly in view').toBe(true);
+    expect(await reveals(300, 1), 'pointer, wholly in view').toBe(false);
+    expect(await reveals(300, 0), 'keyboard, wholly in view').toBe(false);
+    expect(await reveals(356, 0), 'keyboard, its last pixel on the fold: wholly in view').toBe(
+      false,
+    );
+  });
+
+  it('a keyboard open brings the first question into view when it opened ABOVE the scrollport too (#181 H2)', async () => {
+    const h = setup();
+    await h.open();
+    // The scrollport starts at y=100: the first option's label, at 60, stands above it.
+    const reveal = inScroller(h, 60);
+    pressWith(h.button('Give feedback'), 0);
+    expect(reveal).toHaveBeenCalledExactlyOnceWith({ block: 'nearest' });
+  });
+
+  it('Not now returns focus to Give feedback without scrolling after a POINTER press only (#181 H2)', async () => {
+    for (const [detail, options] of [
+      [1, { preventScroll: true }],
+      [0, undefined],
+    ] as const) {
+      const h = setup();
+      await h.expand();
+      const opener = watchFocus(h.opener.querySelector('button')!);
+      pressWith(h.button('Not now'), detail);
+      expect(opener.focus).toHaveBeenCalledExactlyOnceWith(options);
+      expect(opener.order, 'layout is read before the focus').toEqual(['layout', 'focus']);
+    }
+  });
+
+  it('an accepted Send moves focus to Play again without scrolling after a POINTER press only (#181 H2)', async () => {
+    for (const [detail, preventScroll] of [
+      [1, true],
+      [0, false],
+    ] as const) {
+      const h = setup();
+      await h.expand();
+      h.radios(0)[2]!.click();
+      pressWith(h.button('Send'), detail);
+      h.last().resolve('accepted');
+      await flush();
+      expect(h.focusPlayAgainCalls).toEqual([preventScroll]);
+    }
   });
 
   it('Send is aria-disabled with no rating, and pressing it announces what is missing', async () => {
@@ -263,6 +403,20 @@ describe('survey form — expansion, rating gate and Not now (§1, §2, §3)', (
       `Reference: ${REFERENCE}. Quote it if you ask for this feedback to be deleted.`,
     );
     expect(described[1]).toContain('privacy notice');
+  });
+
+  it('links the privacy notice, in a new tab so the draft survives', async () => {
+    const h = setup();
+    await h.expand();
+    const link = h.slot.querySelector<HTMLAnchorElement>('a[href]');
+    expect(link?.getAttribute('href')).toBe(PRIVACY_HREF);
+    expect(PRIVACY_HREF).toBe('/privacy');
+    expect(link?.target).toBe('_blank');
+    expect(link?.rel).toBe('noopener');
+    expect(link?.textContent).toBe('Read the privacy notice');
+    // It sits inside the note Send is described by, so the description still names it.
+    const privacyId = (h.button('Send').getAttribute('aria-describedby') ?? '').split(' ')[1];
+    expect(link?.closest('p')?.id).toBe(privacyId);
   });
 
   it('never silences a pending export: its prompts and clears write without claiming', async () => {
@@ -460,6 +614,7 @@ describe('survey form — a send in flight (§6)', () => {
     expect(h.held).toEqual([true, false]);
     expect(h.status()).toBe(`Thanks for the feedback. Reference: ${REFERENCE}.`);
     expect(h.slot.hidden).toBe(true);
+    expect(h.opener.hidden, 'Give feedback is retired from the row too').toBe(true);
     expect(h.doc.activeElement).toBe(h.playAgain);
     expect(h.last().payload.answers).toEqual({ rating: 3, somethingBroke: false, text: 'hello' });
   });
@@ -504,6 +659,7 @@ describe('survey form — a send in flight (§6)', () => {
     expect(h.last().signal.aborted).toBe(true);
     expect(h.held).toEqual([true, false]);
     expect(h.slot.hidden).toBe(true);
+    expect(h.opener.hidden).toBe(true);
     h.last().resolve('accepted'); // a late response to the aborted request
     await flush();
     expect(h.status(), 'nothing lands after the cancel').toBe('Sending your feedback…');
@@ -518,9 +674,12 @@ describe('survey form — a send in flight (§6)', () => {
     expect(h.held.at(-1)).toBe(false);
   });
 
-  it('destroy empties the slot', () => {
+  it('destroy empties both slots', () => {
     const h = setup();
+    expect(h.opener.childElementCount).toBe(1);
+    expect(h.slot.childElementCount).toBe(1);
     h.form.destroy();
     expect(h.slot.childElementCount).toBe(0);
+    expect(h.opener.childElementCount).toBe(0);
   });
 });
