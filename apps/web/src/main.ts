@@ -55,7 +55,7 @@ import { createRotate, type MatchMediaFn, type RotateMediaQueryList } from './ro
 import { COMPACT_QUERY } from './layout';
 import { clearDockReserve, syncDockCue, syncDockReserve } from './dock-reserve';
 import { clearHudCut, syncHudCut } from './hud-cut';
-import { paintSwatch } from './swatch';
+import { paintSwatch, releaseSwatch } from './swatch';
 import { requestFullscreen } from './fullscreen';
 import { createWakeLock, type WakeLockApi } from './wakelock';
 import {
@@ -1134,6 +1134,8 @@ export function createApp(doc: Document, root: HTMLElement, deps: AppDeps): AppH
       handle.destroy();
       surveyForm?.destroy();
       overlay.destroy();
+      // The Cards' swatch observers (#181): disconnected before the canvases are removed.
+      for (const c of shell.cards) releaseSwatch(c.swatch);
       shell.destroy();
       // Remove the rotate element too — overlay.destroy()/shell.destroy() only remove
       // their own roots, so leaving this behind would stack a duplicate on every
