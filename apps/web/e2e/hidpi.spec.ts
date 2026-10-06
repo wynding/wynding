@@ -259,10 +259,14 @@ test.describe('the backing store against the browser’s own count, at a real de
   }
 
   // The worked-out count's tie rule: layout puts an edge on a half device pixel at some
-  // positions, and rounds it up. The sizes above never put an edge of the box on one, so this
-  // walks the board across every 1/64 CSS px over two device pixels, at scales whose products
-  // are inexact in a float, and holds the store to the browser's count at each — ties included.
-  for (const dsf of [0.9, 0.8, 1.1]) {
+  // positions, and rounds it up — and an edge there, read back in CSS px and multiplied out
+  // again, can come out a hair under the half, where plain rounding goes down. The sizes above
+  // put an edge on a half only at 1 (the 525×320 board's x = 52.5), which reads back exactly,
+  // so this walks the board across every 1/64 CSS px over two device pixels and holds the store
+  // to the browser's count at each, and needs a tie read back under its half, or it has tested
+  // nothing plain rounding gets wrong. (Not at 0.8: every tie this walk reaches there reads
+  // back over its half.)
+  for (const dsf of [0.9, 1.1]) {
     test(`worked out at ${dsf}: the browser's count at every 1/64 px position, half-pixel ties included`, async ({
       baseURL,
     }, testInfo) => {
@@ -271,6 +275,7 @@ test.describe('the backing store against the browser’s own count, at a real de
       test.setTimeout(240_000);
       await atRealScale({ dsf, width: 525, height: 320, fallback: true }, baseURL, async (page) => {
         let ties = 0;
+        let under = 0;
         const steps = Math.ceil(128 / dsf) + 2; // two device pixels of travel
         for (let n = 1; n <= steps; n++) {
           // Move the Stage n/64 CSS px; then resize the board by a whole CSS px and back,
@@ -289,16 +294,24 @@ test.describe('the backing store against the browser’s own count, at a real de
             await frame();
           }, n);
           await expectStoreIsBrowserCount(page, `${dsf} step ${n}`, false);
-          const fractions = await page.evaluate(() => {
+          // Each edge as the renderer reads it (start, start + size), in device pixels.
+          const edges = await page.evaluate(() => {
             const r = document.querySelector('.wy-board canvas')!.getBoundingClientRect();
-            return [r.left, r.right, r.top, r.bottom].map(
-              (v) => (((Math.round(v * devicePixelRatio * 64) / 64) % 1) + 1) % 1,
+            return [r.left, r.left + r.width, r.top, r.top + r.height].map(
+              (v) => v * devicePixelRatio,
             );
           });
-          if (fractions.some((f) => Math.abs(f - 0.5) < 1e-9)) ties++;
+          for (const x of edges) {
+            const onGrid = Math.round(x * 64) / 64; // where layout put it
+            if (Math.abs((((onGrid % 1) + 1) % 1) - 0.5) > 1e-9) continue;
+            ties++;
+            if (x < onGrid) under++;
+          }
         }
-        console.log(`[hidpi] ${dsf}: ${steps} steps, ${ties} with an edge on a half device pixel`);
-        expect(ties, 'the sweep reached a half-pixel tie').toBeGreaterThan(0);
+        console.log(
+          `[hidpi] ${dsf}: ${steps} steps, ${ties} edges on a half pixel, ${under} under it`,
+        );
+        expect(under, 'the sweep reached a tie read back under its half').toBeGreaterThan(0);
       });
     });
   }
