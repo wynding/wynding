@@ -1,6 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import { validate, MAX_INPUTS_PER_TICK } from '@wynding/replay';
 import { getBundledRuleset } from '@wynding/content';
+import type { TracerVM } from '@wynding/render';
 import type { SimInput } from '@wynding/sim';
 import { isDetonation } from '@wynding/render';
 import { createController, enqueueVerdict, outcomesMatch, type Controller } from './controller';
@@ -992,6 +993,52 @@ describe('controller — Tracer lifetime via fired StepEvents (#32)', () => {
     // the real code) catches both.
     expect(t.destX).toBe(362);
     expect(t.destY).toBe(2944);
+  });
+
+  it('lists every shot a tick fires together, from the first frame after it: a newly listed shot always launched after every shot listed before', () => {
+    // `packages/render/src/tower-fire.ts` takes each shot in once by its launch tick alone,
+    // keeping no record of each, and relies on this. Eight basic towers either side of the
+    // lane fire together on many ticks; frames come at 60 Hz, with a 130 ms catch-up every 7th,
+    // so many frames list shots fired on two or more ticks at once.
+    const c = createController(1);
+    startAndCall(c);
+    for (const row of [8, 12]) {
+      for (const col of [2, 4, 6, 8]) {
+        if (c.uiState().armed !== 'basic') c.armTower('basic');
+        c.aimAt(col, row);
+        expect(c.confirm(), `basic at (${col}, ${row})`).toBe(true);
+      }
+    }
+    const listed = new Set<TracerVM>();
+    const shotsPerTick = new Map<number, number>();
+    let latest = -Infinity;
+    let prevTick = c.frame().curVm.tick; // the tick the previous frame showed
+    let multiTickFrames = 0; // frames whose new shots were fired on two or more ticks
+    for (let i = 0; i < 3000; i++) {
+      c.advance(i % 7 === 0 ? 130 : 1000 / 60);
+      let frameLatest = latest;
+      const ticks = new Set<number>();
+      const frame = c.frame();
+      for (const t of frame.tracers) {
+        if (listed.has(t)) continue;
+        listed.add(t);
+        ticks.add(t.launchTick);
+        shotsPerTick.set(t.launchTick, (shotsPerTick.get(t.launchTick) ?? 0) + 1);
+        expect(t.launchTick).toBeGreaterThan(latest);
+        // Listed from the first frame after its tick: a shot fired before the tick the previous
+        // frame showed would have been listed by that frame.
+        expect(t.launchTick).toBeGreaterThanOrEqual(prevTick);
+        frameLatest = Math.max(frameLatest, t.launchTick);
+      }
+      if (ticks.size >= 2) multiTickFrames += 1;
+      latest = frameLatest;
+      prevTick = frame.curVm.tick;
+    }
+    // Not vacuous: shots were listed, many ticks fired more than one at once — the case a shot
+    // listed a tick late would break — and frames that caught up listed several ticks' shots.
+    expect(listed.size).toBeGreaterThan(100);
+    expect([...shotsPerTick.values()].filter((n) => n >= 2).length).toBeGreaterThan(10);
+    expect(multiTickFrames).toBeGreaterThan(5);
   });
 });
 

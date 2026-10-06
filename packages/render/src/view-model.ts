@@ -47,6 +47,13 @@ function stunnedNow(stunUntilTick: number | undefined, tick: number): boolean {
   );
 }
 
+/** A tower's `targetId` column entry as the VM carries it: the locked creep's id, or 0 for
+ *  none — and 0 for a forged or ragged (non-safe-integer) entry, as the sim's fire step
+ *  reads the same column. */
+function lockedTarget(targetId: number | undefined): number {
+  return Number.isSafeInteger(targetId) ? (targetId as number) : 0;
+}
+
 /** Project every live creep/tower of `state` into a render snapshot. */
 export function deriveViewModel(state: SimState, ruleset: CompiledRuleset): RenderVM {
   const grid = ruleset.board.grid;
@@ -137,6 +144,10 @@ export function deriveViewModel(state: SimState, ruleset: CompiledRuleset): Rend
       // per-tower render path to change a cue nothing in the shipped game can observe.
       buffed:
         def?.attack !== undefined && auraMulFor(auraIndex, grid, col, row) > SUPPORT_MUL_IDENTITY,
+      // The sim's own target lock, read as-is (visual pass T3): the creep this tower's head
+      // turns toward. Guarded like every other column this module reads — a forged or ragged
+      // entry is "no lock", the same 0 the sim's own read of the column falls back to.
+      targetId: lockedTarget(state.towers.targetId[i]),
     });
   });
 

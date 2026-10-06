@@ -41,12 +41,17 @@ export function recordingGraphics(): GraphicsLike & { calls: Call[] } {
   };
 }
 
-/** A recording live layer (`board-frame.ts`): `recordingGraphics` plus `clear` and
- *  `strokeRect`, the calls only per-frame drawing makes. */
+/** A recording live layer (`board-frame.ts`): `recordingGraphics` plus `clear`, `strokeRect`
+ *  and `strokePoints`, the calls only per-frame drawing makes. */
 export function recordingLayer(): LayerGraphics & { calls: Call[] } {
   const g = recordingGraphics();
   const record = recorderFor(g.calls);
-  return { ...g, clear: record('clear'), strokeRect: record('strokeRect') };
+  return {
+    ...g,
+    clear: record('clear'),
+    strokeRect: record('strokeRect'),
+    strokePoints: record('strokePoints'),
+  };
 }
 
 /** A recording atlas-frame surface: `recordingGraphics` plus the bake's `flush` and the art
