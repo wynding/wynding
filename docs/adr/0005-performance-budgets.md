@@ -1100,10 +1100,13 @@ board looks the same by construction rather than by a second copy of the shapes:
 - one **atlas** — the towers' art: the plate every tower but the mine stands on, the mine's
   floor-coloured pad, each tower look's head as committed and as boosted (the boost glow
   baked into the boosted head), each look's whole translucent Pending picture with its dashed
-  rim, and the scorch a spent mine leaves; and every creep silhouette shape at normal and
-  low-health tint, standard and boss size — shown by pooled sprites placed each frame.
+  rim, and the scorch a spent mine leaves; and each creep look's body — its silhouette in its
+  family's hue with an ink outline, and a flyer's wings with it — and the two soft shadows a
+  creep casts, on the ground and in the air — shown by pooled sprites placed each frame.
   (_Updated by R2, the visual pass's tower art:_ the atlas first baked each tower footprint
-  mark as committed, buffed with the recipient ✦, and pending with its outline.)
+  mark as committed, buffed with the recipient ✦, and pending with its outline. _Updated by
+  R4, the visual pass's creep art:_ it first baked every creep silhouette shape at normal and
+  low-health tint, standard and boss size.)
 
 Both are repainted only when the cell size, the effective dpr or the colour mode changes,
 never per frame; a texture that would exceed the renderer's maximum size is baked at a lower
@@ -1112,17 +1115,27 @@ scale instead of failing.
 **What stays live.** Everything that moves or comes and goes is still drawn each frame, into
 three `Graphics` objects at fixed depths (`packages/render/src/layers.ts`): the aura shells
 under the towers; the selection cue and tracers between the pending builds and the creeps;
-health pips, status cues, the build ghost and sparks over everything. ADR 0003's cue
+HP bars, status cues, the build ghost and sparks over everything. ADR 0003's cue
 vocabulary — the choice the S10 Finding said the frame budget may be paying for — is split
 between the two by what it marks, not by kind. The cues that belong to a piece's own art are
 baked with it: a tower's silhouette and glyph (its head) and two tower STATE cues, the boost
 glow (the boosted head's frame) and the Pending picture with its dashed rim (a frame per
-look); and two creep cues, the low-health tint and the boss size — each an atlas variant of
-its tower's or creep's frame. A spent mine's scorch is a frame too, its fade the sprite's
-opacity. (_Updated by R2:_ the tower STATE cues were first the buffed recipient's ✦ and the
-pending-build outline.) Everything else stays stroked `Graphics`, drawn per frame: the
-status rings and pips, the airborne chevron, the aura shells, the selection cue, the ghost
-and the sparks.
+look); and two creep cues, the family — a hue and a size step, the boss's size among them —
+and a flyer's wings — each an atlas variant of its tower's or creep's frame. A spent mine's
+scorch is a frame too, its fade the sprite's opacity. (_Updated by R2:_ the tower STATE cues
+were first the buffed recipient's ✦ and the pending-build outline. _Updated by R4:_ the creep
+cues were first the low-health tint, now the live HP bar's colour, and the boss size; the
+airborne cue was a live chevron.) Everything else stays stroked `Graphics`, drawn per frame:
+the HP bars, the status rings and pips, the aura shells, the selection cue, the ghost and the
+sparks.
+
+**A live circle is a polygon sized to its radius** (_added by R4_, the creep art). Phaser
+tessellates every arc into one fixed count of segments whatever its size, and the creep art's
+ink edge under each guaranteed ring and pip added half as many circles again to a busy board:
+on the stress scene a frame stroked 913 circles where it had stroked 609, and filled 188 where
+it had filled 131. So each live layer draws a circle as a closed polygon with only as many
+sides as keep it within a quarter of a device pixel of the circle, and never more than
+Phaser's own count (`circle-path.ts` holds the numbers).
 
 **Measured before/after.** The record-only browser perf suite (`playwright.perf.config.ts`: the
 `catalog` and `stress` scenes on the `mid-range` and `low-end` emulation profiles), run twice
