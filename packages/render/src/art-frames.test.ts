@@ -1058,38 +1058,42 @@ describe('the boost glow stays inside the rim as the frames draw them (QC round 
     }
   });
 
-  it('reaches the walk’s worst cases, pinned from both sides — the sweep’s own bounds are one-sided, so a walk that misses the jumps where they lie would pass them', () => {
-    const designRim = PLATE_ART.find((s) => s.stroke === 'rim')!;
-    const [designCue] = BOOST_ART;
-    if (designRim.kind !== 'rect' || designCue?.kind !== 'circle') throw new Error('shapes');
-    const worst = { plateFromOne: 0, plateBelowOne: 0, floorBelowOne: 0, cue: 1 };
-    for (let cellPx = 9; cellPx <= 64; cellPx++) {
-      const unit = artUnit(cellPx);
-      for (const scale of rimScales(cellPx)) {
-        const rim = drawnRim(cellPx, scale);
-        const half = strokeWidthAt(rim, unit) / 2;
-        const k = unit * scale;
-        for (const out of [
-          rim.x - designRim.x,
-          rim.y - designRim.y,
-          designRim.x + designRim.w - (rim.x + rim.w),
-          designRim.y + designRim.h - (rim.y + rim.h),
-        ]) {
-          if (scale >= 1) worst.plateFromOne = Math.max(worst.plateFromOne, (out - half) * k);
-          else {
-            worst.plateBelowOne = Math.max(worst.plateBelowOne, (out - half) * k);
-            worst.floorBelowOne = Math.max(worst.floorBelowOne, (-out - half) * k);
+  it(
+    'reaches the walk’s worst cases, pinned from both sides — the sweep’s own bounds are one-sided, so a walk that misses the jumps where they lie would pass them',
+    { timeout: 60_000 },
+    () => {
+      const designRim = PLATE_ART.find((s) => s.stroke === 'rim')!;
+      const [designCue] = BOOST_ART;
+      if (designRim.kind !== 'rect' || designCue?.kind !== 'circle') throw new Error('shapes');
+      const worst = { plateFromOne: 0, plateBelowOne: 0, floorBelowOne: 0, cue: 1 };
+      for (let cellPx = 9; cellPx <= 64; cellPx++) {
+        const unit = artUnit(cellPx);
+        for (const scale of rimScales(cellPx)) {
+          const rim = drawnRim(cellPx, scale);
+          const half = strokeWidthAt(rim, unit) / 2;
+          const k = unit * scale;
+          for (const out of [
+            rim.x - designRim.x,
+            rim.y - designRim.y,
+            designRim.x + designRim.w - (rim.x + rim.w),
+            designRim.y + designRim.h - (rim.y + rim.h),
+          ]) {
+            if (scale >= 1) worst.plateFromOne = Math.max(worst.plateFromOne, (out - half) * k);
+            else {
+              worst.plateBelowOne = Math.max(worst.plateBelowOne, (out - half) * k);
+              worst.floorBelowOne = Math.max(worst.floorBelowOne, (-out - half) * k);
+            }
           }
+          const [cue] = boostArtAt(unit, scale);
+          if (cue?.kind === 'circle') worst.cue = Math.min(worst.cue, cue.r / designCue.r);
         }
-        const [cue] = boostArtAt(unit, scale);
-        if (cue?.kind === 'circle') worst.cue = Math.min(worst.cue, cue.r / designCue.r);
       }
-    }
-    expect(worst.plateFromOne, '9px, just under dpr 19/18').toBeCloseTo(7 / 64, 6);
-    expect(worst.plateBelowOne, '9px, just under dpr 5/6').toBeCloseTo(19 / 64, 6);
-    expect(worst.floorBelowOne, '15px, near dpr 0.8009').toBeCloseTo(0.0995551, 6);
-    expect(worst.cue, '9px, just under dpr 19/18').toBeCloseTo(0.9144072, 6);
-  });
+      expect(worst.plateFromOne, '9px, just under dpr 19/18').toBeCloseTo(7 / 64, 6);
+      expect(worst.plateBelowOne, '9px, just under dpr 5/6').toBeCloseTo(19 / 64, 6);
+      expect(worst.floorBelowOne, '15px, near dpr 0.8009').toBeCloseTo(0.0995551, 6);
+      expect(worst.cue, '9px, just under dpr 19/18').toBeCloseTo(0.9144072, 6);
+    },
+  );
 
   it('keeps the plate frame’s rim inside the footprint where its floor would spill it — 11px cells at dpr 1.25', () => {
     // There the rim's one-CSS-px floor makes it 2 texels, grown outward: placed freely, its
@@ -1109,119 +1113,123 @@ describe('the boost glow stays inside the rim as the frames draw them (QC round 
     expect((rim.x + rim.w) * k + half).toBeCloseTo(27, 9); // its last whole one
   });
 
-  it('at every cell size from 9 to 64px and every dpr from 0.8 to 3, each change of the rim’s texels walked: the rim no thinner than its floor and inside the footprint, each glow ring inside it, and the plate fill’s edge under it but by a fraction of a pixel at the smallest cells', () => {
-    // The glow is `pal.aura`, gated against the PLATE (palette.test.ts) and not against the
-    // rim, so it must stay inside the rim. Drawing the rim on whole device pixels moves it —
-    // up to half a pixel, and further inward where the footprint's edge stops it — a
-    // different way at each cell size and dpr, so this measures the rim as the plate frame
-    // draws it (pinned above), not the design's: at every 0.005 of dpr, and on both sides of
-    // each scale where its texels change (`rimScales`), where each measure here is at its
-    // worst — sampled scales hide what the ones between them do (QC round 4).
-    const designRim = PLATE_ART.find((s) => s.stroke === 'rim')!;
-    if (designRim.kind !== 'rect') throw new Error('the rim is a rect');
-    const [designCue] = BOOST_ART;
-    if (designCue?.kind !== 'circle') throw new Error('the glow is rings');
-    // The two sides of a change are a hair apart, and one can fall inside the alignment's own
-    // allowance for floating-point noise (a billionth of a texel), where an edge sits that
-    // hair past where it is bound: so the checks here allow a millionth of a pixel, which no
-    // pixel can show.
-    const HAIR = 1e-6;
-    const bad: string[] = [];
-    /** Where the fill's edge lies off the drawn rim — the plate showing past its outer side,
-     *  or the floor inside its inner side — below dpr 1 and from 1 up: the most, px, and the
-     *  cells where it does at all. */
-    const most = (): { by: number; at: string; cells: Set<number> } => ({
-      by: 0,
-      at: '',
-      cells: new Set(),
-    });
-    const off = {
-      plate: { belowOne: most(), fromOne: most() },
-      floor: { belowOne: most(), fromOne: most() },
-    };
-    const glowAt = {
-      fitted: new Set<number>(),
-      cueShrunk: new Set<number>(),
-      haloOut: new Set<number>(),
-    };
-    let leastCue = { ratio: 1, at: '' };
-    for (let cellPx = 9; cellPx <= 64; cellPx++) {
-      const unit = artUnit(cellPx);
-      for (const scale of rimScales(cellPx)) {
-        const rim = drawnRim(cellPx, scale);
-        const half = strokeWidthAt(rim, unit) / 2;
-        const k = unit * scale;
-        const at = `${cellPx}px at dpr ${scale}`;
-        // Never thinner than its one-CSS-px floor (so two texels at dpr 1.25 or 1.5) ...
-        if (2 * half * k < scale - HAIR) bad.push(`${at}: thinner than its floor`);
-        // ... inside the footprint, so two abutting plates never overlap ...
-        if ((rim.x - half) * k < -HAIR || (rim.x + rim.w + half) * k > ART_BOX * k + HAIR) {
-          bad.push(`${at}: outside the footprint`);
-        }
-        // ... each ring of the glow, as the boosted head's frame draws it, inside it: meeting
-        // its inner edge at most, a texel's, never crossing it ...
-        const glow = boostArtAt(unit, scale);
-        if (glow !== BOOST_ART) glowAt.fitted.add(cellPx);
-        if (glow.length < BOOST_ART.length) glowAt.haloOut.add(cellPx);
-        for (const ring of glow) {
-          if (ring.kind !== 'circle') throw new Error('the glow is rings');
-          const outer = ring.r + strokeWidthAt(ring, unit) / 2;
-          const margin =
-            Math.min(
-              ring.cx - outer - (rim.x + half),
-              rim.x + rim.w - half - (ring.cx + outer),
-              ring.cy - outer - (rim.y + half),
-              rim.y + rim.h - half - (ring.cy + outer),
-            ) * k;
-          if (margin < -HAIR) bad.push(`${at}: a glow ring ${-margin}px into the rim`);
-        }
-        const [cue] = glow;
-        if (cue?.kind === 'circle' && cue.r < designCue.r) {
-          glowAt.cueShrunk.add(cellPx);
-          if (cue.r / designCue.r < leastCue.ratio) leastCue = { ratio: cue.r / designCue.r, at };
-        }
-        // ... and the plate fill's edge, which stays on the design's centre line, side by
-        // side: how far it lies outward of the drawn rim's centre line (near sides, then far).
-        const band = scale >= 1 ? 'fromOne' : 'belowOne';
-        for (const out of [
-          rim.x - designRim.x,
-          rim.y - designRim.y,
-          designRim.x + designRim.w - (rim.x + rim.w),
-          designRim.y + designRim.h - (rim.y + rim.h),
-        ]) {
-          for (const [what, by] of [
-            ['plate', (out - half) * k],
-            ['floor', (-out - half) * k],
-          ] as const) {
-            if (by <= HAIR) continue;
-            const m = off[what][band];
-            m.cells.add(cellPx);
-            if (by > m.by) Object.assign(m, { by, at });
+  it(
+    'at every cell size from 9 to 64px and every dpr from 0.8 to 3, each change of the rim’s texels walked: the rim no thinner than its floor and inside the footprint, each glow ring inside it, and the plate fill’s edge under it but by a fraction of a pixel at the smallest cells',
+    { timeout: 60_000 },
+    () => {
+      // The glow is `pal.aura`, gated against the PLATE (palette.test.ts) and not against the
+      // rim, so it must stay inside the rim. Drawing the rim on whole device pixels moves it —
+      // up to half a pixel, and further inward where the footprint's edge stops it — a
+      // different way at each cell size and dpr, so this measures the rim as the plate frame
+      // draws it (pinned above), not the design's: at every 0.005 of dpr, and on both sides of
+      // each scale where its texels change (`rimScales`), where each measure here is at its
+      // worst — sampled scales hide what the ones between them do (QC round 4).
+      const designRim = PLATE_ART.find((s) => s.stroke === 'rim')!;
+      if (designRim.kind !== 'rect') throw new Error('the rim is a rect');
+      const [designCue] = BOOST_ART;
+      if (designCue?.kind !== 'circle') throw new Error('the glow is rings');
+      // The two sides of a change are a hair apart, and one can fall inside the alignment's own
+      // allowance for floating-point noise (a billionth of a texel), where an edge sits that
+      // hair past where it is bound: so the checks here allow a millionth of a pixel, which no
+      // pixel can show.
+      const HAIR = 1e-6;
+      const bad: string[] = [];
+      /** Where the fill's edge lies off the drawn rim — the plate showing past its outer side,
+       *  or the floor inside its inner side — below dpr 1 and from 1 up: the most, px, and the
+       *  cells where it does at all. */
+      const most = (): { by: number; at: string; cells: Set<number> } => ({
+        by: 0,
+        at: '',
+        cells: new Set(),
+      });
+      const off = {
+        plate: { belowOne: most(), fromOne: most() },
+        floor: { belowOne: most(), fromOne: most() },
+      };
+      const glowAt = {
+        fitted: new Set<number>(),
+        cueShrunk: new Set<number>(),
+        haloOut: new Set<number>(),
+      };
+      let leastCue = { ratio: 1, at: '' };
+      for (let cellPx = 9; cellPx <= 64; cellPx++) {
+        const unit = artUnit(cellPx);
+        for (const scale of rimScales(cellPx)) {
+          const rim = drawnRim(cellPx, scale);
+          const half = strokeWidthAt(rim, unit) / 2;
+          const k = unit * scale;
+          const at = `${cellPx}px at dpr ${scale}`;
+          // Never thinner than its one-CSS-px floor (so two texels at dpr 1.25 or 1.5) ...
+          if (2 * half * k < scale - HAIR) bad.push(`${at}: thinner than its floor`);
+          // ... inside the footprint, so two abutting plates never overlap ...
+          if ((rim.x - half) * k < -HAIR || (rim.x + rim.w + half) * k > ART_BOX * k + HAIR) {
+            bad.push(`${at}: outside the footprint`);
+          }
+          // ... each ring of the glow, as the boosted head's frame draws it, inside it: meeting
+          // its inner edge at most, a texel's, never crossing it ...
+          const glow = boostArtAt(unit, scale);
+          if (glow !== BOOST_ART) glowAt.fitted.add(cellPx);
+          if (glow.length < BOOST_ART.length) glowAt.haloOut.add(cellPx);
+          for (const ring of glow) {
+            if (ring.kind !== 'circle') throw new Error('the glow is rings');
+            const outer = ring.r + strokeWidthAt(ring, unit) / 2;
+            const margin =
+              Math.min(
+                ring.cx - outer - (rim.x + half),
+                rim.x + rim.w - half - (ring.cx + outer),
+                ring.cy - outer - (rim.y + half),
+                rim.y + rim.h - half - (ring.cy + outer),
+              ) * k;
+            if (margin < -HAIR) bad.push(`${at}: a glow ring ${-margin}px into the rim`);
+          }
+          const [cue] = glow;
+          if (cue?.kind === 'circle' && cue.r < designCue.r) {
+            glowAt.cueShrunk.add(cellPx);
+            if (cue.r / designCue.r < leastCue.ratio) leastCue = { ratio: cue.r / designCue.r, at };
+          }
+          // ... and the plate fill's edge, which stays on the design's centre line, side by
+          // side: how far it lies outward of the drawn rim's centre line (near sides, then far).
+          const band = scale >= 1 ? 'fromOne' : 'belowOne';
+          for (const out of [
+            rim.x - designRim.x,
+            rim.y - designRim.y,
+            designRim.x + designRim.w - (rim.x + rim.w),
+            designRim.y + designRim.h - (rim.y + rim.h),
+          ]) {
+            for (const [what, by] of [
+              ['plate', (out - half) * k],
+              ['floor', (-out - half) * k],
+            ] as const) {
+              if (by <= HAIR) continue;
+              const m = off[what][band];
+              m.cells.add(cellPx);
+              if (by > m.by) Object.assign(m, { by, at });
+            }
           }
         }
       }
-    }
-    expect(bad.slice(0, 5), `${bad.length} failures`).toEqual([]);
-    // Where the footprint ends inside a pixel, the rim's far side stops on the whole pixel
-    // before it, short of its place, and the fill's edge lies past it: a blend of plate into
-    // the footprint's last pixel. From dpr 1 up only at 9 and 10 px cells, 0.11 px at most
-    // (9 px, just under dpr 19/18), and the floor never shows inside the rim; below dpr 1,
-    // at 9 to 13 px, 0.30 px at most (9 px, just under 5/6), and the floor shows inside the
-    // rim at 11 to 19 px, 0.10 px at most.
-    expect([...off.plate.fromOne.cells], off.plate.fromOne.at).toEqual([9, 10]);
-    expect(off.plate.fromOne.by, off.plate.fromOne.at).toBeLessThanOrEqual(0.11);
-    expect([...off.floor.fromOne.cells], off.floor.fromOne.at).toEqual([]);
-    expect([...off.plate.belowOne.cells]).toEqual([9, 10, 11, 12, 13]);
-    expect(off.plate.belowOne.by, off.plate.belowOne.at).toBeLessThanOrEqual(0.3);
-    expect([...off.floor.belowOne.cells]).toEqual([11, 12, 13, 14, 15, 16, 17, 18, 19]);
-    expect(off.floor.belowOne.by, off.floor.belowOne.at).toBeLessThanOrEqual(0.1);
-    // The glow is fitted at 9 to 15 px only (`boostArtAt`): the cue shrinks at 9 and 10 px,
-    // to 0.91 of its radius at the least, and the halo is left out at 9 to 12.
-    expect([...glowAt.fitted]).toEqual([9, 10, 11, 12, 13, 14, 15]);
-    expect([...glowAt.cueShrunk]).toEqual([9, 10]);
-    expect([...glowAt.haloOut]).toEqual([9, 10, 11, 12]);
-    expect(leastCue.ratio, leastCue.at).toBeGreaterThan(0.91);
-  });
+      expect(bad.slice(0, 5), `${bad.length} failures`).toEqual([]);
+      // Where the footprint ends inside a pixel, the rim's far side stops on the whole pixel
+      // before it, short of its place, and the fill's edge lies past it: a blend of plate into
+      // the footprint's last pixel. From dpr 1 up only at 9 and 10 px cells, 0.11 px at most
+      // (9 px, just under dpr 19/18), and the floor never shows inside the rim; below dpr 1,
+      // at 9 to 13 px, 0.30 px at most (9 px, just under 5/6), and the floor shows inside the
+      // rim at 11 to 19 px, 0.10 px at most.
+      expect([...off.plate.fromOne.cells], off.plate.fromOne.at).toEqual([9, 10]);
+      expect(off.plate.fromOne.by, off.plate.fromOne.at).toBeLessThanOrEqual(0.11);
+      expect([...off.floor.fromOne.cells], off.floor.fromOne.at).toEqual([]);
+      expect([...off.plate.belowOne.cells]).toEqual([9, 10, 11, 12, 13]);
+      expect(off.plate.belowOne.by, off.plate.belowOne.at).toBeLessThanOrEqual(0.3);
+      expect([...off.floor.belowOne.cells]).toEqual([11, 12, 13, 14, 15, 16, 17, 18, 19]);
+      expect(off.floor.belowOne.by, off.floor.belowOne.at).toBeLessThanOrEqual(0.1);
+      // The glow is fitted at 9 to 15 px only (`boostArtAt`): the cue shrinks at 9 and 10 px,
+      // to 0.91 of its radius at the least, and the halo is left out at 9 to 12.
+      expect([...glowAt.fitted]).toEqual([9, 10, 11, 12, 13, 14, 15]);
+      expect([...glowAt.cueShrunk]).toEqual([9, 10]);
+      expect([...glowAt.haloOut]).toEqual([9, 10, 11, 12]);
+      expect(leastCue.ratio, leastCue.at).toBeGreaterThan(0.91);
+    },
+  );
 
   it('fits the glow inside the rim only where the drawn rim comes in past it — 9px cells just under dpr 19/18, at its worst', () => {
     // There the footprint ends a hair short of 19 texels, so the rim's far side, two texels
