@@ -798,3 +798,142 @@ describe('press guard — QC round 5 (#181 H2)', () => {
     expect(space.up.defaultPrevented, 'its release activates').toBe(false);
   });
 });
+
+describe('press guard — QC round 6 (#181 H2)', () => {
+  const stamped = <E extends Event>(event: E, at: number): E => {
+    Object.defineProperty(event, 'timeStamp', { value: at });
+    return event;
+  };
+  const nowIs = (ms: number) =>
+    vi.spyOn(document.defaultView!.performance, 'now').mockReturnValue(ms);
+  /** A pointer event of a touch (`id`) on `el`, with no mouse events. */
+  const touchAt = (
+    el: Element,
+    type: 'pointerdown' | 'pointerup' | 'pointercancel',
+    at: number,
+    id = 7,
+    x = 100,
+  ): void => {
+    const e = stamped(new MouseEvent(type, { bubbles: true, clientX: x, clientY: 100 }), at);
+    Object.defineProperty(e, 'pointerType', { value: 'touch' });
+    Object.defineProperty(e, 'pointerId', { value: id });
+    el.dispatchEvent(e);
+  };
+  /** A tap's mouse events, at its release. */
+  const tap = (el: Element, at: number, detail = 1): void => {
+    const init = { bubbles: true, cancelable: true, clientX: 100, clientY: 100, detail };
+    el.dispatchEvent(stamped(new MouseEvent('mousedown', init), at));
+    el.dispatchEvent(stamped(new MouseEvent('click', init), at));
+  };
+
+  // Kill tests for round 5's untested lines.
+  it('K1: a touch the dialog arrived during, CANCELLED: the arrival is timed from the cancel', () => {
+    const h = fixture();
+    touchAt(h.board, 'pointerdown', 0);
+    nowIs(20);
+    h.guard.arm();
+    touchAt(h.board, 'pointercancel', 550);
+    touchAt(h.b, 'pointerdown', 685, 8);
+    tap(h.b, 775);
+    expect(h.pressed, 'a tap 225 ms after the cancel').toEqual([]);
+  });
+
+  it('K2: a double-tap whose second tap is slow (detail 2, 600 ms after the first’s release) belongs to the arrival', () => {
+    const h = fixture();
+    touchAt(h.board, 'pointerdown', 0);
+    nowIs(20);
+    h.guard.arm();
+    touchAt(h.board, 'pointerup', 90);
+    touchAt(h.b, 'pointerdown', 380, 8);
+    tap(h.b, 690, 2);
+    expect(h.pressed).toEqual([]);
+  });
+
+  it('K3: another finger’s release does not time the arrival: the held touch’s own release does', () => {
+    const h = fixture();
+    touchAt(h.board, 'pointerdown', 0, 7);
+    nowIs(20);
+    h.guard.arm();
+    touchAt(h.board, 'pointerdown', 150, 8, 300); // a second finger, elsewhere
+    touchAt(h.board, 'pointerup', 200, 8, 300);
+    touchAt(h.board, 'pointerup', 900, 7);
+    touchAt(h.b, 'pointerdown', 1035, 9);
+    tap(h.b, 1125);
+    expect(h.pressed, '225 ms after the held touch’s release').toEqual([]);
+  });
+
+  it('K4: another finger’s release does not mark the last one released: still down at the arrival, it is never stale', () => {
+    const h = fixture();
+    touchAt(h.board, 'pointerdown', 0, 7, 300);
+    touchAt(h.board, 'pointerdown', 100, 8);
+    touchAt(h.board, 'pointerup', 200, 7, 300);
+    nowIs(2300); // finger 8 still down, 2.2 s on
+    h.guard.arm();
+    touchAt(h.board, 'pointerup', 2400, 8);
+    touchAt(h.b, 'pointerdown', 2535, 9);
+    tap(h.b, 2625);
+    expect(h.pressed).toEqual([]);
+  });
+
+  // Reproductions (fail on bc4158a).
+  it('R-H6: a long touch let go 600 ms before the arrival still marks the spot: staleness runs from the release', () => {
+    const h = fixture();
+    touchAt(h.board, 'pointerdown', 0);
+    touchAt(h.board, 'pointerup', 1500);
+    nowIs(2100);
+    h.guard.arm();
+    touchAt(h.b, 'pointerdown', 2150, 8);
+    tap(h.b, 2235);
+    expect(h.pressed, 'a tap 135 ms after the arrival').toEqual([]);
+  });
+
+  it('R-H5: a repeat on the same control of a press let through after the arrival passes: a double-click on Run data opens and closes it', () => {
+    const h = fixture();
+    h.press(h.board, 0);
+    nowIs(20);
+    h.guard.arm();
+    h.press(h.b, 650);
+    h.press(h.b, 800, {}, 2);
+    expect(h.pressed).toEqual(['B', 'B']);
+  });
+
+  it('R-FLAKE: a scripted focus after a keyboard activation, before its check has run, is not taken for the activation’s move', () => {
+    vi.useFakeTimers();
+    try {
+      const h = fixture();
+      nowIs(1000);
+      h.a.focus();
+      h.clickOnly(h.a, 1000); // Enter on A: its handlers move focus nowhere
+      h.b.focus(); // a script moves focus, before the zero-delay check has run
+      expect(h.key(h.b, 'Enter').down.defaultPrevented, 'Enter on B').toBe(false);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('R-H2a: two fingers down across the arrival each keep their own spot', () => {
+    const h = fixture();
+    touchAt(h.board, 'pointerdown', 0, 7); // A, on the spot
+    touchAt(h.board, 'pointerdown', 120, 8, 300); // B, 200px away
+    nowIs(273);
+    h.guard.arm();
+    touchAt(h.board, 'pointerup', 538, 7);
+    touchAt(h.board, 'pointerup', 662, 8, 300);
+    touchAt(h.b, 'pointerdown', 822, 9);
+    tap(h.b, 936);
+    expect(h.pressed, 'a tap at A 274 ms after the last release').toEqual([]);
+  });
+
+  it('R-H2b: alternating taps at two spots each keep their own spot', () => {
+    const h = fixture();
+    touchAt(h.board, 'pointerdown', 0, 7);
+    touchAt(h.board, 'pointerup', 117, 7);
+    touchAt(h.board, 'pointerdown', 302, 8, 300);
+    nowIs(379);
+    h.guard.arm();
+    touchAt(h.board, 'pointerup', 417, 8, 300);
+    touchAt(h.b, 'pointerdown', 605, 9);
+    tap(h.b, 715);
+    expect(h.pressed, 'a tap back at the first spot').toEqual([]);
+  });
+});
