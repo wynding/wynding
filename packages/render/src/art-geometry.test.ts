@@ -149,9 +149,9 @@ describe('parsePath', () => {
     }
     // ... and a number is one a browser can read into the 32-bit float it parses path data
     // into, part by part: at most 39 integer digits, summing to a finite 32-bit float, an
-    // exponent field of at most 38 whatever precedes it, and a value within range. Each verdict below is Chromium's and
-    // WebKit's, measured (QC round 4): the 0e39, the 0.0…01e39 and the 40-digit 1000…0e-38
-    // paint nothing, though they are 0, 10 and 10.
+    // exponent field of at most 38 whatever precedes it, and a value within range. Each verdict
+    // below is Chromium's and WebKit's, measured (QC round 4): the 0e39, the 0.0…01e39 and the
+    // 40-digit 1000…0e-38 paint nothing, though they are 0, 10 and 10.
     for (const bad of [
       'M10 10L1e39 50',
       'M10 10L50 -3.5e38',
@@ -160,6 +160,10 @@ describe('parsePath', () => {
       `M10 10L1${'0'.repeat(39)}e-38 50`,
       'M10 10L9e0039 50',
       'M10 10L9e0038 50',
+      // Near the float max, past the margin (a browser drops them too).
+      'M10 10L3.40282356e38 50',
+      'M10 10L340282350e30 50',
+      'M10 10L34.028235e37 50',
     ]) {
       expect(() => parsePath(bad), bad).toThrow(/32-bit float/);
     }
@@ -177,6 +181,7 @@ describe('parsePath', () => {
       [`1${'0'.repeat(38)}e-37`, 10],
       ['1e-39', 1e-39],
       ['1e-999', 0],
+      ['3.4e38', 3.4e38],
     ] as const) {
       expect(parsePath(`M10 10L${good} 50`)[1], good).toEqual({ c: 'L', x, y: 50 });
     }

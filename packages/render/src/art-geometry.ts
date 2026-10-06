@@ -55,7 +55,8 @@ const NUMBER_PARTS = /^[-+]?(\d*)(?:\.\d+)?(?:[eE]([-+]?\d+))?$/;
 /**
  * A number's integer digits as a browser reads them: right to left, each digit times its
  * place value, summed in 32-bit floats. The 40th place value overflows a float, so a part
- * of 40 or more digits is infinite — zeros included — and so is the float's maximum written
+ * of 40 or more digits is not finite (infinite, or NaN where an overflowed place value meets a
+ * 0) — zeros included — and so is the float's maximum written
  * out in full, whose sum rounds up past it.
  */
 function floatInteger(digits: string): number {
@@ -86,8 +87,9 @@ const isNumber = (token: string): boolean => !COMMAND_LETTERS.includes(token);
  * decimal point is followed by a digit (`'L90. 50'` and `'L1.e1 50'` paint nothing); a number
  * is one the browser can read into the 32-bit float it parses path data into, which it
  * checks part by part: at most 39 integer digits, summing to a finite 32-bit float, an
- * exponent field of at most 38 whatever comes before it, and a value within range (`'L1e39 50'`, `'L0e39 50'` and a
- * 40-digit `'L1000…0e-38 50'` paint nothing, though the last two are 0 and 10; a negative
+ * exponent field of at most 38 whatever comes before it, and a value within range (`'L1e39 50'`,
+ * `'L0e39 50'` and a 40-digit `'L1000…0e-38 50'` paint nothing, though the last two are 0 and
+ * 10; a negative
  * exponent may be any size, as it only underflows); and an arc flag is the one character
  * `0` or `1`, which may be packed against what follows it (`'A40 40 0 0190 50'` is flags 0
  * and 1, then 90 50).
@@ -138,13 +140,15 @@ export function parsePath(d: string): PathCommand[] {
     }
     const v = Number(t);
     // A browser reads path data into 32-bit floats, and a number it cannot hold ends it:
-    // integer digits that sum past a float's range, an exponent field over 38 (`0e39`, though it is
-    // 0), or a value past the range. (Measured in Chromium and WebKit, which agree.)
+    // integer digits that sum past a float's range, an exponent field over 38 (`0e39`, though it
+    // is 0), or a value past the range. Values in (3.4028e38, FLT_MAX] are dropped too, on the
+    // safe side. (Measured in Chromium and WebKit, which agree but for a sliver of 39-digit
+    // integers near 3.4028233e38, which WebKit, summing with fused multiply-adds, reads.)
     const [, whole, exponent] = NUMBER_PARTS.exec(t) ?? [];
     if (
       !Number.isFinite(floatInteger(whole ?? '')) ||
       (exponent !== undefined && Number(exponent) > 38) ||
-      !Number.isFinite(Math.fround(v))
+      !(Math.abs(v) <= 3.4028e38)
     ) {
       throw new Error(`a number past a 32-bit float, which a browser reads it into: '${d}'`);
     }
