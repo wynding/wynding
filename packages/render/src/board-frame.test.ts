@@ -702,11 +702,12 @@ describe('createPolygonLiveLayers — every live layer draws its circles as poly
   it('wraps the shells, the effects and the cues, at the dpr read at each call — never Phaser’s 100-sided arc', () => {
     let dpr = 1;
     const live = createPolygonLiveLayers(
-      () => pathLayer(),
+      (layer) => Object.assign(pathLayer(), { layer }),
       () => dpr,
     );
     for (const name of ['shells', 'effects', 'cues'] as const) {
       const g = live[name];
+      expect(g.layer, `${name}: made under its own name, which sets its depth`).toBe(name);
       dpr = 1;
       g.strokeCircle(0, 0, 30);
       dpr = 2;
