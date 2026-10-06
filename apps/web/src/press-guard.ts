@@ -33,19 +33,23 @@
 //   - The dialog's arrival. Presses are recorded across the whole document (`pointerdown`, since
 //     a tap's `mousedown` and `click` come only at its release, and none come where the dialog
 //     arrived over the board meanwhile). `arm` notes the arrival, and the spot of a press under 2 s
-//     old; a press on a panel control within the window of the arrival, inside the slop of that
-//     spot, is held: it was begun before the dialog was there.
+//     old or still down; a press on a panel control within the window of the arrival, inside the
+//     slop of that spot, is held: it belongs to a gesture begun before the dialog was there. Where
+//     that pointer was still down as the dialog arrived, the arrival is timed from its release
+//     (`pointerup` or `pointercancel`), so a slow tap or a long touch keeps the whole window, and
+//     a press the OS counts as a repeat (`detail` above 1) belongs to the arrival for 2 s, as in
+//     rule 1. A fourth tap of a burst passes: Chromium caps its tap count at 3.
 //   - Keys at the first focus. `holdKeys(el)` gives `el` no Enter or Space for 500 ms: Play again
 //     at the dialog's first focus (a second Enter or Space on the board as the run ends), and after
 //     an accepted Send.
 //   - Keys after a keyboard activation. One (`detail` 0) that moves focus to another panel control
-//     gives that control the same hold (Space twice on Give feedback would check the first rating;
+//     (checked at the next task, or at the next key if that comes first) gives that control the same hold (Space twice on Give feedback would check the first rating;
 //     Enter twice on Not now would reopen the survey). The hold covers any control, a radio
 //     included, and is checked before the auto-repeat rule.
 //
 // What always passes: a keyboard activation (its click has `detail` 0, as a script's `click()`
 // does), a repeat on the same control (a double-click on Run data opens and closes it), and a
-// press beyond the slop. A press with another button than the main one is ignored. Every press
+// press beyond the slop. A press with another button than the main one activates nothing and is no press's reference (its `pointerdown` still marks the arrival's spot). Every press
 // that passes, a repeat included, is the one the next press is measured from; a held press
 // changes nothing, so a triple-click's third press is held like its second. The click a label
 // forwards to its control, for a press on the label's text, is part of that press, wherever the
@@ -55,11 +59,15 @@
 // An auto-repeated Enter or Space on a panel button activates nothing (the key's own press and
 // release still do, once).
 
-/** The double-click window: a press this soon after the last one belongs to its gesture. */
+/** The double-click window: a press this soon after the last one belongs to its gesture, and a
+ *  press on a panel control this soon after the dialog's arrival (timed from the pointer's
+ *  release, where it was still down) belongs to the arrival's. */
 export const PRESS_GUARD_WINDOW_MS = 500;
 
 /** How long a press the OS counts as a repeat (`detail` above 1) still belongs to the gesture of
- *  the last one: past the slowest double-click setting a player is likely to choose, capped. */
+ *  the last one, or to the dialog's arrival: past the slowest double-click setting a player is
+ *  likely to choose, capped. Also how old a pointer's press may be, and not still down, for the
+ *  arrival to count it. */
 export const PRESS_GUARD_REPEAT_MS = 2000;
 
 /** How far a press may land from the last one and still be at the same spot, for a mouse or a
@@ -130,7 +138,8 @@ interface Press {
 
 export interface PressGuard {
   /** The dialog has just arrived, or arrived again: a press made before now landed on whatever
-   *  stood there before it, so the arrival counts as the layout moving. */
+   *  stood there before it, so the arrival counts as the layout moving. It also notes the time and
+   *  spot of the last pointerdown, where that is under 2 s old or its pointer is still down. */
   arm(): void;
   /** Focus has just been moved to `el` for the player: `el` takes no Enter or Space for
    *  `PRESS_GUARD_KEY_HOLD_MS`. */
@@ -198,7 +207,7 @@ export function guardPresses(root: HTMLElement): PressGuard {
         ? PRESS_GUARD_TOUCH_SLOP_PX
         : PRESS_GUARD_SLOP_PX;
     // The dialog has just arrived under a pointer that was pressing: a press at that spot this
-    // soon after it was begun before the dialog was there.
+    // soon after belongs to a gesture begun before the dialog was there.
     if (arrival !== null && root.contains(control)) {
       const since = event.timeStamp - arrival.at;
       if (

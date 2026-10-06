@@ -20,7 +20,8 @@
 // was not aimed at (`press-guard.ts`). And the status region never shrinks within one dialog, so
 // a shorter message is not one of the things that move. The panel opens with Play again focused,
 // unless Play again is not wholly in view at the top of the panel (a short window at heavy text
-// zoom): then the heading takes focus (`open`).
+// zoom): then the heading takes focus (`open`). Play again, so focused, takes no Enter or Space
+// for 500 ms, so a second key meant for the board does not start a new run.
 //
 // One sentence carries the score and the stars to assistive tech (`results.summary`, today's
 // string): it is the dialog's description, and the visual stars and score are `aria-hidden`
@@ -100,8 +101,8 @@ export interface ResultsPanel {
   render(outcome: ResultsOutcome): void;
   /** The dialog has just been shown, or shown again: its arrival counts as the layout moving
    *  under any press made before it (`press-guard.ts`). Place the panel, then give it its first
-   *  focus — Play again (ADR 0014 §1), or the heading where Play again is not wholly in view at
-   *  the top. */
+   *  focus — Play again (ADR 0014 §1), which then takes no Enter or Space for 500 ms, or the
+   *  heading where Play again is not wholly in view at the top. */
   open(): void;
   /** Move focus to Play again, where an accepted Send sends it (ADR 0014 §1): without the
    *  browser's scroll after a POINTER press (`focusAfterRender`), and taking no Enter or Space
