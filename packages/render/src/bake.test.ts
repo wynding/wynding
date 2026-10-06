@@ -15,10 +15,12 @@ import {
   ATLAS_GUTTER_TEXELS,
   ATLAS_MAX_WIDTH,
   MIN_BAKE_SCALE,
+  type AtlasFrame,
+  type AtlasLayout,
   type BakeInputs,
 } from './bake';
 import type { ColourMode } from './types';
-import { atlasFrameSpecs, PLATE_FRAME_KEY } from './art-frames';
+import { atlasFrameSpecs, PLATE_FRAME_KEY, type FrameSpec } from './art-frames';
 import {
   fakeContext as sharedContext,
   fakePath as makePath,
@@ -175,21 +177,35 @@ describe('paintAtlas', () => {
   });
 
   it('paints every frame’s art — a batched rect included — before its clip is restored', () => {
-    const layout = layoutAtlas(10, 1, 4096);
+    // An opaque `fillRect` is held in the adapter's batch (`canvas-graphics.ts`): it must be
+    // flushed inside its own frame, before that frame's restore, or it would paint unclipped
+    // — or into the next frame. Until C3 (#181) the square creep silhouette was such a rect;
+    // creeps are art now and no atlas painter draws one, so a frame that does is built here.
+    const frame = (key: string, x: number, paint: FrameSpec['paint']): [string, AtlasFrame] => [
+      key,
+      { key, x, y: 0, width: 12, height: 12, anchorX: 6, anchorY: 6, paint },
+    ];
+    const layout: AtlasLayout = {
+      scale: 1,
+      width: 32,
+      height: 12,
+      frames: new Map([
+        frame('batched', 0, (g) => {
+          g.fillStyle(0xffffff, 1);
+          g.fillRect(2.5, 2.5, 7, 7);
+        }),
+        frame('next', 16, () => undefined),
+      ]),
+    };
     const ctx = fakeContext();
     paintAtlas(ctx, layout, PAL, makePath);
-    // The square silhouette is a single opaque fillRect, held in the adapter's batch: it
-    // must be flushed inside its own frame, before that frame's restore.
-    const keys = [...layout.frames.keys()];
-    const inFrame = frameSegments(ctx.ops)[keys.indexOf('creep:square:normal:standard')]!;
-    // The square's OWN rect — not the clip's, which is also a `rect` in this slice: at 10px
-    // cells r = 3.5, so the frame is 2 × (⌈3.5⌉ + 2) = 12 texels with its centre at 6, and the
-    // square spans 6 ± 3.5 in frame-local px.
-    const square = inFrame.findIndex(
+    const [inFrame] = frameSegments(ctx.ops);
+    // The square's OWN rect — not the clip's, which is also a `rect` in this slice.
+    const square = inFrame!.findIndex(
       (o) => o.op === 'rect' && JSON.stringify(o.args) === JSON.stringify([2.5, 2.5, 7, 7]),
     );
     expect(square).toBeGreaterThanOrEqual(0);
-    expect(inFrame.slice(square + 1).some((o) => o.op === 'fill')).toBe(true);
+    expect(inFrame!.slice(square + 1).some((o) => o.op === 'fill')).toBe(true);
   });
 
   it('hands every art path string to the Path2D factory, and draws the path it gets back', () => {

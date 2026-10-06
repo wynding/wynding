@@ -10,6 +10,7 @@
 // quiet structural fill excluded from the gate (identity carried by geometry); `spark` is
 // exempt (transient fading FX, non-essential — see `palette.test.ts`).
 
+import type { CreepFamily } from './creep-paint';
 import type { TowerRole } from './tower-paint';
 import type { ColourMode } from './types';
 
@@ -21,8 +22,24 @@ export interface Palette {
   /** Lane entrance / exit glyph tints. */
   readonly entrance: number;
   readonly exit: number;
-  /** Creep silhouette + its health pip. */
+  /** The creep FAMILY hues (visual pass C3, #181) — the colour a creep's body is filled in,
+   *  the second channel beside its silhouette (`CreepFamily`, `creep-paint.ts`), and what its
+   *  HP bar fills with while it is not low. `creep` is the NORMAL family's — `normal`,
+   *  `resolute`, and any id the catalog has never heard of — and was every creep's colour
+   *  until C3; each other family has its own. Gated in every mode (`palette.test.ts`): each
+   *  ≥ 3:1 against the floor and the plate it can cross, the ink outline ≥ 3:1 against each,
+   *  the families DISTINCT under the mode's own simulated colour-vision deficiency, and each
+   *  clear of every status-cue colour. Read them through `creepColour`. */
   readonly creep: number;
+  readonly creepSwarm: number;
+  readonly creepFast: number;
+  readonly creepArmored: number;
+  readonly creepFlying: number;
+  readonly creepBoss: number;
+  /** The HP bar's fill below `isLowHp`'s threshold — the bar's colour turns to this while its
+   *  LENGTH carries how much HP is left (dual encoding). Since C3 it is the bar's alone: a
+   *  creep's body keeps its family hue at any HP. Gated distinct from every family hue under
+   *  each mode's simulation, so the turn reads on every creep. */
   readonly creepLowHp: number;
   /** The tower plate's RIM (visual pass, #181) — the outline that carries a tower's 2×2
    *  footprint edge. The plate itself (`plate`) is only ~1.28:1 against the floor, so the rim
@@ -70,28 +87,26 @@ export interface Palette {
    *  shape cue the telegraph ALWAYS draws (`creep-paint.ts`); an essential cue, gated
    *  ≥ 3:1 like every other opaque cue (`palette.test.ts`). The jolt ring draws OUTSIDE
    *  the silhouette (r×1.15), so its contrast partner is the board FLOOR, like the slow
-   *  ring and the DoT pips. The additional gate against `creep` is belt-and-braces for
-   *  the `flicker`, which does still draw inside at r×0.85. */
+   *  ring and the DoT pips. The `flicker` still draws inside at r×0.85, on the creep's own
+   *  body — since C3 a family hue, which no single colour clears in every family (the
+   *  luminance sandwich `palette.test.ts` derives) — so it carries an ink under-stroke like
+   *  every other cue, and what is gated is that ink against every body. */
   readonly stunned: number;
   /** Ward cue (M2-S6) — the redundant colour channel behind the always-on outer ring
    *  `wardPaintOps` draws for a creep whose catalog definition carries an immunity. Not
    *  a timed status (see CONTEXT.md's Ward term), so gated ≥ 3:1 like every other
    *  opaque cue (`palette.test.ts`) with no motion-cue caveat. */
   readonly warded: number;
-  /** Airborne cue (M2-S7) — the redundant colour channel behind the always-on wingspan
-   *  shape cue `airborneCuePaintOps` draws for a creep whose catalog `domain` is `'air'`.
-   *  Not a timed status (see CONTEXT.md's Domain entry), so gated ≥ 3:1 like every
-   *  other opaque cue (`palette.test.ts`) with no motion-cue caveat — same posture as
-   *  `warded`. The wingspan draws entirely OUTSIDE the silhouette and outside every
-   *  other cue's radius — apex at r×3.4, tips at ≈ r×3.23, each moved out a further
-   *  1.25px for its ink outline (≈ r×3.76 and r×3.57 at r = 3.5) — so its contrast
-   *  partners are what lies there: the board floor, and a tower in the next cell up — its
-   *  plate and rim under the light stroke, its role-coloured head under the ink outline,
-   *  each pair gated. Radii are NOT restated beyond that: the authoritative ordering,
-   *  and the reason it must stay outside the ward, is derived at `creep-paint.ts`'s
-   *  CUE-RADIUS ORDERING block. (An earlier version of this comment quoted r×1.1/r×1.3,
-   *  the draft ship-review rejected for sitting on the slow ring — a reader auditing
-   *  collisions from here would have reconstructed the exact bug that was fixed.) */
+  /** Airborne cue (M2-S7) — the redundant colour channel behind the always-on shape cue a
+   *  creep whose catalog `domain` is `'air'` carries: since C4 (#181) the fill of the two
+   *  WINGS attached to its body, each outlined in ink (`CREEP_WINGS`, `creep-art.ts`). Not a
+   *  timed status (see CONTEXT.md's Domain entry), so gated ≥ 3:1 like every other opaque cue
+   *  (`palette.test.ts`) with no motion-cue caveat — same posture as `warded`. A flyer flies
+   *  straight at the exit over whatever towers stand in the way, so its wings lie on the
+   *  floor, a plate, a rim, a role-coloured head or another creep: the light fill reads on
+   *  the dark ones and the ink outline on the light ones, each pair gated. (Until C4 it was
+   *  a detached chevron floating more than a cell above the creep — `creep-paint.ts`'s
+   *  CUE-RADIUS ORDERING block records why it sat there and why it no longer has to.) */
   readonly airborne: number;
   /** Support-aura cue (M2-S8) — the colour channel behind the adjacency SHELL
    *  `drawAuraShells` strokes one cell out from a `beacon`'s footprint. Drawn on the board
@@ -117,8 +132,18 @@ const DEFAULT: Palette = {
   border: 0x3a4358,
   entrance: 0x56b4e9, // sky blue
   exit: 0xe69f00, // orange
-  creep: 0xf0e442, // yellow
-  creepLowHp: 0xd55e00, // vermillion (low-HP tint; pip length also shrinks)
+  // The style frame's creep families (C3, #181), nudged only where the distinctness gate
+  // needed it: the frame's own swarm and flying (pale yellow, cream) sat 18.24 ΔE76 apart and
+  // its normal and fast (yellow, yellow-green) 19.79, so swarm, fast and flying moved by
+  // 3.4, 6.2 and 4.5 ΔE76 to clear 25 (`palette.test.ts`). Normal, armored and boss are the
+  // frame's own.
+  creep: 0xf0e442, // yellow — the normal family
+  creepSwarm: 0xf6ef94, // pale yellow
+  creepFast: 0xbce761, // yellow-green
+  creepArmored: 0xe89a5c, // orange
+  creepFlying: 0xfff3cc, // cream
+  creepBoss: 0xff5a64, // red
+  creepLowHp: 0xd55e00, // vermillion — the HP bar's fill when low (its length shrinks too)
   // The plate rim: a light slate, neutral on every colour-vision axis, so one value serves
   // every mode — 4.08:1 against the floor (and 3.19:1 against the plate it outlines).
   tower: 0x707f9c,
@@ -161,32 +186,33 @@ const DEFAULT: Palette = {
   // It IS drawn over a tower when a warded creep paths across a footprint (the ring spans
   // ~1.54 cells). Since the visual pass that surface is mostly the plate (8.91:1); the thin
   // rim (`tower`) measures 2.79:1 and the light role-coloured heads as little as 1.12:1
-  // (default control). That is the same posture every sibling cue already has — `poisoned`'s
-  // pips at r×1.8 overlap footprints too, and are gated against the tower's surfaces by
-  // byte-DISTINCTNESS, not contrast — so it is consistent rather than a new hole, but the
-  // cue-radius layout as a whole is owed a pass.
+  // (default control). Since C3 (#181) the ring carries an ink under-stroke, as every
+  // creep cue does, and the ink is gated ≥ 3:1 against the rim and every head: the gold
+  // reads on the dark surfaces, its ink edge on the light ones (`palette.test.ts`'s
+  // surface gate).
   warded: 0xffd23f,
   // Pale ice-blue (M2-S7) — distinct from every other cue in this table, and gated on
-  // contrast against the surfaces it is actually drawn over: the floor (14.82:1) and, since
-  // the visual pass drew towers as a plate with a head, the plate (11.59:1) and its rim
-  // `tower` (3.63:1) — see `palette.test.ts`. Over the light role-coloured HEADS it can
-  // also cross, this light stroke cannot read and is not gated: it clears none of the light
-  // ones (1.05:1 over the default support white), and no single colour clears both them and
-  // the dark plate. So the cue carries an ink outline (`ART_INK`), which is gated ≥ 3:1
-  // against every role colour in every mode: the light core reads on the dark surfaces, the
-  // ink edge on a light head (docs/accessibility-checklist.md; the cue's own redraw, C4,
-  // is to come).
+  // contrast against the surfaces it is actually drawn over: the floor (14.82:1), the plate
+  // (11.59:1) and its rim `tower` (3.63:1) — see `palette.test.ts`. Since C4 (#181) it fills a
+  // flyer's two WINGS, attached to its body, and a flyer crosses whole towers on its straight
+  // line to the exit; over the light role-coloured heads, and the light creep families, this
+  // light fill cannot read and is not gated (1.05:1 over the default support white), and no
+  // single colour clears both them and the dark plate. So each wing is outlined in ink
+  // (`ART_INK`), which is gated ≥ 3:1 against every role colour and every creep family in
+  // every mode: the light fill reads on the dark surfaces, the ink edge on the light ones
+  // (docs/accessibility-checklist.md). Until C4 the same two halves made up a detached
+  // chevron a cell above the creep — the light stroke and an ink outline under it.
   //
   // WHY IT IS NOT THE ELECTRIC CYAN THIS SHIPPED AS FIRST (0x33ccff): that measured
   // 1.83:1 against `tower` 0x009e73 and 2.77:1 against 0x0072b2, both under this repo's
-  // own MIN_CUE_CONTRAST of 3.0 (ship-review, M2-S7). The wingspan sits a cell above its
-  // creep, so on the shipped board — where every creep walks the row-11 lane past
-  // tower footprints on rows 10 and 12 — being drawn over a tower is the NORMAL case,
-  // not an incidental one. `warded`'s 2.37:1 note below was the precedent invoked for
-  // accepting it; a precedent for tolerating a miss is not a reason to add one when a
-  // compliant colour exists. Lightening also widens the gap from `slowed`'s sky blue
-  // under tritanopia, where cyan-vs-sky-blue sat on exactly the axis that palette
-  // avoids.
+  // own MIN_CUE_CONTRAST of 3.0 (ship-review, M2-S7). The chevron of the day sat a cell
+  // above its creep, so on the shipped board — where every creep walks the row-11 lane
+  // past tower footprints on rows 10 and 12 — being drawn over a tower was the NORMAL case,
+  // not an incidental one (as it is for today's wings, on a flyer crossing towers).
+  // `warded`'s 2.37:1 note below was the precedent invoked for accepting it; a precedent
+  // for tolerating a miss is not a reason to add one when a compliant colour exists.
+  // Lightening also widens the gap from `slowed`'s sky blue under tritanopia, where
+  // cyan-vs-sky-blue sat on exactly the axis that palette avoids.
   //
   // TRITAN RESIDUAL, measured and deliberately ACCEPTED (not overlooked): in tritan
   // `stunned` is 0xfffff5, so airborne-vs-stunned is ~1.10:1 — perceptually one
@@ -196,15 +222,12 @@ const DEFAULT: Palette = {
   // 0xb0d8ff → 2.30, 0x8fb8f0 → 1.68; against today's plate rim: 2.47, 2.71, 1.98).
   // Choosing separation here would trade an enforced gate for an unenforced one. Shape
   // carries the distinction instead, decisively and per ADR 0003's primary channel: a stun
-  // jolt is a RING at r×1.15; the airborne cue is two line strokes whose NEAREST point is
-  // the wingtips — r×3.23 plus the 1.25px the chevron moved out for its ink outline, r×3.57
-  // at r = 3.5 — over a cell out from the creep centre: a separation no near-white pair can
-  // erase. Restated from the `airborne` key
-  // above, whose own note names `creep-paint.ts`'s CUE-RADIUS ORDERING as the authority
-  // precisely so a restatement cannot become a second source of truth. This line proved
-  // the point: #126 moved the strokes out from r×2.6–2.9 and this sentence went stale,
-  // caught by external review rather than by the move. Same posture as `poisoned`'s own
-  // tritan note.
+  // jolt is a RING around the body at r×1.15; the airborne cue is two ink-outlined
+  // TRIANGLES fixed to the body's sides, each reaching about two radii out — never a closed
+  // curve — and both read apart by their ink edges besides (`creep-paint.ts`'s CUE-RADIUS
+  // ORDERING block is the authority for the geometry, restated here only as shapes so a
+  // restatement cannot become a second source of truth: #126 once moved the strokes and a
+  // sentence here went stale). Same posture as `poisoned`'s own tritan note.
   airborne: 0xdcf8ff,
   // Pale lavender (M2-S8) — clearing the floor at 7.64:1 composited at
   // `AURA_SHELL_ALPHA`, and byte-distinct from every cue the shell can share a surface
@@ -224,7 +247,18 @@ const DEFAULT: Palette = {
 // Only the keys that actually differ from DEFAULT are overridden.
 const PROTAN_DEUTAN: Palette = {
   ...DEFAULT,
-  creepLowHp: 0xe69f00,
+  // The creep families, re-tuned so the six (and the HP bar's low colour) stay apart under
+  // BOTH simulated protanopia and deuteranopia (min ΔE76 26.01; the default table's fall to
+  // 12.35 under protanopia, normal and fast closest, and to 12.15 under deuteranopia, armored
+  // and boss closest). Separated by LIGHTNESS and the blue–yellow axis these deficiencies
+  // keep: a bright yellow normal against a paler yellow-green fast, a stone-grey swarm, the
+  // cream flyer, and a deeper rose boss. Armored keeps the default's orange.
+  creep: 0xfff41d,
+  creepSwarm: 0xbfc1b4,
+  creepFast: 0xedff7a,
+  creepFlying: 0xfff4c2,
+  creepBoss: 0xe34a67,
+  creepLowHp: 0xf28e00,
   // The role colours, re-tuned so the six stay apart under BOTH simulated protanopia and
   // deuteranopia (min ΔE76 31.79 / 31.38; the default six fall to 20.40 under protanopia,
   // ice blue and orchid closest, and to 11.23 under deuteranopia, amber and red-orange
@@ -256,10 +290,22 @@ const TRITAN: Palette = {
   roleSupport: 0xffe3e2,
   entrance: 0x009e73,
   exit: 0xd55e00,
-  creep: 0xcc79a7, // magenta
+  // The creep families re-tuned for simulated tritanopia (min ΔE76 26.02, the HP bar's low
+  // colour included; the default table's fall to 6.38 there, swarm and flying all but one
+  // colour). Normal moves to a yellow-green and fast to a leaf green, the swarm darkens to an
+  // ochre and the flyer cools to a mint, each kept ≥ 15 ΔE76 from every status-cue colour this
+  // mode draws around them (`palette.test.ts`) — this mode's cue colours sit nearer the
+  // yellows than the default's do. Armored and boss keep the default's orange and red. Until
+  // C3 this mode's one creep colour was the magenta 0xcc79a7, which the notes below on
+  // `poisoned` and `stunned` were written against.
+  creep: 0xd3eb28,
+  creepSwarm: 0xbfa95a,
+  creepFast: 0x80b426,
+  creepFlying: 0xadf1cd,
+  creepLowHp: 0xff242d,
   range: 0x56b4e9,
-  // Yellow here, not DEFAULT's reddish purple: this mode gives `creep` the magenta
-  // 0xcc79a7, and a telegraph byte-identical to a creep body would be no cue at all.
+  // Yellow here, not DEFAULT's reddish purple: this mode gave `creep` the magenta
+  // 0xcc79a7 until C3, and a telegraph byte-identical to a creep body would be no cue at all.
   // What this buys, stated precisely (QC round 2 measured it): yellow separates well
   // from the BACKGROUNDS a pip is actually drawn over — the dark `floor`, and what was
   // then this mode's bluish-green tower body (today a tower is the slate `plate`, 9.73:1,
@@ -267,9 +313,10 @@ const TRITAN: Palette = {
   // first draft unusable. It does NOT separate strongly from this mode's magenta `creep` under
   // simulated tritanopia; the pips sit outside the silhouette at r*1.8 so they are not
   // drawn ON it, and the always-on SHAPE cue carries the state regardless, colour being
-  // the redundant channel per the Telegraph glossary. The gate below is byte-equality,
-  // so it cannot see perceptual distance — a real CVD-distance gate is worth having and
-  // is not in this story.
+  // the redundant channel per the Telegraph glossary. The byte-equality gate below cannot
+  // see perceptual distance; since C3 a CVD-distance gate does — every creep family and the
+  // HP bar's low colour ≥ 15 ΔE76 from every status-cue colour under this mode's simulation
+  // (`palette.test.ts`) — and the pips carry an ink under-stroke, which reads on any body.
   poisoned: 0xf0e442,
   // DEFAULT's electric-violet `stunned` fails this mode's `creep` (magenta 0xcc79a7 sits
   // at a very different luminance than DEFAULT's yellow), so this mode overrides it.
@@ -283,7 +330,9 @@ const TRITAN: Palette = {
   // shrinking white disc straight through the jolt ring's radius, so the guaranteed
   // stun cue vanished on exactly the tick the stun lands. 0xfffff5 sits inside the
   // verified near-white band (clears `creep` at 3.04 and `floor` at 16.36) and is
-  // byte-distinct from `spark`.
+  // byte-distinct from `spark`. (Those `creep` figures are the magenta's. Since C3 a body is
+  // its family's hue and the flicker drawn on it carries an ink under-stroke, so the gate on
+  // it is ink's — `palette.test.ts`.)
   stunned: 0xfffff5,
 };
 
@@ -320,5 +369,24 @@ export function roleColour(pal: Palette, role: TowerRole): number {
       return pal.roleSupport;
     case 'burst':
       return pal.roleBurst;
+  }
+}
+
+/** The hue a creep of `family` wears in `pal` (C3) — its body's fill, and its HP bar's while
+ *  the creep is not low. The one place a family becomes a palette key. */
+export function creepColour(pal: Palette, family: CreepFamily): number {
+  switch (family) {
+    case 'normal':
+      return pal.creep;
+    case 'swarm':
+      return pal.creepSwarm;
+    case 'fast':
+      return pal.creepFast;
+    case 'armored':
+      return pal.creepArmored;
+    case 'flying':
+      return pal.creepFlying;
+    case 'boss':
+      return pal.creepBoss;
   }
 }

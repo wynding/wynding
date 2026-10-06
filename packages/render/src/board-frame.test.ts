@@ -1,4 +1,4 @@
-// board-frame.test.ts — one frame of the board, drawn into three recording layers and five
+// board-frame.test.ts — one frame of the board, drawn into three recording layers and six
 // recording sprite layers: what goes into WHICH live layer (the aura shells into `shells` and
 // nowhere else — M2-S8's guarantee that no shell stripes a tower body, now held by the layer
 // order — the selection and tracers into `effects`, every creep cue, the ghost and the sparks
@@ -19,6 +19,7 @@ import {
 import { createSpritePool } from './sprite-pool';
 import { atlasFrameSpecs, PAD_FRAME_KEY, PLATE_FRAME_KEY, SCORCH_FRAME_KEY } from './art-frames';
 import { AURA_SHELL_ALPHA } from './board-draw';
+import { ART_INK } from './tower-art';
 import { layerDepth } from './layers';
 import { resolvePalette } from './palette';
 import { createProjection, type Projection } from './projection';
@@ -74,6 +75,7 @@ function targets() {
     plates: recordingSprites(),
     heads: recordingSprites(),
     pending: recordingSprites(),
+    creepShadows: recordingSprites(),
     creeps: recordingSprites(),
   };
   return { t: t satisfies BoardTargets, board };
@@ -209,7 +211,8 @@ describe('drawBoardFrame — which live layer each thing is drawn into', () => {
     const { t } = targets();
     drawBoardFrame(t, busyFrame());
     const cues = drawn(t.layers.cues);
-    expect(cues[0]).toBe(`fillRect ${hex(PAL.creep)}`); // the health pip comes first
+    // The rings' ink under-strokes come first (`drawCreepCues`' first pass).
+    expect(cues[0]).toBe(`strokeCircle ${hex(ART_INK)}`);
     const ghost = cues.indexOf(`strokeRoundedRect ${hex(PAL.ghostValid)}`);
     const spark = cues.indexOf(`fillCircle ${hex(PAL.spark)}`);
     expect(ghost).toBeGreaterThan(0);
@@ -218,11 +221,15 @@ describe('drawBoardFrame — which live layer each thing is drawn into', () => {
       `strokeCircle ${hex(PAL.slowed)}`,
       `fillCircle ${hex(PAL.poisoned)}`,
       `strokeCircle ${hex(PAL.warded)}`,
-      `lineBetween ${hex(PAL.airborne)}`,
+      `fillRect ${hex(PAL.creep)}`, // the HP bar's fill, in the creep's family hue
     ]) {
       expect(cues.indexOf(cue), cue).toBeGreaterThan(0);
       expect(cues.lastIndexOf(cue), cue).toBeLessThan(ghost); // every creep cue before the ghost
     }
+    // The airborne cue is no live cue since C4: a flyer's wings are baked into its body's frame
+    // (the creeps sprite layer, below), so nothing here is drawn in the airborne colour.
+    expect(cues.some((c) => c.endsWith(` ${hex(PAL.airborne)}`))).toBe(false);
+    expect(t.creeps.syncs[0]!.map((p) => p.frame)).toEqual(['creep:triangle:normal:air']);
     expect(cues.indexOf(`strokeCircle ${hex(PAL.range)}`)).toBeGreaterThan(ghost); // its range ring
   });
 
@@ -244,7 +251,7 @@ describe('drawBoardFrame — which live layer each thing is drawn into', () => {
 });
 
 describe('drawBoardFrame — the sprite layers and the board image', () => {
-  it('shows each sprite layer its placements: plates, heads, queued builds, creeps — and no scorch with nothing gone off', () => {
+  it('shows each sprite layer its placements: plates, heads, queued builds, creeps and their shadows — and no scorch with nothing gone off', () => {
     const { t } = targets();
     drawBoardFrame(t, busyFrame());
     // Each committed tower is two sprites: its plate in `plates`, its head — the buffed one
@@ -259,8 +266,13 @@ describe('drawBoardFrame — the sprite layers and the board image', () => {
     expect(t.pending.syncs.map((s) => s.map((p) => p.frame))).toEqual([
       ['tower:pending:ringed:control'],
     ]);
+    // The busy frame's creep flies: its body — wings and all — in `creeps`, and its shadow, at
+    // its true position, in `creepShadows`.
     expect(t.creeps.syncs.map((s) => s.map((p) => p.frame))).toEqual([
-      ['creep:triangle:normal:standard'],
+      ['creep:triangle:normal:air'],
+    ]);
+    expect(t.creepShadows.syncs.map((s) => s.map((p) => p.frame))).toEqual([
+      ['creep:shadow:normal:air'],
     ]);
   });
 
@@ -306,11 +318,13 @@ describe('drawBoardFrame — the sprite layers and the board image', () => {
       t.plates.hidden,
       t.heads.hidden,
       t.pending.hidden,
+      t.creepShadows.hidden,
       t.creeps.hidden,
-    ]).toEqual([1, 1, 1, 1, 1]);
+    ]).toEqual([1, 1, 1, 1, 1, 1]);
     drawBoardFrame(t, busyFrame());
     expect(board.visible).toEqual([true, false, true]);
     expect(t.creeps.syncs).toHaveLength(2);
+    expect(t.creepShadows.syncs).toHaveLength(2);
   });
 });
 
@@ -456,6 +470,25 @@ describe('drawBoardFrame — a tracer converges on where its creep is DRAWN', ()
       expect([raw.x, raw.y]).not.toEqual([placed.cx, placed.cy]);
     }
   });
+
+  it('at a flyer, it arrives at the flyer’s TRUE position — where its shadow lies, below its lifted body', () => {
+    // Recorded as it is, not endorsed: tracers converge on the sim's point, and a flyer's body
+    // is drawn lifted above it since C4 (#181). Where a tracer should meet a flyer is for the
+    // visual pass's shots (C2) to decide; this pins today's answer so a change is a decision.
+    const frame = busyFrame();
+    const c = creep({ domain: 'air' });
+    const { t } = targets();
+    drawBoardFrame(t, { ...frame, curVm: vm([], [c]) });
+    const [shadow] = t.creepShadows.syncs[0]!;
+    const shadowAnchor = frame.frames.get(shadow!.frame)!;
+    const dot = t.layers.effects.calls.find((call) => call.method === 'fillCircle')!;
+    expect(dot.args.slice(0, 2)).toEqual([
+      shadow!.x + shadowAnchor.anchorX,
+      shadow!.y + shadowAnchor.anchorY,
+    ]);
+    const body = t.creeps.syncs[0]![0] as CreepPlacement;
+    expect(body.cy).toBeLessThan(dot.args[1] as number); // the body, and its cues, above it
+  });
 });
 
 describe('drawBoardFrame — a spent mine’s scorch, in the scorches layer, on the frame’s own clock', () => {
@@ -584,7 +617,7 @@ describe('createLiveLayers / createSpriteLayers — each layer made under its ow
     ]);
   });
 
-  it('forEachLayerSprite visits every sprite of all five sprite layers — what a rebake repoints at its new atlas', () => {
+  it('forEachLayerSprite visits every sprite of all six sprite layers — what a rebake repoints at its new atlas', () => {
     // As `scene.ts` makes them: a pool per layer, each sprite knowing which layer made it.
     const layers = createSpriteLayers((layer) =>
       createSpritePool((p) => ({
@@ -600,7 +633,7 @@ describe('createLiveLayers / createSpriteLayers — each layer made under its ow
         setAlpha: () => undefined,
       })),
     );
-    const names = ['scorches', 'plates', 'heads', 'pending', 'creeps'] as const;
+    const names = ['scorches', 'plates', 'heads', 'pending', 'creepShadows', 'creeps'] as const;
     for (const name of names) {
       layers[name].sync([0, 1].map((i) => ({ frame: `${name}:${i}`, x: 0, y: 0 })));
     }
@@ -617,11 +650,12 @@ describe('createLiveLayers / createSpriteLayers — each layer made under its ow
       layers.plates.name,
       layers.heads.name,
       layers.pending.name,
+      layers.creepShadows.name,
       layers.creeps.name,
-    ]).toEqual(['scorches', 'plates', 'heads', 'pending', 'creeps']);
+    ]).toEqual(['scorches', 'plates', 'heads', 'pending', 'creepShadows', 'creeps']);
   });
 
-  it('so depths read from those names keep every shell under every plate and head (M2-S8), every scorch under every shell, and the rest in order', () => {
+  it('so depths read from those names keep every shell under every plate and head (M2-S8), every scorch under every shell, every creep shadow under every creep, and the rest in order', () => {
     // How `scene.ts` makes them: each object's depth is `layerDepth` of the name it was made under.
     const live = createLiveLayers((name) =>
       Object.assign(recordingLayer(), { depth: layerDepth(name) }),
@@ -634,9 +668,10 @@ describe('createLiveLayers / createSpriteLayers — each layer made under its ow
       sprites.plates,
       sprites.heads,
       sprites.pending,
+      sprites.creepShadows,
       live.effects.depth,
       sprites.creeps,
       live.cues.depth,
-    ]).toEqual([0, 1, 2, 3, 4, 5, 6, 7, 8]);
+    ]).toEqual([0, 1, 2, 3, 4, 5, 6, 7, 8, 9]);
   });
 });

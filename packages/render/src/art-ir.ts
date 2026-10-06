@@ -1,13 +1,15 @@
 // art-ir.ts — the vector art kit's intermediate representation (visual pass, #181): a small,
 // typed, Phaser-free description of a piece of art as a list of shapes, each with its own
 // paint. The IR is the EDITABLE MASTER of the game's art (ADR 0002: art is original and its
-// master is committed — here, as code): `tower-art.ts` holds the towers' art in it, the
-// Canvas2D painter (`art-paint.ts`) draws it into the board atlas and the Card swatches, and
-// `art-geometry.ts` measures it (frame sizes, and the tests that reason about what the art
-// covers).
+// master is committed — here, as code): `tower-art.ts` holds the towers' art in it and
+// `creep-art.ts` the creeps', the Canvas2D painter (`art-paint.ts`) draws it into the board
+// atlas and the Card swatches, the SVG renderer (`art-svg.ts`) into the wave strip's creep
+// icons, and `art-geometry.ts` measures it (frame sizes, and the tests that reason about
+// what the art covers).
 //
 // Coordinates are DESIGN UNITS. A tower's art lives in a 64-unit box — one 2×2 footprint —
-// and is drawn scaled by `2 × cellPx / 64` CSS px per unit, so it is resolution-independent:
+// and is drawn scaled by `2 × cellPx / 64` CSS px per unit; a creep's is drawn around its
+// body's centre, ten units to its radius (`creep-art.ts`). So art is resolution-independent:
 // the same master bakes at every cell size and device pixel ratio. Stroke widths and dash
 // lengths are design units too (they scale with the art, as in SVG), with an optional floor
 // in CSS px so a line that matters still reads at a phone's cell size.
@@ -36,7 +38,11 @@ export type ArtColour =
   | 'gloss'
   /** A spent mine's scorch mark, and its cracks. */
   | 'scorch'
-  | 'crack';
+  | 'crack'
+  /** A creep's FAMILY hue (`creepColour`, palette) — its body's fill (C3). Creep art only. */
+  | 'family'
+  /** `palette.airborne` — the fill of a flyer's wings (C4). Creep art only. */
+  | 'airborne';
 
 /** How one shape is painted. A shape may fill, stroke, or both (fill first, as in SVG). */
 export interface ArtPaint {

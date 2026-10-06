@@ -4,32 +4,31 @@
 // per `CanvasFeatures.js`), so nothing in it can be unit-tested. Nothing here needs Phaser —
 // every function draws through `GraphicsLike` below, a structural slice of
 // `Phaser.GameObjects.Graphics` that a real Graphics satisfies for free and that
-// `scene.test.ts` satisfies with a recording fake. That is what keeps the hexagon and
-// poisoned-pip branches witnessed: `scene.ts` is coverage-excluded and Playwright + axe
-// cannot see canvas cues.
+// `scene.test.ts` satisfies with a recording fake. That is what keeps branches like the
+// poisoned pips witnessed: `scene.ts` is coverage-excluded and Playwright + axe cannot see
+// canvas cues.
 //
-// Two kinds of function live here since the visual pass's V2 (#181), which bakes static art
-// into textures instead of re-recording it every frame:
-//
-//  - A STATIC-ART PAINTER (`paintCreepSilhouette`) runs at BAKE time only, into a
-//    Canvas2D-backed `GraphicsLike` (`canvas-graphics.ts`), once per atlas frame
-//    (`art-frames.ts`). Its geometry is the per-frame draw's, unchanged — the centre it is
-//    handed is simply frame-local now. Towers are no longer drawn here: since the visual
-//    pass they are vector art (`tower-art.ts`), painted by the art kit (`art-paint.ts`).
-//  - PER-FRAME EXECUTORS (`drawAuraShells`, `drawSelection`, `drawCreepCues`) still draw into
-//    a Phaser `Graphics` every frame: what moves, or comes and goes, stays live. Which layer
-//    each one draws into is decided by `board-frame.ts` (and pinned by its test), and where
-//    that layer sits is `layers.ts`'s business — neither is call order's.
+// Since the visual pass's V2 (#181) baked static art into textures, what lives here are the
+// PER-FRAME EXECUTORS (`drawAuraShells`, `drawSelection`, `drawCreepCues`): they draw into a
+// Phaser `Graphics` every frame, because what moves, or comes and goes, stays live. Towers
+// and creeps are not drawn here: they are vector art (`tower-art.ts`, `creep-art.ts`),
+// painted once into the board atlas by the art kit (`art-paint.ts`). Which layer each
+// executor draws into is decided by `board-frame.ts` (and pinned by its test), and where that
+// layer sits is `layers.ts`'s business — neither is call order's.
 
 import {
   slowTelegraphPaintOps,
   dotTelegraphPaintOps,
   stunTelegraphPaintOps,
   wardPaintOps,
-  airborneCuePaintOps,
-  type CreepSilhouettePaintOp,
+  hpBarPaintOp,
+  type DotTelegraphPaintOp,
+  type SlowTelegraphPaintOp,
+  type StunTelegraphPaintOp,
+  type WardPaintOp,
 } from './creep-paint';
 import { snapToDevicePx } from './device-px';
+import { ART_INK } from './tower-art';
 import type { Projection } from './projection';
 import type { Palette } from './palette';
 import type { RenderVM, RenderOverlay, TowerVM } from './types';
@@ -239,105 +238,105 @@ export function drawSelection(
   }
 }
 
-/** The boss's size multiplier (M2-S10, ruling 2 — size is the ONLY boss cue, no new
- *  `CreepShape` and no new cue ring, since the concentric budget `creep-paint.ts`
- *  documents is already exhausted). Applied AFTER `Math.max(3, cellPx * 0.35)`'s floor,
- *  never inside it — that ordering is LOAD-BEARING, not cosmetic. Below `cellPx ≈ 8.57`
- *  the floor binds and `r` is pinned at 3px regardless of `cellPx`; scaling inside the
- *  floor would then multiply the ALREADY-CLAMPED 3px, giving the boss 3px too (no cue at
- *  all) at exactly the cell size where legibility is worst. Scaling after the floor
- *  always gives the boss 4.5px there — visibly larger than every other creep's 3px,
- *  which is the entire point of a size-only cue. */
-const BOSS_SCALE = 1.5;
-
-/** A creep silhouette's half-size in CSS px — the board's `max(3, cellPx * 0.35)`, then
- *  `BOSS_SCALE` for a boss, AFTER the floor (see the constant's own comment for why that
- *  ordering is load-bearing). One function, because the baked silhouette (`art-frames.ts`)
- *  and the live cues drawn around it (`drawCreepCues`) must agree on it exactly. */
-export function creepRadius(cellPx: number, boss: boolean): number {
-  return Math.max(3, cellPx * 0.35) * (boss ? BOSS_SCALE : 1);
-}
-
-/** Below this remaining-health fraction a creep's silhouette AND its health pip switch to
- *  the warning tint (`pal.creepLowHp`). The pip's LENGTH carries health too, so the colour
- *  is the redundant channel of a dual cue, never the only one. */
-export const CREEP_LOW_HP_FRAC = 0.34;
-
-/** Whether a creep at `hpFrac` wears the low-health tint — the ONE threshold test, shared
- *  by the baked silhouette's frame choice and the live pip's colour. */
-export function isLowHp(hpFrac: number): boolean {
-  return hpFrac < CREEP_LOW_HP_FRAC;
-}
-
-/** The fill a creep's silhouette and health pip share. */
-export function creepFillColour(pal: Palette, lowHp: boolean): number {
-  return lowHp ? pal.creepLowHp : pal.creep;
-}
-
-/** One creep silhouette — keyed on its catalog id's shape (M2-S3, extended M2-S4a, M2-S5a):
- *  `normal` keeps the triangle (a shape cue distinct from the tower's rounded square); `fast`
- *  draws a diamond; `swarm` draws a small square (fragile/numerous, distinct from both at
- *  cell scale); `armored` draws a six-sided plated hexagon (armoured/tanky, distinct from
- *  all three); `resolute` a regular pentagon; an unknown id falls back to the triangle
- *  (total). A STATIC-ART painter: it runs at bake time into an atlas frame, centred where
- *  the frame says; the geometry is the per-frame draw's, unchanged. */
-export function paintCreepSilhouette(
-  g: GraphicsLike,
-  op: Pick<CreepSilhouettePaintOp, 'shape' | 'x' | 'y' | 'r' | 'colour'>,
-): void {
-  const r = op.r;
-  g.fillStyle(op.colour, 1);
-  if (op.shape === 'diamond') {
-    g.fillTriangle(op.x, op.y - r, op.x + r, op.y, op.x, op.y + r);
-    g.fillTriangle(op.x, op.y - r, op.x - r, op.y, op.x, op.y + r);
-  } else if (op.shape === 'square') {
-    g.fillRect(op.x - r, op.y - r, r * 2, r * 2);
-  } else if (op.shape === 'hexagon') {
-    const pts: { x: number; y: number }[] = [];
-    for (let i = 0; i < 6; i++) {
-      const angle = (Math.PI / 3) * i - Math.PI / 2; // apex up, like the other shapes
-      pts.push({ x: op.x + r * Math.cos(angle), y: op.y + r * Math.sin(angle) });
-    }
-    g.fillPoints(pts, true);
-  } else if (op.shape === 'pentagon') {
-    // Regular pentagon (M2-S6, `resolute`): vertex k at angle -90° + k×72°, apex up
-    // like every other shape, generated the way the hexagon loop above already is.
-    const pts: { x: number; y: number }[] = [];
-    for (let i = 0; i < 5; i++) {
-      const angle = ((2 * Math.PI) / 5) * i - Math.PI / 2;
-      pts.push({ x: op.x + r * Math.cos(angle), y: op.y + r * Math.sin(angle) });
-    }
-    g.fillPoints(pts, true);
-  } else {
-    g.fillTriangle(op.x, op.y - r, op.x + r, op.y + r, op.x - r, op.y + r);
-  }
-}
-
-/** What `drawCreepCues` needs of one creep: where its silhouette is DRAWN (`cx`/`cy`, the
- *  centre `placement.ts` snapped its sprite to — PIXELS, never the fixed-point `CreepVM`
- *  point), its radius, its silhouette fill, its health and its cue states. */
+/** What `drawCreepCues` needs of one creep: where its cues are centred (`cx`/`cy` — its BODY
+ *  as drawn: the centre `placement.ts` snapped its sprite to, lifted for a flyer — PIXELS,
+ *  never the fixed-point `CreepVM` point), its radius (its family's size step included), its
+ *  family's hue (the HP bar's fill), its HP and its cue states. */
 export interface CreepCueInput {
   readonly cx: number;
   readonly cy: number;
   readonly r: number;
-  readonly colour: number;
+  readonly hue: number;
   readonly hpFrac: number;
   readonly slowed: boolean;
   readonly poisoned: boolean;
   readonly stunned: boolean;
   readonly warded: boolean;
-  readonly airborne: boolean;
 }
 
-/** Every creep's health pip and status cues, drawn over EVERY creep's silhouette: the
- *  silhouettes are sprites in the layer below (`layers.ts`), so a creep's cues can never be
- *  hidden under a neighbouring creep's body. That is the one ordering V2 (#181) changed on
- *  purpose — creeps used to draw one whole stack at a time (silhouette, pip, cues, then the
- *  next creep), which let a later creep's body cover an earlier creep's rings.
+/** How much wider than its cue an ink under-stroke reaches on each side, CSS px (C3, #181):
+ *  the established way a cue reads on every surface it lands on — its own colour against the
+ *  dark floor and plate, its ink edge against a light tower head, a rim or another creep's
+ *  body (`palette.test.ts` gates both halves). The airborne chevron carried one first (#181
+ *  QC round 1); since C3 every guaranteed cue, and the flicker, does. */
+export const CUE_INK_PX = 1;
+
+/** The slow ring's, the jolt's, the flicker's and the ward's stroke widths, CSS px. */
+const SLOW_RING_PX = 2;
+const SLOW_PULSE_PX = 1;
+const JOLT_PX = 4;
+const FLICKER_PX = 2;
+const WARD_PX = 2;
+
+/** One creep's cue plans for this frame. */
+interface CreepCuePlans {
+  readonly slow: readonly SlowTelegraphPaintOp[];
+  readonly dot: readonly DotTelegraphPaintOp[];
+  readonly stun: readonly StunTelegraphPaintOp[];
+  readonly ward: readonly WardPaintOp[];
+}
+
+/** The plans every creep's cues are drawn from, made once per frame. Every plan takes the
+ *  drawn PIXEL centre, never the raw `CreepVM` (Codex review, PR #78): `CreepVM.x`/`y` are
+ *  fixed-point sim units — 256 per cell — and passing the creep itself drew the first two
+ *  cues ~256× its pixel position, far off-canvas. The slowed telegraph carried that from
+ *  M2-S3 and so had never rendered; M2-S5a reproduced it in the DoT telegraph.
+ *  `scene.test.ts` pins that every plan receives the drawn centre. */
+function cuePlans(
+  pal: Palette,
+  c: CreepCueInput,
+  reducedMotion: boolean,
+  renderTimeMs: number,
+): CreepCuePlans {
+  const x = c.cx;
+  const y = c.cy;
+  return {
+    slow: slowTelegraphPaintOps(
+      { x, y, slowed: c.slowed },
+      c.r,
+      reducedMotion,
+      pal.slowed,
+      renderTimeMs,
+    ),
+    dot: dotTelegraphPaintOps(
+      { x, y, poisoned: c.poisoned },
+      c.r,
+      reducedMotion,
+      pal.poisoned,
+      renderTimeMs,
+    ),
+    stun: stunTelegraphPaintOps(
+      { x, y, stunned: c.stunned },
+      c.r,
+      reducedMotion,
+      pal.stunned,
+      renderTimeMs,
+    ),
+    ward: wardPaintOps({ x, y, warded: c.warded }, c.r, pal.warded),
+  };
+}
+
+/** Every creep's HP bar and status cues, drawn over EVERY creep's body: the bodies are
+ *  sprites in the paint layer below (`layers.ts`), so a creep's cues can never be hidden under
+ *  a neighbouring creep's body — the one ordering V2 (#181) changed on purpose, when creeps
+ *  stopped drawing one whole stack at a time.
  *
- *  Per creep, in the old order: the pip, then the slowed, DoT, stun, ward and airborne cues.
- *  Every cue is centred on the creep's DRAWN centre, so cue and body cannot drift apart by
- *  the sprite's device-pixel snap. */
+ *  Since C3 the cues are drawn in PASSES over every creep, each pass over the one before
+ *  (`creep-paint.ts`'s CUE-RADIUS ORDERING block derives why):
+ *   1. the ink under-strokes of the rings — the slow ring, the stun jolt and flicker, the
+ *      ward — `CUE_INK_PX` wider on each side, so no ink ever covers a ring's colour;
+ *   2. the rings in their colours: the slowed telegraph (M2-S3; its ring ALWAYS, its pulse
+ *      only when motion is allowed — WCAG 2.3.3 / GAG §2), the stun telegraph (M2-S6; the
+ *      jolt OUTSIDE the silhouette always, the flicker inside it with motion), the ward
+ *      (M2-S6; catalog-derived, so no motion cue and no reduced-motion branch);
+ *   3. the HP bar (`hpBarPaintOp`), over the rings, so the arc of a ring under it is hidden
+ *      rather than the bar's length;
+ *   4. the DoT pips (M2-S5a — an ESSENTIAL cue: HP shows damage already TAKEN, a DoT record
+ *      armor-bypassing damage already SCHEDULED, which no other surface reveals), each on
+ *      its own ink disc, on top of everything, then their drift when motion is allowed. No
+ *      per-tick live-region announcement accompanies them (`dotTelegraphPaintOps` says why).
+ *  Every cue is centred on the creep's drawn body, so cue and body cannot drift apart by the
+ *  sprite's device-pixel snap. */
 export function drawCreepCues(
   g: GraphicsLike,
   pal: Palette,
@@ -345,103 +344,63 @@ export function drawCreepCues(
   reducedMotion: boolean,
   renderTimeMs: number, // MILLISECONDS — the unit lives in the name (QC r3), the tick→ms conversion happens at the call site
 ): void {
-  for (const c of creeps) {
-    const p = { x: c.cx, y: c.cy };
-    const r = c.r;
-    // Health pip: length AND colour encode HP (dual cue) — warning tint only when low,
-    // the silhouette's own fill. hpFrac is already clamped to [0,1] by deriveViewModel
-    // (CreepVM invariant).
-    g.fillStyle(c.colour, 1);
-    g.fillRect(p.x - r, p.y - r - 4, r * 2 * c.hpFrac, 3);
-    // Slowed telegraph (M2-S3): a shape cue (ring, opaque) ALWAYS accompanies a live
-    // slow; the motion cue (pulse, radius driven by render time) yields to reduced
-    // motion (WCAG 2.3.3 / GAG §2). Alphas live in the plan, not here.
-    // EVERY telegraph takes the drawn PIXEL centre `p`, never the raw `CreepVM` (Codex
-    // review, PR #78). `CreepVM.x`/`y` are fixed-point sim units — 256 per cell — so
-    // passing the creep itself drew both of the first two cues around coordinates ~256×
-    // the pixel position, i.e. far off-canvas. The slowed telegraph carried this from
-    // M2-S3 and had therefore never actually rendered; M2-S5a reproduced it in the DoT
-    // telegraph. `scene.test.ts` pins that every plan receives the drawn centre.
-    for (const tel of slowTelegraphPaintOps(
-      { ...p, slowed: c.slowed },
-      r,
-      reducedMotion,
-      pal.slowed,
-      renderTimeMs,
-    )) {
-      g.lineStyle(tel.kind === 'ring' ? 2 : 1, tel.colour, tel.alpha);
+  const plans = creeps.map((c) => cuePlans(pal, c, reducedMotion, renderTimeMs));
+  const ink = CUE_INK_PX * 2;
+  // 1. The rings' ink under-strokes.
+  for (const p of plans) {
+    for (const tel of p.slow) {
+      if (tel.kind !== 'ring') continue; // the pulse is a motion cue, faded by design
+      g.lineStyle(SLOW_RING_PX + ink, ART_INK, tel.alpha);
       g.strokeCircle(tel.x, tel.y, tel.r);
     }
-    // DoT ("poisoned") telegraph (M2-S5a, PLAN.md step 32 — an ESSENTIAL cue, not a
-    // decorative one: HP pips show damage already TAKEN, a DoT record is
-    // armor-bypassing damage already SCHEDULED, which no other surface reveals). Three
-    // pips (opaque) ALWAYS accompany a live DoT record; the drift cue (radius/alpha
-    // driven by render time) yields to reduced motion (WCAG 2.3.3 / GAG §2). Sits at
-    // r×1.8 — deliberately OUTSIDE the slowed ring's r×1.4 above, so a creep carrying
-    // BOTH statuses reads as two distinct concentric cues, never a muddle. No per-tick
-    // live-region announcement accompanies this — see the rationale at
-    // `dotTelegraphPaintOps` (per-tick chatter would flood a screen reader; the state,
-    // not the tick, is what matters).
-    for (const tel of dotTelegraphPaintOps(
-      { ...p, poisoned: c.poisoned },
-      r,
-      reducedMotion,
-      pal.poisoned,
-      renderTimeMs,
-    )) {
+    for (const tel of p.stun) {
+      g.lineStyle((tel.kind === 'jolt' ? JOLT_PX : FLICKER_PX) + ink, ART_INK, tel.alpha);
+      g.strokeCircle(tel.x, tel.y, tel.r);
+    }
+    for (const tel of p.ward) {
+      g.lineStyle(WARD_PX + ink, ART_INK, tel.alpha);
+      g.strokeCircle(tel.x, tel.y, tel.r);
+    }
+  }
+  // 2. The rings in their colours. Alphas live in the plans, not here.
+  for (const p of plans) {
+    for (const tel of p.slow) {
+      g.lineStyle(tel.kind === 'ring' ? SLOW_RING_PX : SLOW_PULSE_PX, tel.colour, tel.alpha);
+      g.strokeCircle(tel.x, tel.y, tel.r);
+    }
+    for (const tel of p.stun) {
+      g.lineStyle(tel.kind === 'jolt' ? JOLT_PX : FLICKER_PX, tel.colour, tel.alpha);
+      g.strokeCircle(tel.x, tel.y, tel.r);
+    }
+    for (const tel of p.ward) {
+      g.lineStyle(WARD_PX, tel.colour, tel.alpha);
+      g.strokeCircle(tel.x, tel.y, tel.r);
+    }
+  }
+  // 3. The HP bars: length AND colour carry HP (dual cue). `hpFrac` is already clamped to
+  //    [0, 1] by `deriveViewModel` (CreepVM invariant).
+  for (const c of creeps) {
+    const bar = hpBarPaintOp({ x: c.cx, y: c.cy }, c.r, c.hpFrac, c.hue, pal.creepLowHp, ART_INK);
+    g.fillStyle(bar.backing.colour, 1);
+    g.fillRect(bar.backing.x, bar.backing.y, bar.backing.w, bar.backing.h);
+    if (bar.fill.w > 0) {
+      g.fillStyle(bar.fill.colour, 1);
+      g.fillRect(bar.fill.x, bar.fill.y, bar.fill.w, bar.fill.h);
+    }
+  }
+  // 4. The DoT pips, each on its own ink disc, then their drift.
+  for (const p of plans) {
+    for (const tel of p.dot) {
+      if (tel.kind !== 'pip') continue;
+      g.fillStyle(ART_INK, tel.alpha);
+      g.fillCircle(tel.x, tel.y, tel.r + CUE_INK_PX);
       g.fillStyle(tel.colour, tel.alpha);
       g.fillCircle(tel.x, tel.y, tel.r);
     }
-    // Stun telegraph (M2-S6): a thick OUTER ring (`'jolt'`, r×1.15, ALWAYS accompanies a
-    // live stun) plus a SMALLER alpha-animated inner ring (`'flicker'`, r×0.85, motion-cue,
-    // yields to reduced motion) — mirrors the slow/DoT telegraphs' shape+motion posture.
-    // The guaranteed cue is the outer one so its contrast partner is the board floor
-    // rather than the creep fill; see `creep-paint.ts`'s builder for why that is
-    // load-bearing rather than cosmetic.
-    for (const tel of stunTelegraphPaintOps(
-      { ...p, stunned: c.stunned },
-      r,
-      reducedMotion,
-      pal.stunned,
-      renderTimeMs,
-    )) {
-      g.lineStyle(tel.kind === 'jolt' ? 4 : 2, tel.colour, tel.alpha);
-      g.strokeCircle(tel.x, tel.y, tel.r);
-    }
-    // Ward cue (M2-S6): a single opaque outer ring for a creep whose catalog
-    // definition carries an immunity — NOT a timed status, so no motion cue and no
-    // reduced-motion branch (`wardPaintOps` takes no `renderTimeMs`). Sits at r×2.2,
-    // outside every other cue here, so a warded+slowed+stunned creep still reads as
-    // three distinct concentric rings.
-    for (const tel of wardPaintOps({ ...p, warded: c.warded }, r, pal.warded)) {
-      g.lineStyle(2, tel.colour, tel.alpha);
-      g.strokeCircle(tel.x, tel.y, tel.r);
-    }
-    // Airborne cue (M2-S7): a wing chevron layered OVER the creep's base silhouette — an
-    // independent paint plan, not a fourth `CreepShape`, so `armored-flyer` (S10) reads
-    // as armored (the hexagon) AND airborne (this) at once. Catalog-derived
-    // (`CreepVM.domain === 'air'`), so — like the ward cue right above — it takes no
-    // `renderTimeMs` and has no reduced-motion branch.
-    // The `0` is the canvas top: the cue mirrors below the creep rather than drawing
-    // off-screen, for a flyer on a board whose openings sit on row 0 (Codex P2, PR #87).
-    // Ink outline first, then the light strokes over it (QC round 1, #181): the cue lands
-    // on tower heads, and over a light role colour only the ink edge reads.
-    for (const tel of airborneCuePaintOps({ ...p, airborne: c.airborne }, r, pal.airborne, 0)) {
-      const wings = [
-        [tel.leftX, tel.leftY],
-        [tel.rightX, tel.rightY],
-      ] as const;
-      g.lineStyle(tel.strokePx + 2 * tel.outlinePx, tel.outlineColour, tel.alpha);
-      for (const [tx, ty] of wings) {
-        // A line quad ends square at its points, so the outline runs `outlinePx` past both
-        // ends to ring the tips and the apex too.
-        const len = Math.hypot(tx - tel.apexX, ty - tel.apexY);
-        const ux = ((tx - tel.apexX) / len) * tel.outlinePx;
-        const uy = ((ty - tel.apexY) / len) * tel.outlinePx;
-        g.lineBetween(tel.apexX - ux, tel.apexY - uy, tx + ux, ty + uy);
-      }
-      g.lineStyle(tel.strokePx, tel.colour, tel.alpha);
-      for (const [tx, ty] of wings) g.lineBetween(tel.apexX, tel.apexY, tx, ty);
+    for (const tel of p.dot) {
+      if (tel.kind !== 'drift') continue;
+      g.fillStyle(tel.colour, tel.alpha);
+      g.fillCircle(tel.x, tel.y, tel.r);
     }
   }
 }

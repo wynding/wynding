@@ -15,8 +15,20 @@ export { resolvePalette, roleColour, COLOUR_MODES } from './palette';
 export type { Palette } from './palette';
 export { renderTimeOf, positionTracers, tracerPaintOps } from './tracers';
 export type { PositionedTracer, TracerPaintOp } from './tracers';
-export { creepShapeFor, creepSilhouettePaintOp, slowTelegraphPaintOps } from './creep-paint';
-export type { CreepShape, CreepSilhouettePaintOp, SlowTelegraphPaintOp } from './creep-paint';
+export {
+  creepShapeFor,
+  creepFamilyFor,
+  creepLookFor,
+  CREEP_LOOKS,
+  slowTelegraphPaintOps,
+} from './creep-paint';
+export type { CreepShape, CreepFamily, CreepLook, SlowTelegraphPaintOp } from './creep-paint';
+// The creep art kit, for the wave strip's creep icons (`apps/web/src/hud-icons.ts`): the
+// board's own creep art, drawn as SVG, so an icon always matches the board.
+export { creepIconArt, creepArtColour, CREEP_ICON_HALF } from './creep-art';
+export { artSvgNodes } from './art-svg';
+export type { ArtSvgNode } from './art-svg';
+export type { ArtColour, ArtShape } from './art-ir';
 export { towerFootprintMarkFor, towerRoleFor, towerLookFor } from './tower-paint';
 export type { TowerFootprintMark, TowerRole, TowerLook } from './tower-paint';
 // The tower art kit, for the Card swatches (`apps/web/src/swatch.ts`): the same art through

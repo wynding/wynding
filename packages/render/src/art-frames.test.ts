@@ -1,7 +1,8 @@
 // art-frames.test.ts — the board atlas's frame catalogue: every key placement can ask for
-// is baked, keys follow the look (a tower's head silhouette and role, a creep's shape) rather
-// than the catalog id, frames are sized around their art and anchored on whole texels, every
-// painter stays inside its own frame, and painters draw in the palette they are handed.
+// is baked, keys follow the look (a tower's head silhouette and role, a creep's shape, family
+// and domain) rather than the catalog id, frames are sized around their art and anchored on
+// whole texels, every painter stays inside its own frame, and painters draw in the palette
+// they are handed.
 
 import { describe, it, expect } from 'vitest';
 import { getBundledRuleset } from '@wynding/content';
@@ -10,7 +11,9 @@ import {
   artUnit,
   boostArtAt,
   creepFrameKey,
+  creepFrameKeys,
   creepFrameSpecs,
+  creepShadowFrameKey,
   groundFrameKey,
   headFrameKey,
   paintTowerArt,
@@ -31,10 +34,25 @@ import { cssColour } from './canvas-graphics';
 import { fakeContext, fakePath, type CtxOp } from './test-support/fake-context';
 import { drawnRim, rimScales } from './test-support/rim-scales';
 import { alignArtToTexels, alignRectToTexels, strokeWidthAt, type ArtShape } from './art-ir';
-import { creepRadius } from './board-draw';
-import { CREEP_SHAPE_VALUES } from './creep-paint';
+import {
+  BOSS_OVER_ARMORED,
+  CREEP_ART_R,
+  CREEP_LIFT,
+  CREEP_SHADOW,
+  creepBodyArt,
+  creepRadius,
+} from './creep-art';
+import {
+  CREEP_FAMILIES,
+  CREEP_LOOKS,
+  CREEP_SHAPE_VALUES,
+  creepLookFor,
+  creepLookKey,
+} from './creep-paint';
 import {
   ART_BOX,
+  ART_INK,
+  ART_SHADOW,
   ART_FOOTPRINT,
   BOOST_ART,
   HEAD_ART,
@@ -47,7 +65,7 @@ import {
   SCORCH_ART,
 } from './tower-art';
 import { TOWER_FOOTPRINT_MARKS, TOWER_LOOKS, towerLookKey } from './tower-paint';
-import { resolvePalette, roleColour } from './palette';
+import { creepColour, resolvePalette, roleColour } from './palette';
 import {
   recordingArtGraphics as recorder,
   type Call as Recorded,
@@ -85,7 +103,10 @@ function artCalls(calls: readonly Recorded[]): ArtCall[] {
   return artOps(calls).filter((o): o is { op: 'art' } & ArtCall => o.op === 'art');
 }
 
-function paint(spec: FrameSpec, mode: 'default' | 'protan' | 'tritan' = 'default'): Recorded[] {
+function paint(
+  spec: FrameSpec,
+  mode: 'default' | 'protan' | 'deutan' | 'tritan' = 'default',
+): Recorded[] {
   const g = recorder();
   spec.paint(g, resolvePalette(mode));
   return g.calls;
@@ -166,17 +187,55 @@ describe('frame keys follow the look, not the catalog id', () => {
     expect(groundFrameKey('no-such-tower')).toBe(PLATE_FRAME_KEY);
   });
 
-  it('keys a creep frame by its shape, its low-health tint and its boss size', () => {
-    expect(creepFrameKey('armored', 1, false)).toBe('creep:hexagon:normal:standard');
-    expect(creepFrameKey('boss', 1, true)).toBe('creep:hexagon:normal:boss');
-    expect(creepFrameKey('fast', 0.1, false)).toBe('creep:diamond:low:standard');
-    expect(creepFrameKey('no-such-creep', 1, false)).toBe(creepFrameKey('normal', 1, false));
+  it('keys a creep’s body by its look — shape, family and domain — and its shadow by its family and domain', () => {
+    expect(creepFrameKey('armored', false, false)).toBe('creep:hexagon:armored:ground');
+    expect(creepFrameKey('boss', true, false)).toBe('creep:hexagon:boss:ground');
+    expect(creepFrameKey('armored-flyer', false, true)).toBe('creep:hexagon:armored:air');
+    expect(creepFrameKey('resolute', false, false)).toBe('creep:pentagon:normal:ground');
+    expect(creepShadowFrameKey('armored-flyer', false, true)).toBe('creep:shadow:armored:air');
+    expect(creepShadowFrameKey('swarm', false, false)).toBe('creep:shadow:swarm:ground');
+    // An id the catalog has never heard of looks like `normal` — the SAME frames.
+    expect(creepFrameKey('no-such-creep', false, false)).toBe(
+      creepFrameKey('normal', false, false),
+    );
+    expect(creepFrameKey('__proto__', false, true)).toBe(creepFrameKey('normal', false, true));
   });
 
-  it('turns low-health strictly BELOW a third of max HP (0.34), matching the live pip', () => {
-    expect(creepFrameKey('normal', 0.34, false)).toBe('creep:triangle:normal:standard');
-    expect(creepFrameKey('normal', 0.3399, false)).toBe('creep:triangle:low:standard');
-    expect(creepFrameKey('normal', 0, false)).toBe('creep:triangle:low:standard');
+  // Retargeted (C3): the body frame used to turn low-HP at 0.34 — the frame key took the HP.
+  // A body keeps its family's hue at any HP now, so its keys take no HP at all, and the turn
+  // is the HP bar's (`creep-paint.test.ts` pins it at the same three points). What stays
+  // here is the other half of that move: no creep frame is ever painted in the low colour.
+  it('never paints a creep frame in the low-HP colour, in any mode — the HP bar carries the turn', () => {
+    for (const mode of ['default', 'protan', 'deutan', 'tritan'] as const) {
+      const pal = resolvePalette(mode);
+      for (const spec of creepFrameSpecs(20, 1)) {
+        const colour = artCalls(paint(spec, mode))[0]!.colour;
+        for (const shape of [
+          ...creepBodyArt({ shape: 'square', airborne: true }),
+          ...CREEP_SHADOW.air,
+        ]) {
+          for (const token of [shape.fill, shape.stroke]) {
+            if (token !== undefined)
+              expect(colour(token), `${spec.key} ${token}`).not.toBe(pal.creepLowHp);
+          }
+        }
+      }
+    }
+  });
+
+  it('builds each id’s keys once and hands back the same ones — placement asks every frame', () => {
+    const first = creepFrameKeys('fast', false, true);
+    expect(creepFrameKeys('fast', false, true)).toBe(first);
+    expect(first.look).toEqual(creepLookFor('fast', false, true));
+    expect(first.body).toBe(creepFrameKey('fast', false, true));
+    expect(first.shadow).toBe(creepShadowFrameKey('fast', false, true));
+    // Each role and domain has its own slot.
+    expect(creepFrameKeys('fast', true, true)).not.toBe(first);
+    expect(creepFrameKeys('fast', false, false)).not.toBe(first);
+    // The tower keys are kept the same way: the same key, whichever way it is asked for.
+    expect(headFrameKey('slow', true)).toBe('tower:head:ringed:control:buffed');
+    expect(headFrameKey('slow', true)).toBe(headFrameKey('slow', true));
+    expect(groundFrameKey('mine')).toBe(PAD_FRAME_KEY);
   });
 });
 
@@ -184,9 +243,11 @@ describe('atlasFrameSpecs — the whole catalogue', () => {
   const specs = atlasFrameSpecs(20, 1);
   const keys = new Set(specs.map((s) => s.key));
 
-  it('bakes every key placement can produce: the plate, the pad, each look × state, the scorch, each creep', () => {
+  it('bakes every key placement can produce: the plate, the pad, each look × state, the scorch, each creep look and shadow', () => {
     expect(specs).toHaveLength(keys.size); // no duplicate keys
-    expect(specs).toHaveLength(2 + TOWER_LOOKS.length * 3 + 1 + CREEP_SHAPE_VALUES.length * 4);
+    expect(specs).toHaveLength(
+      2 + TOWER_LOOKS.length * 3 + 1 + CREEP_LOOKS.length + CREEP_FAMILIES.length * 2,
+    );
     expect(keys.has(PLATE_FRAME_KEY)).toBe(true);
     expect(keys.has(PAD_FRAME_KEY)).toBe(true);
     expect(keys.has(SCORCH_FRAME_KEY)).toBe(true);
@@ -201,10 +262,16 @@ describe('atlasFrameSpecs — the whole catalogue', () => {
         expect(keys.has(key), `${id}: ${key}`).toBe(true);
       }
     }
-    for (const shape of CREEP_SHAPE_VALUES) {
-      for (const tint of ['normal', 'low']) {
-        for (const size of ['standard', 'boss']) {
-          expect(keys.has(`creep:${shape}:${tint}:${size}`)).toBe(true);
+    // Every creep look's body, every family's shadow in either domain — and so every key a
+    // creep of ANY id can ask for (`creep-paint.test.ts` pins that `CREEP_LOOKS` holds them).
+    for (const look of CREEP_LOOKS) {
+      expect(keys.has(`creep:${creepLookKey(look)}`), creepLookKey(look)).toBe(true);
+    }
+    for (const id of ['normal', 'armored-flyer', 'boss', 'no-such-creep', '__proto__', '']) {
+      for (const boss of [false, true]) {
+        for (const air of [false, true]) {
+          expect(keys.has(creepFrameKey(id, boss, air)), `${id} ${boss} ${air}`).toBe(true);
+          expect(keys.has(creepShadowFrameKey(id, boss, air)), `${id} ${boss} ${air}`).toBe(true);
         }
       }
     }
@@ -327,20 +394,42 @@ describe('frame sizes and anchors sit on whole texels', () => {
     expect(spec.height - spec.anchorY).toBeGreaterThanOrEqual(cellPx * 2 * (66 / 64));
   });
 
-  it('sizes a creep frame around its radius — the boss at 1.5× — anchored at the centre', () => {
-    for (const spec of creepFrameSpecs(20, 2)) {
-      const boss = spec.key.endsWith(':boss');
-      const half = Math.ceil(creepRadius(20, boss) * 2) + FRAME_PAD_TEXELS;
-      expect(spec.width).toBe(half * 2);
-      expect(spec.height).toBe(half * 2);
-      expect(spec.anchorX).toBe(half / 2);
-      expect(spec.anchorY).toBe(half / 2);
+  it('sizes every creep frame to its art — wings, outline and shadow included — plus the pad, and no more', () => {
+    for (const [cellPx, scale] of SIZES) {
+      for (const spec of creepFrameSpecs(cellPx, scale)) expectSizedToArt(spec, scale);
     }
-    const [standard, boss] = [
-      creepFrameSpecs(20, 1).find((s) => s.key === 'creep:hexagon:normal:standard')!,
-      creepFrameSpecs(20, 1).find((s) => s.key === 'creep:hexagon:normal:boss')!,
-    ];
-    expect(boss.width).toBeGreaterThan(standard.width);
+  });
+
+  it('draws a creep’s body and shadow at its family’s radius — the boss’s 1.5× the armored creep’s', () => {
+    for (const [cellPx, scale] of SIZES) {
+      for (const spec of creepFrameSpecs(cellPx, scale)) {
+        const family = spec.key.split(':').at(-2)!;
+        const [call] = artCalls(paint(spec));
+        expect(call!.unit, spec.key).toBeCloseTo(
+          creepRadius(cellPx, family as (typeof CREEP_FAMILIES)[number]) / CREEP_ART_R,
+          12,
+        );
+      }
+    }
+    const width = (key: string): number => creepFrameSpecs(20, 1).find((s) => s.key === key)!.width;
+    expect(width('creep:hexagon:boss:ground')).toBeGreaterThan(
+      width('creep:hexagon:armored:ground'),
+    );
+    expect(creepRadius(20, 'boss') / creepRadius(20, 'armored')).toBeCloseTo(BOSS_OVER_ARMORED, 12);
+  });
+
+  it('anchors a creep’s body and shadow at its TRUE position: a ground body’s centre, CREEP_LIFT below a flyer’s', () => {
+    for (const [cellPx, scale] of SIZES) {
+      for (const spec of creepFrameSpecs(cellPx, scale)) {
+        const [call] = artCalls(paint(spec));
+        // The art's design origin — the body's centre, or the shadow's reference point — sits
+        // on the anchor across, and on it or `CREEP_LIFT` design units above it.
+        const lift =
+          spec.key.endsWith(':air') && !spec.key.startsWith('creep:shadow:') ? CREEP_LIFT : 0;
+        expect(call!.x, spec.key).toBeCloseTo(spec.anchorX, 9);
+        expect(call!.y, spec.key).toBeCloseTo(spec.anchorY - lift * call!.unit, 9);
+      }
+    }
   });
 });
 
@@ -357,15 +446,18 @@ describe('every painter stays inside its frame', () => {
     });
   }
 
-  it('a creep silhouette is centred on its anchor', () => {
+  it('a creep’s body is centred across its anchor, wings and all, and its shadow falls down and to the right of it', () => {
     for (const spec of creepFrameSpecs(20, 1)) {
       const box = paintedExtent(spec);
-      const r = creepRadius(20, spec.key.endsWith(':boss'));
-      // Every shape is symmetric about the centre's vertical, at most r out, apex at cy - r.
-      expect((box.minX + box.maxX) / 2).toBeCloseTo(spec.anchorX, 9);
-      expect(box.maxX - spec.anchorX).toBeLessThanOrEqual(r + 1e-9);
-      expect(box.maxY - spec.anchorY).toBeLessThanOrEqual(r + 1e-9);
-      expect(box.minY).toBeCloseTo(spec.anchorY - r, 9);
+      if (spec.key.startsWith('creep:shadow:')) {
+        // The light falls from the upper left, as on the towers: the shadow lies below the
+        // creep's true position and leans right.
+        expect((box.minX + box.maxX) / 2, spec.key).toBeGreaterThan(spec.anchorX);
+        expect((box.minY + box.maxY) / 2, spec.key).toBeGreaterThan(spec.anchorY);
+      } else {
+        // Every silhouette, and the pair of wings, is symmetric about the body's vertical.
+        expect((box.minX + box.maxX) / 2, spec.key).toBeCloseTo(spec.anchorX, 9);
+      }
     }
   });
 
@@ -384,16 +476,42 @@ describe('painters draw the art they own, in the palette they are handed', () =>
   const at20 = towerFrameSpecs(20, 1);
   const frame = (key: string): FrameSpec => at20.find((s) => s.key === key)!;
 
-  it('fills a creep silhouette in creep, or creepLowHp for the low-health frame', () => {
-    const fillOf = (key: string, mode: 'default' | 'tritan'): unknown =>
-      paint(
-        creepFrameSpecs(20, 1).find((s) => s.key === key)!,
-        mode,
-      ).find((c) => c.method === 'fillStyle')!.args[0];
-    expect(fillOf('creep:square:normal:standard', 'default')).toBe(PAL.creep);
-    expect(fillOf('creep:square:low:standard', 'default')).toBe(PAL.creepLowHp);
+  it('paints a creep’s body art in its family’s hue, its wings in airborne, its outlines in ink — in the palette it is handed', () => {
+    const specs = creepFrameSpecs(20, 1);
+    for (const mode of ['default', 'protan', 'deutan', 'tritan'] as const) {
+      const pal = resolvePalette(mode);
+      for (const look of CREEP_LOOKS) {
+        const key = `creep:${creepLookKey(look)}`;
+        const [call] = artCalls(
+          paint(
+            specs.find((s) => s.key === key)!,
+            mode,
+          ),
+        );
+        // The look's own art, shape for shape: wings under the body for a flyer.
+        expect(call!.shapes, key).toBe(creepBodyArt(look));
+        expect(call!.colour('family'), `${mode} ${key}`).toBe(creepColour(pal, look.family));
+        expect(call!.colour('airborne'), `${mode} ${key}`).toBe(pal.airborne);
+        expect(call!.colour('ink'), `${mode} ${key}`).toBe(ART_INK);
+        // Art is code: a tower's colour asked of a creep is a bug to surface, not to guess.
+        expect(() => call!.colour('plate')).toThrow(/creep art has no 'plate' colour/);
+      }
+      for (const family of CREEP_FAMILIES) {
+        for (const air of [false, true]) {
+          const key = `creep:shadow:${family}:${air ? 'air' : 'ground'}`;
+          const [call] = artCalls(
+            paint(
+              specs.find((s) => s.key === key)!,
+              mode,
+            ),
+          );
+          expect(call!.shapes, key).toBe(CREEP_SHADOW[air ? 'air' : 'ground']);
+          expect(call!.colour('shadow'), key).toBe(ART_SHADOW);
+        }
+      }
+    }
     // A colour-mode rebake repaints the same frame in the new palette.
-    expect(fillOf('creep:square:normal:standard', 'tritan')).toBe(resolvePalette('tritan').creep);
+    expect(resolvePalette('tritan').creep).not.toBe(PAL.creep);
   });
 
   it('paints the plate frame as the plate art — its rim moved onto whole texels — its colours from the palette', () => {

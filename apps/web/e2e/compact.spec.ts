@@ -365,9 +365,9 @@ test.describe('Compact layout (PLAN.md P1 / two-layouts contract)', () => {
       '4 × Flying Creep — air, armor 0, leak cost 1, no immunities',
     ]);
     // The arc's densest wave, in the form a player actually reads it (#181): each row is the
-    // creep's own board silhouette and its count — the shapes tell the four kinds apart (the
-    // armored hexagon among them), and the board's airborne chevron rides on the flyer
-    // alone, which is precisely the "is air next?" question the surface is scanned for.
+    // creep's own board art and its count — the shapes tell the four kinds apart (the
+    // armored hexagon among them), and the board's wings ride on the flyer alone, which is
+    // precisely the "is air next?" question the surface is scanned for.
     await expect(preview.locator('.wy-preview-count')).toHaveText(['×10', '×6', '×4', '×4']);
     const icons = preview.locator('svg.wy-creep-icon');
     await expect(icons).toHaveCount(4);
@@ -376,7 +376,7 @@ test.describe('Compact layout (PLAN.md P1 / two-layouts contract)', () => {
     ).toEqual(['swarm', 'fast', 'armored', 'flying'].map((id) => creepShapeFor(id)));
     expect(
       await icons.evaluateAll((els) =>
-        els.map((el) => el.querySelector('.wy-creep-chevron') !== null),
+        els.map((el) => el.querySelector('.wy-creep-wing') !== null),
       ),
     ).toEqual([false, false, false, true]);
     for (const icon of await icons.all()) await expect(icon).toBeVisible();

@@ -23,11 +23,27 @@
 // also stay apart from one another under each mode's own SIMULATED colour-vision
 // deficiency — a distinctness gate in CIELAB, since contrast cannot say whether two
 // colours look alike.
+//
+// CREEPS (the visual pass, C3/C4, #181) wear a FAMILY hue each, outlined in ink, and carry an
+// HP bar — a fill on an ink backing. Each hue is gated against the floor and the plate it can
+// cross, the ink outline against each hue, the bar's fill against its backing, and the
+// families — the bar's low colour among them — are held apart under each mode's simulated
+// deficiency and kept clear of the status-cue colours drawn around them. Every live creep
+// cue carries an ink edge, and each is gated against every surface it can land on: its own
+// colour, or its ink edge, must clear 3:1 there.
 
 import { describe, it, expect } from 'vitest';
-import { COLOUR_MODES, resolvePalette, roleColour } from './palette';
+import { COLOUR_MODES, creepColour, resolvePalette, roleColour } from './palette';
 import { AURA_SHELL_ALPHA, SELECTION_ALPHA } from './board-draw';
-import { ART_INK, BOOST_RING_ALPHA, PENDING_ALPHA, PENDING_PLATE_ALPHA } from './tower-art';
+import { CREEP_SHADOW_ALPHA } from './creep-art';
+import { CREEP_FAMILIES } from './creep-paint';
+import {
+  ART_INK,
+  ART_SHADOW,
+  BOOST_RING_ALPHA,
+  PENDING_ALPHA,
+  PENDING_PLATE_ALPHA,
+} from './tower-art';
 import { TOWER_ROLES, type TowerRole } from './tower-paint';
 import type { Palette } from './palette';
 import type { ColourMode } from './types';
@@ -67,10 +83,21 @@ function compositeOver(fg: number, bg: number, a: number): number {
 // drift cue, alpha ≤ 0.5, is the non-essential motion cue) — PLAN.md step 32. `tower` is
 // the plate RIM since the visual pass — what carries a tower's footprint edge against the
 // floor, solid on a built tower and dashed (at full opacity) on a pending one.
+// The creep family hues (C3) are a creep's BODY fill, drawn opaque — on the floor, and a
+// flyer's across a tower's plate too (gated below).
+const CREEP_HUES: ReadonlyArray<keyof Palette> = [
+  'creep',
+  'creepSwarm',
+  'creepFast',
+  'creepArmored',
+  'creepFlying',
+  'creepBoss',
+];
+
 const OPAQUE_CUES: ReadonlyArray<keyof Palette> = [
   'entrance',
   'exit',
-  'creep',
+  ...CREEP_HUES,
   'creepLowHp',
   'tower',
   'ghostValid',
@@ -124,15 +151,15 @@ describe('contrast gate — canvas cues vs the board floor (WCAG 1.4.11 non-text
       expect(pal.ghostValid).not.toBe(pal.ghostInvalid);
 
       // `airborne` is gated against a tower's surfaces as well as the floor (M2-S7,
-      // ship-review). Unlike every other cue here, the wingspan is drawn a full cell ABOVE
-      // its creep, and on the shipped board creeps walk the row-11 lane between tower
-      // footprints on rows 10 and 12 — so a tower is a surface it lands on as the ordinary
-      // case, not an incidental one. The first colour tried (electric cyan 0x33ccff)
-      // measured 1.83:1 against the tower body of the day and passed every gate that existed
-      // at the time, which is why this one exists. Since the visual pass a tower is mostly
-      // its slate PLATE, edged by the RIM (`tower`) — both gated here. Its light role-coloured
-      // HEAD is not, and cannot be (no colour clears both it and the dark plate); that
-      // residual is carried by shape and recorded in docs/accessibility-checklist.md.
+      // ship-review). The wingspan of the day was drawn a full cell ABOVE its creep, and on
+      // the shipped board creeps walk the row-11 lane between tower footprints on rows 10 and
+      // 12 — so a tower was a surface it landed on as the ordinary case. The first colour
+      // tried (electric cyan 0x33ccff) measured 1.83:1 against the tower body of the day and
+      // passed every gate that existed at the time, which is why this one exists. Since C4
+      // it fills a flyer's WINGS, and a flyer crosses whole towers on its way to the exit.
+      // Since the visual pass a tower is mostly its slate PLATE, edged by the RIM (`tower`) —
+      // both gated here. Its light role-coloured HEAD is not, and cannot be (no colour clears
+      // both it and the dark plate): the wings' ink outline carries it, gated below.
       const airborneOverTower = contrast(pal.airborne, pal.tower);
       minima['airborne@tower'] = airborneOverTower;
       expect(airborneOverTower).toBeGreaterThanOrEqual(MIN_CUE_CONTRAST);
@@ -184,7 +211,7 @@ const TOWER_SURFACES: ReadonlyArray<keyof Palette> = [
 const POISONED_MUST_DIFFER_FROM: ReadonlyArray<keyof Palette> = [
   ...TOWER_SURFACES,
   'ghostValid',
-  'creep',
+  ...CREEP_HUES,
   'creepLowHp',
   'floor',
 ];
@@ -222,17 +249,46 @@ const POISONED_MUST_DIFFER_FROM: ReadonlyArray<keyof Palette> = [
 // The ward ring is opaque and drawn well outside the silhouette at r×2.2, but a tower
 // footprint under it is the same kind of "cue drawn over a body this gate doesn't reach" as
 // this one.
-const STUNNED_MUST_CONTRAST: ReadonlyArray<keyof Palette> = ['creep'];
+//
+// SINCE C3 (#181) A BODY IS ITS FAMILY'S HUE — six per mode — and the same sandwich closes on
+// them in EVERY mode, tritan included: no luminance clears the floor and all six (the test
+// below scans for one). So the gate this block used to end on — `stunned` ≥ 3:1 against
+// `creep`, for the flicker drawn on the body — could only ever have covered one family of six,
+// and in tritan, whose normal creep is now a light yellow-green, it no longer holds even
+// there. The flicker carries an ink under-stroke instead, like every creep cue
+// (`drawCreepCues`), and what is gated is that ink edge against every family hue, and the cue
+// against its own edge. The jolt and every other cue are gated against every surface they
+// land on further down.
 
-describe('stunned — the jolt ring vs the creep fill it is drawn over (M2-S6)', () => {
+describe('stunned — the flicker on the creep’s own body, by its ink edge (M2-S6, C3)', () => {
   for (const mode of COLOUR_MODES) {
-    it(`mode "${mode}": stunned clears ${MIN_CUE_CONTRAST}:1 against creep`, () => {
+    it(`mode "${mode}": the ink edge clears ${MIN_CUE_CONTRAST}:1 against every family hue, and stunned against the ink`, () => {
       const pal = resolvePalette(mode);
-      for (const key of STUNNED_MUST_CONTRAST) {
-        expect(contrast(pal.stunned, pal[key])).toBeGreaterThanOrEqual(MIN_CUE_CONTRAST);
+      for (const key of CREEP_HUES) {
+        expect(contrast(ART_INK, pal[key]), key).toBeGreaterThanOrEqual(MIN_CUE_CONTRAST);
       }
+      expect(contrast(pal.stunned, ART_INK)).toBeGreaterThanOrEqual(MIN_CUE_CONTRAST);
     });
   }
+
+  it('can fail: the sandwich is real — no colour clears both the floor and every family hue, in any mode', () => {
+    // WCAG contrast is a function of relative luminance alone, so a scan of luminance is a
+    // scan of every colour.
+    const ratio = (l: number, hex: number): number => {
+      const o = relativeLuminance(hex);
+      return (Math.max(l, o) + 0.05) / (Math.min(l, o) + 0.05);
+    };
+    for (const mode of COLOUR_MODES) {
+      const pal = resolvePalette(mode);
+      let clears = 0;
+      for (let i = 0; i <= 10_000; i++) {
+        const l = i / 10_000;
+        if (ratio(l, pal.floor) < MIN_CUE_CONTRAST) continue;
+        if (CREEP_HUES.every((k) => ratio(l, pal[k]) >= MIN_CUE_CONTRAST)) clears++;
+      }
+      expect(clears, mode).toBe(0);
+    }
+  });
 });
 
 // `aura`'s shell is stroked on the board FLOOR, one cell out from a beacon's footprint —
@@ -260,7 +316,7 @@ const AURA_MUST_DIFFER_FROM: ReadonlyArray<keyof Palette> = [
   'stunned',
   'warded',
   'airborne',
-  'creep',
+  ...CREEP_HUES,
   'creepLowHp',
 ];
 
@@ -309,7 +365,7 @@ describe('poisoned — pairwise distinctness from every cue a pip can be drawn o
 // behind it.
 const STUNNED_MUST_DIFFER_FROM: ReadonlyArray<keyof Palette> = [
   'spark',
-  'creep',
+  ...CREEP_HUES,
   'creepLowHp',
   ...TOWER_SURFACES,
   'floor',
@@ -321,7 +377,7 @@ const STUNNED_MUST_DIFFER_FROM: ReadonlyArray<keyof Palette> = [
 
 const WARDED_MUST_DIFFER_FROM: ReadonlyArray<keyof Palette> = [
   'spark',
-  'creep',
+  ...CREEP_HUES,
   'creepLowHp',
   ...TOWER_SURFACES,
   'floor',
@@ -331,13 +387,13 @@ const WARDED_MUST_DIFFER_FROM: ReadonlyArray<keyof Palette> = [
   'poisoned',
 ];
 
-// `airborne` (M2-S7) draws entirely outside the silhouette, over the same backgrounds a
-// creep can path across or be built under — the same scope `stunned`/`warded` are
-// gated against, plus those two cues themselves (a warded or stunned flyer is a
+// `airborne` (M2-S7) — since C4 a flyer's wings, attached to its body — lies over the same
+// backgrounds a creep can path across or be built under — the same scope `stunned`/`warded`
+// are gated against, plus those two cues themselves (a warded or stunned flyer is a
 // perfectly reachable state).
 const AIRBORNE_MUST_DIFFER_FROM: ReadonlyArray<keyof Palette> = [
   'spark',
-  'creep',
+  ...CREEP_HUES,
   'creepLowHp',
   ...TOWER_SURFACES,
   'floor',
@@ -557,14 +613,257 @@ describe('tower role colours — distinguishable under each mode’s own simulat
   });
 });
 
-describe('airborne — readable on every tower surface it lands on (QC round 1, #181)', () => {
-  // The flyer cue sits ~1.2 cells above its creep, so a flyer one row under a tower puts it
-  // on that tower as the ordinary case — and since the visual pass a tower's top is a LIGHT
-  // role-coloured head, over which the light stroke alone measures as little as 1.05:1. So
-  // the cue carries an ink outline (`airborneCuePaintOps`' `outlineColour`): the light core
-  // reads on the dark surfaces, the ink edge on the light ones. Both halves gated here.
+// ---- Creeps (the visual pass, C3/C4, #181) ----
+
+describe('creep families — each hue on the floor and the plate, the ink outline on each, the HP bar on its backing (C3)', () => {
   for (const mode of COLOUR_MODES) {
-    it(`mode "${mode}": the light stroke clears ${MIN_CUE_CONTRAST}:1 on the floor, plate and rim; its ink outline on every role colour and the rim`, () => {
+    it(`mode "${mode}": every family hue clears ${MIN_CUE_CONTRAST}:1 on the floor and the plate, the ink outline on every hue, and the bar’s every fill on its ink backing`, () => {
+      const pal = resolvePalette(mode);
+      const minima: Record<string, number> = {};
+      for (const family of CREEP_FAMILIES) {
+        const hue = creepColour(pal, family);
+        // A creep walks the floor, and a flyer crosses plates on its way to the exit.
+        minima[`${family}@floor`] = contrast(hue, pal.floor);
+        minima[`${family}@plate`] = contrast(hue, pal.plate);
+        // The silhouette's ink outline, which keeps overlapping creeps countable — and the HP
+        // bar's backing, which the bar's fill lies on.
+        minima[`ink@${family}`] = contrast(ART_INK, hue);
+      }
+      // The bar's low colour lies on the backing too, and a flyer's bar crosses plates.
+      minima['ink@low'] = contrast(ART_INK, pal.creepLowHp);
+      minima['low@plate'] = contrast(pal.creepLowHp, pal.plate);
+      for (const [k, v] of Object.entries(minima)) {
+        expect(v, k).toBeGreaterThanOrEqual(MIN_CUE_CONTRAST);
+      }
+      console.info(
+        `[palette.test] mode=${mode} creep families min=${Math.min(...Object.values(minima)).toFixed(2)} ` +
+          Object.entries(minima)
+            .map(([k, v]) => `${k}=${v.toFixed(2)}`)
+            .join(' '),
+      );
+    });
+  }
+
+  it('gives every family its own hue in every mode — the bar’s low colour another', () => {
+    for (const mode of COLOUR_MODES) {
+      const pal = resolvePalette(mode);
+      const hues = [...CREEP_FAMILIES.map((f) => creepColour(pal, f)), pal.creepLowHp];
+      expect(new Set(hues).size, mode).toBe(CREEP_FAMILIES.length + 1);
+    }
+  });
+});
+
+/** The colours whose pairwise distance `closestOf` measures: each family's hue, and the HP
+ *  bar's low colour, which must read apart from every hue the bar turns from. */
+const creepGroups = (pal: Palette): readonly (readonly [string, number])[] => [
+  ...CREEP_FAMILIES.map((f) => [f, creepColour(pal, f)] as const),
+  ['low', pal.creepLowHp] as const,
+];
+
+/** The closest any two DISTINCT colours of `colours` come, ΔE76, as seen with `deficiency` —
+ *  colours that are one byte value are one hue group, which their shapes tell apart. */
+function closestOf(
+  colours: readonly (readonly [string, number])[],
+  deficiency: keyof typeof MACHADO_2009 | null,
+): { deltaE: number; pair: string } {
+  let best = { deltaE: Infinity, pair: '' };
+  for (let i = 0; i < colours.length; i++) {
+    for (let j = i + 1; j < colours.length; j++) {
+      if (colours[i]![1] === colours[j]![1]) continue;
+      const a = labAs(colours[i]![1], deficiency);
+      const b = labAs(colours[j]![1], deficiency);
+      const d = Math.hypot(a[0] - b[0], a[1] - b[1], a[2] - b[2]);
+      if (d < best.deltaE) best = { deltaE: d, pair: `${colours[i]![0]}/${colours[j]![0]}` };
+    }
+  }
+  return best;
+}
+
+/** How far apart (ΔE76) the creep families — and the bar's low colour — must stay, pairwise,
+ *  under each mode's own simulated deficiency: the role colours' bar. The tuned tables clear
+ *  it with a point to spare in each mode (26.01–26.02); the style frame's own hues fall to
+ *  18.24 under normal vision (its swarm and flyer) and lower under each simulation. */
+const MIN_FAMILY_DELTA_E = 25;
+
+/** How far (ΔE76) every family hue and the low colour stay from every status-cue colour drawn
+ *  around a creep, under the mode's simulation: a cue's colour must not melt into the body or
+ *  bar it lies across. (Its ink edge reads regardless — gated below.) */
+const MIN_FAMILY_CUE_DELTA_E = 15;
+
+const STATUS_CUES: ReadonlyArray<keyof Palette> = [
+  'slowed',
+  'poisoned',
+  'stunned',
+  'warded',
+  'airborne',
+];
+
+/** The style frame's own family hues — C3's starting point. */
+const FRAME_CREEP_HUES = {
+  swarm: 0xf6ee9a,
+  normal: 0xf0e442,
+  fast: 0xc9e65a,
+  armored: 0xe89a5c,
+  flying: 0xfff4c4,
+  boss: 0xff5a64,
+} as const;
+
+describe('creep families — distinguishable under each mode’s own simulated deficiency (C3)', () => {
+  for (const mode of COLOUR_MODES) {
+    it(`mode "${mode}": the families and the bar’s low colour stay ≥ ${MIN_FAMILY_DELTA_E} ΔE76 apart, and ≥ ${MIN_FAMILY_CUE_DELTA_E} from every status cue`, () => {
+      const pal = resolvePalette(mode);
+      const deficiency = SIMULATED[mode];
+      const closest = closestOf(creepGroups(pal), deficiency);
+      let cueClosest = { deltaE: Infinity, pair: '' };
+      for (const [name, hue] of creepGroups(pal)) {
+        for (const cue of STATUS_CUES) {
+          const a = labAs(hue, deficiency);
+          const b = labAs(pal[cue], deficiency);
+          const d = Math.hypot(a[0] - b[0], a[1] - b[1], a[2] - b[2]);
+          if (d < cueClosest.deltaE) cueClosest = { deltaE: d, pair: `${name}/${cue}` };
+        }
+      }
+      console.info(
+        `[palette.test] mode=${mode} creep families under ${deficiency ?? 'normal vision'}: ` +
+          `min ΔE76=${closest.deltaE.toFixed(2)} (${closest.pair}); ` +
+          `from the status cues min ΔE76=${cueClosest.deltaE.toFixed(2)} (${cueClosest.pair})`,
+      );
+      expect(closest.deltaE, closest.pair).toBeGreaterThanOrEqual(MIN_FAMILY_DELTA_E);
+      expect(cueClosest.deltaE, cueClosest.pair).toBeGreaterThanOrEqual(MIN_FAMILY_CUE_DELTA_E);
+    });
+  }
+
+  it('can fail: the style frame’s own hues are too close — under normal vision and each simulation — and so is the default table under each simulation', () => {
+    const pal = resolvePalette('default');
+    const frame: readonly (readonly [string, number])[] = [
+      ...Object.entries(FRAME_CREEP_HUES),
+      ['low', pal.creepLowHp] as const,
+    ];
+    for (const deficiency of [null, 'protan', 'deutan', 'tritan'] as const) {
+      expect(closestOf(frame, deficiency).deltaE, `${deficiency}`).toBeLessThan(MIN_FAMILY_DELTA_E);
+    }
+    // The default table keeps the frame's normal, armored and boss: why each deficiency mode
+    // has hues of its own.
+    for (const deficiency of ['protan', 'deutan', 'tritan'] as const) {
+      expect(closestOf(creepGroups(pal), deficiency).deltaE, deficiency).toBeLessThan(
+        MIN_FAMILY_DELTA_E,
+      );
+    }
+  });
+});
+
+describe('every creep cue reads on every surface it lands on — by its colour or its ink edge (C3/C4)', () => {
+  // Every live creep cue carries an ink edge (`drawCreepCues`' under-strokes, the pips' ink
+  // discs, the wings' outline): its own colour reads on a surface it contrasts with, the ink
+  // edge on the rest. So for each cue and each surface it can land on, ONE of the two must
+  // clear 3:1 there — and the cue against its own edge. The surfaces: the floor; a tower's
+  // plate, rim and head in every role colour (a ground creep passes beside towers, a flyer
+  // crosses them); another creep's body in every family hue, its HP bar's low fill, and a
+  // flyer's wings (cues are drawn over every body, `layers.ts`).
+  const surfacesOf = (pal: Palette): Record<string, number> => ({
+    floor: pal.floor,
+    plate: pal.plate,
+    rim: pal.tower,
+    ...Object.fromEntries(TOWER_ROLES.map((r) => [r, roleColour(pal, r)])),
+    ...Object.fromEntries(CREEP_FAMILIES.map((f) => [`body:${f}`, creepColour(pal, f)])),
+    'bar:low': pal.creepLowHp,
+    wing: pal.airborne,
+  });
+  const reads = (cue: number, surface: number): number =>
+    Math.max(contrast(cue, surface), contrast(ART_INK, surface));
+
+  for (const mode of COLOUR_MODES) {
+    it(`mode "${mode}": every cue, or its ink edge, clears ${MIN_CUE_CONTRAST}:1 on every surface — and against its own edge`, () => {
+      const pal = resolvePalette(mode);
+      const worst: string[] = [];
+      for (const cue of STATUS_CUES) {
+        let min = { v: Infinity, on: '' };
+        for (const [name, surface] of Object.entries(surfacesOf(pal))) {
+          const v = reads(pal[cue], surface);
+          expect(v, `${cue} on ${name}`).toBeGreaterThanOrEqual(MIN_CUE_CONTRAST);
+          if (v < min.v) min = { v, on: name };
+        }
+        expect(contrast(pal[cue], ART_INK), `${cue} on its edge`).toBeGreaterThanOrEqual(
+          MIN_CUE_CONTRAST,
+        );
+        worst.push(`${cue}=${min.v.toFixed(2)}@${min.on}`);
+      }
+      console.info(`[palette.test] mode=${mode} creep cues, worst surface: ${worst.join(' ')}`);
+    });
+  }
+
+  // UNDER A CREEP'S SHADOW (B3). Creep shadows lie over the floor and every tower surface —
+  // under every body and every cue (`layers.ts`) — and a cue can land on one: a flyer's lower
+  // cues on its own shadow, any cue on a neighbour's. Darkened, a mid-tone surface can fall
+  // between the ink and a cue's own luminance, where neither clears 3:1. MEASURED and PINNED,
+  // not passed: these are the only shaded surfaces under 3:1 at the style frame's shadow
+  // strengths, every one on a tower — its rim, a 1–2px line between a plate and the floor that
+  // each read, and in protan/deutan two of the six heads. Recorded in
+  // docs/accessibility-checklist.md; a change that adds a pair, or deepens the worst, fails.
+  const SHADED_UNDER_3: readonly string[] = [
+    'default poisoned rim@0.34',
+    'default poisoned rim@0.28',
+    'default slowed rim@0.28',
+    'default stunned rim@0.34',
+    'default stunned rim@0.28',
+    ...(['protan', 'deutan'] as const).flatMap((m) => [
+      `${m} poisoned rim@0.34`,
+      `${m} poisoned rim@0.28`,
+      `${m} poisoned poison@0.34`,
+      `${m} poisoned poison@0.28`,
+      `${m} poisoned burst@0.34`,
+      `${m} slowed rim@0.28`,
+      `${m} slowed poison@0.28`,
+      `${m} stunned rim@0.34`,
+      `${m} stunned rim@0.28`,
+      `${m} stunned poison@0.34`,
+      `${m} stunned poison@0.28`,
+      `${m} stunned burst@0.34`,
+    ]),
+    'tritan slowed rim@0.28',
+  ];
+
+  it('under a creep’s shadow, only the pinned tower surfaces fall under 3:1 — and none under 2.5', () => {
+    const under: string[] = [];
+    let worst = Infinity;
+    for (const mode of COLOUR_MODES) {
+      const pal = resolvePalette(mode);
+      const shadable: Record<string, number> = {
+        floor: pal.floor,
+        plate: pal.plate,
+        rim: pal.tower,
+        ...Object.fromEntries(TOWER_ROLES.map((r) => [r, roleColour(pal, r)])),
+      };
+      for (const alpha of [CREEP_SHADOW_ALPHA.ground, CREEP_SHADOW_ALPHA.air]) {
+        for (const [name, surface] of Object.entries(shadable)) {
+          const shaded = compositeOver(ART_SHADOW, surface, alpha);
+          for (const cue of STATUS_CUES) {
+            const v = reads(pal[cue], shaded);
+            if (v < MIN_CUE_CONTRAST) {
+              under.push(`${mode} ${cue} ${name}@${alpha}`);
+              worst = Math.min(worst, v);
+            }
+          }
+        }
+      }
+    }
+    console.info(
+      `[palette.test] creep cues on shaded surfaces under 3:1 (worst ${worst.toFixed(2)}): ${under.join(', ')}`,
+    );
+    expect([...under].sort()).toEqual([...SHADED_UNDER_3].sort());
+    expect(worst).toBeGreaterThanOrEqual(2.5);
+  });
+});
+
+describe('airborne — readable on every tower surface it lands on (QC round 1, #181; C4)', () => {
+  // A flyer crosses whole towers on its straight line to the exit (and the chevron it wore
+  // until C4 sat ~1.2 cells above its creep, on a tower as the ordinary case) — and since the
+  // visual pass a tower's top is a LIGHT role-coloured head, over which the light wing fill
+  // alone measures as little as 1.05:1. So each wing is outlined in ink (`CREEP_WINGS`,
+  // `creep-art.ts`): the light fill reads on the dark surfaces, the ink edge on the light
+  // ones — another creep's body among them. Both halves gated here.
+  for (const mode of COLOUR_MODES) {
+    it(`mode "${mode}": the light fill clears ${MIN_CUE_CONTRAST}:1 on the floor, plate and rim; its ink outline on every role colour, every creep family and the rim`, () => {
       const pal = resolvePalette(mode);
       for (const surface of ['floor', 'plate', 'tower'] as const) {
         expect(contrast(pal.airborne, pal[surface]), surface).toBeGreaterThanOrEqual(
@@ -578,6 +877,9 @@ describe('airborne — readable on every tower surface it lands on (QC round 1, 
         expect(c, role).toBeGreaterThanOrEqual(MIN_CUE_CONTRAST);
       }
       expect(contrast(ART_INK, pal.tower)).toBeGreaterThanOrEqual(MIN_CUE_CONTRAST);
+      for (const key of CREEP_HUES) {
+        expect(contrast(ART_INK, pal[key]), key).toBeGreaterThanOrEqual(MIN_CUE_CONTRAST);
+      }
       // ... and the two halves of the cue read apart from each other.
       expect(contrast(ART_INK, pal.airborne)).toBeGreaterThanOrEqual(MIN_CUE_CONTRAST);
       console.info(

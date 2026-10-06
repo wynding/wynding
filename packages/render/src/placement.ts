@@ -2,34 +2,30 @@
 // Phaser-free, unit-tested: `board-frame.ts` hands these lists to the sprite pools
 // (`sprite-pool.ts`), which only copy them onto sprites, so every decision a frame's picture
 // depends on — which towers are hidden, which are pending, which stand on a plate and which
-// on a pad, which heads wear the boost glow, how faded a scorch is, which silhouette and size
-// a creep gets, when it turns low-health — is made here, where a test can see it.
+// on a pad, which heads wear the boost glow, how faded a scorch is, which look a creep wears,
+// where its body and its shadow go, which creeps draw over which — is made here, where a test
+// can see it.
 //
 // POSITIONS are world CSS px (the space every projection call returns) and are SNAPPED TO
 // WHOLE DEVICE PIXELS: a sprite's top-left lands where `x × dpr` is an integer. The atlas
 // bakes at the effective dpr with every frame anchor on a whole texel, so a snapped sprite
 // puts each texel on exactly one pixel of the canvas's backing store — crisp, never resampled
-// between two (`scene.ts` says how that store reaches the screen). Creeps carry their snapped
-// centre too, for the cues drawn around them (`drawCreepCues`) and the tracers converging on
-// them.
+// between two (`scene.ts` says how that store reaches the screen). Creeps carry the centre
+// their cues are drawn around too (`drawCreepCues`): their body's, as drawn.
 
+import { visibleTowers, type CreepCueInput } from './board-draw';
 import {
-  creepFillColour,
-  creepRadius,
-  isLowHp,
-  visibleTowers,
-  type CreepCueInput,
-} from './board-draw';
-import {
-  creepFrameKey,
+  creepFrameKeys,
   groundFrameKey,
   headFrameKey,
   pendingFrameKey,
   SCORCH_FRAME_KEY,
 } from './art-frames';
+import { creepBaseRadius, creepLiftPx, CREEP_SIZE } from './creep-art';
+import type { CreepFamily } from './creep-paint';
 import { snapToDevicePx } from './device-px';
 import type { Projection } from './projection';
-import type { Palette } from './palette';
+import { creepColour, type Palette } from './palette';
 import type { CreepVM, RenderOverlay, RenderVM } from './types';
 
 /** One sprite: the atlas frame it shows, its top-left corner (world CSS px), and its
@@ -50,7 +46,7 @@ export interface FrameAnchor {
 function anchorOf(frames: ReadonlyMap<string, FrameAnchor>, key: string): FrameAnchor {
   const frame = frames.get(key);
   // Every key placement can produce — `groundFrameKey`, `headFrameKey`, `pendingFrameKey`,
-  // the scorch, `creepFrameKey` — is baked (`art-frames.ts`), for any id at all: a miss is a
+  // the scorch, `creepFrameKeys` — is baked (`art-frames.ts`), for any id at all: a miss is a
   // broken atlas, and drawing nothing would hide it.
   if (frame === undefined) throw new Error(`board atlas has no frame '${key}'`);
   return frame;
@@ -132,11 +128,20 @@ export function placeScorches(
   });
 }
 
-/** One creep: its silhouette sprite, plus everything its live cues need. */
+/** One creep's BODY: its sprite, plus everything its live cues need. */
 export interface CreepPlacement extends SpritePlacement, CreepCueInput {}
 
+/** Every creep sprite this frame. */
+export interface CreepPlacements {
+  /** Each creep's ground shadow — the creep-shadows layer, under every creep's body. */
+  readonly shadows: readonly SpritePlacement[];
+  /** Each creep's body, with what its cues need — the creeps layer: every creep on the
+   *  ground, then every creep in the air. */
+  readonly bodies: readonly CreepPlacement[];
+}
+
 /** What `placeCreeps` reads of a creep: its interpolated position and the state its
- *  frame and cues are keyed on. */
+ *  frames and cues are keyed on. */
 export type CreepPlacementInput = Pick<
   CreepVM,
   | 'x'
@@ -151,40 +156,125 @@ export type CreepPlacementInput = Pick<
   | 'boss'
 >;
 
+/** What placement needs of one creep look in one atlas: its two frames and their anchors,
+ *  and its family's size step. */
+interface CreepLookPlacement {
+  readonly body: string;
+  readonly bodyAnchor: FrameAnchor;
+  readonly shadow: string;
+  readonly shadowAnchor: FrameAnchor;
+  readonly family: CreepFamily;
+  readonly size: number;
+}
+
+/** Per atlas, per creep id, four slots — [ground, air] × [not boss, boss] — each filled the
+ *  first time a frame asks for it and kept for as long as the atlas lives: a rebake brings a
+ *  new frame map, and with it a new table. So a creep's look, its frame keys and their
+ *  anchors are found once per look, never once per creep per frame (#181: R3's profile found
+ *  a fifth of the board frame's JavaScript going to frame keys built and looked up afresh). */
+const CREEP_TABLES = new WeakMap<
+  ReadonlyMap<string, FrameAnchor>,
+  Map<string, (CreepLookPlacement | undefined)[]>
+>();
+
+function creepLookPlacement(
+  frames: ReadonlyMap<string, FrameAnchor>,
+  creepId: string,
+  boss: boolean,
+  airborne: boolean,
+): CreepLookPlacement {
+  let table = CREEP_TABLES.get(frames);
+  if (table === undefined) {
+    table = new Map();
+    CREEP_TABLES.set(frames, table);
+  }
+  let slots = table.get(creepId);
+  if (slots === undefined) {
+    slots = [undefined, undefined, undefined, undefined];
+    table.set(creepId, slots);
+  }
+  const slot = (boss ? 2 : 0) + (airborne ? 1 : 0);
+  let look = slots[slot];
+  if (look === undefined) {
+    const keys = creepFrameKeys(creepId, boss, airborne);
+    look = {
+      body: keys.body,
+      bodyAnchor: anchorOf(frames, keys.body),
+      shadow: keys.shadow,
+      shadowAnchor: anchorOf(frames, keys.shadow),
+      family: keys.look.family,
+      size: CREEP_SIZE[keys.look.family],
+    };
+    slots[slot] = look;
+  }
+  return look;
+}
+
+/** The canvas's top edge, world CSS px: no flyer's body is drawn above it. */
+const CANVAS_TOP = 0;
+
 /**
- * Every creep silhouette this frame, in draw order (the order of `interpolated`, so a later
- * creep's body still covers an earlier one's, as before). The frame is keyed on the
- * creep's shape, its low-health tint and its boss size; the sprite is centred on the
- * creep's projected point, snapped to a whole device pixel, and that snapped centre is what
- * its health pip and status cues are drawn around.
+ * Every creep sprite this frame: each creep's SHADOW, for the creep-shadows layer, and its
+ * BODY, for the creeps layer — both keyed on its look (shape, family and domain,
+ * `creep-paint.ts`), both anchored at its true position — its projected point, snapped to a
+ * whole device pixel — so the two land together, and a flyer's lift is the one its frame has
+ * baked in.
+ *
+ * Bodies come every creep on the ground first, then every creep in the air, each group in the
+ * order of `interpolated`, so a later creep still covers an earlier one of its own domain: a
+ * flyer is above the ground, and draws over every creep walking it. Each body carries the
+ * centre its cues are drawn around — the body's own, which for a flyer is its LIFTED body,
+ * not its shadow (`creep-paint.ts`'s CUE-RADIUS ORDERING block) — and its family's radius and
+ * hue.
+ *
+ * A flyer whose body would start above the canvas — on a board with an opening on its top
+ * row, legal though no shipped board has one — is drawn down by just enough whole device
+ * pixels that it does not, its cues with it: its wings are its airborne cue, and the
+ * detached cue they replace flipped below its creep there for the same reason (Codex P2,
+ * PR #87).
  */
 export function placeCreeps(
   interpolated: readonly CreepPlacementInput[],
   pal: Palette,
   projection: Projection,
   frames: ReadonlyMap<string, FrameAnchor>,
-): CreepPlacement[] {
+): CreepPlacements {
   const dpr = projection.dpr;
-  return interpolated.map((c) => {
+  const base = creepBaseRadius(projection.cellPx);
+  const shadows: SpritePlacement[] = [];
+  const ground: CreepPlacement[] = [];
+  const air: CreepPlacement[] = [];
+  for (const c of interpolated) {
+    const airborne = c.domain === 'air';
+    const look = creepLookPlacement(frames, c.creepId, c.boss, airborne);
     const p = projection.fpToPixel(c.x, c.y);
-    const cx = snapToDevicePx(p.x, dpr);
-    const cy = snapToDevicePx(p.y, dpr);
-    const frame = creepFrameKey(c.creepId, c.hpFrac, c.boss);
-    const a = anchorOf(frames, frame);
-    return {
-      frame,
-      x: cx - a.anchorX,
-      y: cy - a.anchorY,
-      cx,
-      cy,
-      r: creepRadius(projection.cellPx, c.boss),
-      colour: creepFillColour(pal, isLowHp(c.hpFrac)),
+    const x = snapToDevicePx(p.x, dpr);
+    const y = snapToDevicePx(p.y, dpr);
+    shadows.push({
+      frame: look.shadow,
+      x: x - look.shadowAnchor.anchorX,
+      y: y - look.shadowAnchor.anchorY,
+    });
+    const r = base * look.size;
+    const top = y - look.bodyAnchor.anchorY;
+    // Whole device pixels (the body stays on the texel grid); the epsilon keeps a float's
+    // error on an exact edge from costing a pixel.
+    const down =
+      airborne && top < CANVAS_TOP ? Math.ceil((CANVAS_TOP - top) * dpr - 1e-6) / dpr : 0;
+    (airborne ? air : ground).push({
+      frame: look.body,
+      x: x - look.bodyAnchor.anchorX,
+      y: top + down,
+      cx: x,
+      cy: y - creepLiftPx(r, airborne) + down,
+      r,
+      hue: creepColour(pal, look.family),
       hpFrac: c.hpFrac,
       slowed: c.slowed,
       poisoned: c.poisoned,
       stunned: c.stunned,
       warded: c.warded,
-      airborne: c.domain === 'air',
-    };
-  });
+    });
+  }
+  return { shadows, bodies: air.length === 0 ? ground : [...ground, ...air] };
 }

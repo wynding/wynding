@@ -7,9 +7,9 @@
 // Playwright e2e suite instead. Draws board-space visuals only — the HUD and all controls are
 // a DOM overlay owned by apps/web (ADR 0003 §3: canvas text isn't semantic/axe-visible).
 //
-// STATIC ART IS BAKED, NOT RE-RECORDED (V2, #181). The board, every tower and every creep
-// silhouette are painted once into textures and shown by sprites: one board image, and pooled
-// images over one atlas, placed each frame from pure placement lists (`placement.ts`). They
+// STATIC ART IS BAKED, NOT RE-RECORDED (V2, #181). The board, every tower and every creep's
+// body and shadow are painted once into textures and shown by sprites: one board image, and
+// pooled images over one atlas, placed each frame from pure placement lists (`placement.ts`). They
 // are repainted only when the cell size, the effective dpr or the colour mode changes. Only
 // what moves or comes and goes is still drawn live, into three `Graphics` — shells, effects,
 // cues — and `layers.ts` fixes where each object sits in the draw order. ADR 0005's S10

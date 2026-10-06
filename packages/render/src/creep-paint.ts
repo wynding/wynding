@@ -1,10 +1,13 @@
-// creep-paint.ts — pure creep-silhouette + slow-telegraph paint-plan geometry (M2-S3).
-// Kept in a Phaser-free module (the `board-cells.ts`/`tracers.ts` precedent) so both are
-// unit-testable; `scene.ts` is a thin executor of exactly these plans (coverage-excluded,
-// WebGL). No sim import: keyed purely on the catalog id string the render VM already
-// carries (`CreepVM.creepId`).
-
-import { ART_INK } from './tower-art';
+// creep-paint.ts — what a creep LOOKS like, keyed on its catalog id, and the pure paint plans
+// of the live cues drawn around it (M2-S3 onward; the visual pass's C3/C4, #181). Kept in a
+// Phaser-free module (the `board-cells.ts`/`tracers.ts` precedent) so all of it is
+// unit-testable; `board-draw.ts` is a thin executor of exactly these plans. No sim import:
+// keyed purely on what the render VM already carries (`CreepVM.creepId`, `.boss`, `.domain`).
+//
+// A creep's LOOK has three axes, each its own channel: its SHAPE (the silhouette, the primary
+// cue, ADR 0003), its FAMILY (the hue its body wears and the size step it is drawn at, C3),
+// and whether it is AIRBORNE (the wings, C4). Its art — `creep-art.ts` — is drawn from the
+// look; the cues here are drawn live around it every frame.
 
 /** The silhouette shapes the scene can draw. `'triangle'` is the pre-M2-S3 creep shape;
  *  `'diamond'` is `fast`'s visibly-distinct-at-cell-scale shape; `'square'` is `swarm`'s
@@ -16,36 +19,37 @@ import { ART_INK } from './tower-art';
  *  `'hexagon'` already is, distinct from all four at cell scale. An id this build's
  *  catalog doesn't recognize draws `'triangle'` too (TOTAL — never throw; a
  *  forged/future content id must still render something, per the `tower.unknown.name`
- *  precedent).
+ *  precedent). Since the visual pass each shape is drawn to the style frame's geometry,
+ *  outlined in ink (`CREEP_BODY`, `creep-art.ts`), and `creep-art.test.ts` holds the five
+ *  apart by outline.
  *
  *  `flying` (M2-S7) is DELIBERATELY ABSENT from the table below, and is the first
  *  shipped creep that is. Its distinguishing axis is DOMAIN, not kind, and domain has
- *  its own always-on shape cue — `airborneCuePaintOps`' wingspan — so giving it a sixth
- *  base silhouette would encode the same fact twice and spend the shape vocabulary on
- *  it. That is the same composability argument S10 depends on: `armored-flyer` must
- *  read as armored AND airborne, which it does by keeping `'hexagon'` and gaining the
- *  wingspan. A per-domain base shape would make that combination unrepresentable.
- *  The consequence, stated because it is a real one (ship-review, M2-S7): at the
- *  silhouette itself `flying` and `normal` are identical, so the wingspan is the ONLY
- *  channel separating them — which is exactly why `airborneCuePaintOps` mirrors the cue
- *  below the creep rather than letting it leave the viewport (Codex P2, PR #87). It
- *  draws a cell away from the creep, above by default and below at the top edge.
+ *  its own always-on shape cue — since C4, the WINGS attached to its body
+ *  (`CREEP_WINGS`, `creep-art.ts`) — so giving it a sixth base silhouette would encode
+ *  the same fact twice and spend the shape vocabulary on it. That is the same
+ *  composability argument S10 depends on: `armored-flyer` must read as armored AND
+ *  airborne, which it does by keeping `'hexagon'` and gaining the wings. A per-domain base
+ *  shape would make that combination unrepresentable. The consequence, stated because it
+ *  is a real one (ship-review, M2-S7): at the silhouette itself `flying` and `normal` are
+ *  identical, so the wings — and, since C3, the flyer's own family hue — are what separate
+ *  them.
  *
  *  `armored-flyer` and `boss` (M2-S10) are the composability proof this file's header
  *  argues for, exercised rather than merely asserted: both reuse `'hexagon'` — no third
  *  role/domain-driven shape value — and gain distinctness from OTHER independent axes
- *  instead. `armored-flyer` reads as armored (the hexagon) AND airborne (the wingspan,
- *  `airborneCuePaintOps`), the exact combination this header already names. `boss` reads
- *  as armored (the hexagon) AND larger (`BOSS_SCALE` in `board-draw.ts`) AND warded (it
- *  is stun-immune, `wardPaintOps`) — role stays a pure axis, so a future boss VARIANT
- *  would compose the same way rather than needing a SIXTH silhouette. (Counted against
- *  the union below, which has five members. Two docstrings in this file said "fourth"
- *  and one said "sixth"; the S7 accessibility audit copied the wrong one — #126.) */
+ *  instead. `armored-flyer` reads as armored (the hexagon) AND airborne (the wings), the
+ *  exact combination this header already names. `boss` reads as armored (the hexagon) AND
+ *  larger (its family's size step, 1.5× the armored creep's — `CREEP_SIZE`, `creep-art.ts`)
+ *  AND warded (it is stun-immune, `wardPaintOps`) — and, since C3, in a hue of its own. Role
+ *  stays a pure axis, so a future boss VARIANT would compose the same way rather than
+ *  needing a SIXTH silhouette. (Counted against the union below, which has five members.
+ *  Two docstrings in this file said "fourth" and one said "sixth"; the S7 accessibility
+ *  audit copied the wrong one — #126.) */
 export type CreepShape = 'triangle' | 'diamond' | 'square' | 'hexagon' | 'pentagon';
 
-/** Every `CreepShape`, as a value — the board atlas bakes one silhouette frame per shape
- *  (`art-frames.ts`). Keyed on the union, so a sixth shape that is not listed here fails to
- *  compile rather than baking no frame. */
+/** Every `CreepShape`, as a value. Keyed on the union, so a sixth shape that is not listed
+ *  here fails to compile rather than going without art (`CREEP_BODY`, `creep-art.ts`). */
 const ALL_SHAPES: Readonly<Record<CreepShape, true>> = {
   triangle: true,
   diamond: true,
@@ -74,27 +78,157 @@ export function creepShapeFor(creepId: string): CreepShape {
     : 'triangle';
 }
 
-/** One creep silhouette + HP-pip paint step, keyed on `creepId`'s shape. `r` is the
- *  silhouette's half-size (the scene's existing `max(3, cellPx * 0.35)` radius); `hpFrac`
- *  drives the pip's length (dual cue with `colour`, unchanged from pre-M2-S3). */
-export interface CreepSilhouettePaintOp {
-  readonly shape: CreepShape;
-  readonly x: number;
-  readonly y: number;
-  readonly r: number;
-  readonly colour: number;
-  readonly hpFrac: number;
+/** A creep's FAMILY (visual pass C3, #181): the hue its body is filled in — the second
+ *  channel beside its silhouette, one palette key per family per colour-vision mode
+ *  (`creepColour`, `palette.ts`) — and the SIZE STEP it is drawn at (`CREEP_SIZE`,
+ *  `creep-art.ts`), from the small swarm to the large boss. The style frame's: ids it gives
+ *  one hue share a family — `resolute` the normal creep's, `armored-flyer` the armored
+ *  creep's — and their shapes tell them apart. */
+export type CreepFamily = 'swarm' | 'normal' | 'fast' | 'armored' | 'flying' | 'boss';
+
+/** Every `CreepFamily`, as a value — keyed on the union, so a seventh family that is not
+ *  listed here fails to compile (the palette needs a hue per family, `creepColour`). */
+const ALL_FAMILIES: Readonly<Record<CreepFamily, true>> = {
+  swarm: true,
+  normal: true,
+  fast: true,
+  armored: true,
+  flying: true,
+  boss: true,
+};
+export const CREEP_FAMILIES: readonly CreepFamily[] = Object.keys(ALL_FAMILIES) as CreepFamily[];
+
+const CREEP_FAMILY_BY_ID: Readonly<Partial<Record<string, CreepFamily>>> = {
+  normal: 'normal',
+  fast: 'fast',
+  swarm: 'swarm',
+  armored: 'armored',
+  resolute: 'normal',
+  flying: 'flying',
+  'armored-flyer': 'armored',
+};
+
+/** The family of a creep of `creepId` — `boss` when it carries the boss ROLE (`CreepVM.boss`,
+ *  a catalog join), whatever its id, since the boss's size step was always keyed on the role
+ *  and its hue now goes with it; otherwise its id's, and the normal family for an id the
+ *  table does not list. The `boss` id is not listed: without the role it is no boss, and
+ *  wears neither the boss's size nor its hue. Total over any string, guarded like
+ *  `creepShapeFor`. */
+export function creepFamilyFor(creepId: string, boss: boolean): CreepFamily {
+  if (boss) return 'boss';
+  return Object.prototype.hasOwnProperty.call(CREEP_FAMILY_BY_ID, creepId)
+    ? (CREEP_FAMILY_BY_ID[creepId] as CreepFamily)
+    : 'normal';
 }
 
-export function creepSilhouettePaintOp(
-  creepId: string,
-  x: number,
-  y: number,
+/** What a creep looks like: its silhouette, its family (hue and size step), and whether it
+ *  flies (wings, a lifted body, and a ground shadow under it). */
+export interface CreepLook {
+  readonly shape: CreepShape;
+  readonly family: CreepFamily;
+  readonly airborne: boolean;
+}
+
+/** The look of a creep of `creepId` with the boss role or not, in the air or not — total
+ *  over any string, like each of its axes. Domain and role are the VM's own fields, joined
+ *  from the catalog, never inferred from the id: an id the catalog has never heard of may
+ *  still fly, and its look still carries wings. */
+export function creepLookFor(creepId: string, boss: boolean, airborne: boolean): CreepLook {
+  return { shape: creepShapeFor(creepId), family: creepFamilyFor(creepId, boss), airborne };
+}
+
+/** A look's stable name, `<shape>:<family>:<air|ground>` — what the board atlas keys a
+ *  creep's body by. */
+export function creepLookKey(look: CreepLook): string {
+  return `${look.shape}:${look.family}:${look.airborne ? 'air' : 'ground'}`;
+}
+
+/** Every look `creepLookFor` can return for ANY id, role and domain: one per id either table
+ *  knows, plus the fallback an unknown id gets, each with and without the boss role and in
+ *  either domain — deduplicated, in table order. The board atlas bakes one body per look
+ *  (`art-frames.ts`), so every look placement can ask for is baked by construction. */
+export const CREEP_LOOKS: readonly CreepLook[] = (() => {
+  const ids = [...new Set([...Object.keys(CREEP_SHAPES), ...Object.keys(CREEP_FAMILY_BY_ID)])];
+  // `''` is never a catalog id (`ruleset-schema.ts` requires `^[a-z][a-z0-9-]{0,31}$`), so
+  // it stands in for "an id neither table knows" — the fallback look.
+  const seen = new Set<string>();
+  const looks: CreepLook[] = [];
+  for (const id of [...ids, '']) {
+    for (const boss of [false, true]) {
+      for (const airborne of [false, true]) {
+        const look = creepLookFor(id, boss, airborne);
+        const key = creepLookKey(look);
+        if (seen.has(key)) continue;
+        seen.add(key);
+        looks.push(look);
+      }
+    }
+  }
+  return looks;
+})();
+
+/** Below this remaining-HP fraction a creep's HP bar turns to the warning colour
+ *  (`pal.creepLowHp`). The bar's LENGTH carries HP too, so the colour is the redundant
+ *  channel of a dual cue, never the only one. Until C3 the silhouette turned too; since C3
+ *  a body keeps its family's hue at any HP, and the bar carries the turn alone. */
+export const CREEP_LOW_HP_FRAC = 0.34;
+
+/** Whether a creep at `hpFrac` shows the low-HP colour — the ONE threshold test. */
+export function isLowHp(hpFrac: number): boolean {
+  return hpFrac < CREEP_LOW_HP_FRAC;
+}
+
+/** The HP bar's geometry, the style frame's, in the creep's radius `r`: `HP_BAR_WIDTH` radii
+ *  wide, `HP_BAR_HEIGHT` radii tall (never under `HP_BAR_MIN_HEIGHT_PX`), its top
+ *  `HP_BAR_RISE` radii above the body's centre, on a backing `HP_BAR_BACKING_PX` larger on
+ *  every side. */
+export const HP_BAR_WIDTH = 2.1;
+export const HP_BAR_HEIGHT = 0.32;
+export const HP_BAR_MIN_HEIGHT_PX = 3;
+export const HP_BAR_RISE = 1.75;
+export const HP_BAR_BACKING_PX = 1;
+
+/** One rectangle of the HP bar, CSS px, and its colour. */
+export interface HpBarRect {
+  readonly x: number;
+  readonly y: number;
+  readonly w: number;
+  readonly h: number;
+  readonly colour: number;
+}
+
+/** The HP bar's paint plan: its backing, then its fill. */
+export interface HpBarPaintOp {
+  readonly backing: HpBarRect;
+  readonly fill: HpBarRect;
+}
+
+/**
+ * A creep's HP bar (C3, #181) — the style frame's, replacing the bare pip: an opaque
+ * `backing` the bar's full length, and over it a FILL whose LENGTH is the creep's remaining
+ * HP and whose colour is its family's `hue`, turning to `lowColour` below `isLowHp`'s
+ * threshold — two channels for one fact, length and colour. The frame drew the backing in
+ * ink at 0.85; it is opaque here, so its colour is exactly what the palette gate measures
+ * the fill and the surfaces against. `centre` is the body's drawn centre — PIXELS, like every
+ * plan in this file; `hpFrac` is already clamped to [0, 1] by the VM.
+ */
+export function hpBarPaintOp(
+  centre: { readonly x: number; readonly y: number },
   r: number,
-  colour: number,
   hpFrac: number,
-): CreepSilhouettePaintOp {
-  return { shape: creepShapeFor(creepId), x, y, r, colour, hpFrac };
+  hue: number,
+  lowColour: number,
+  backing: number,
+): HpBarPaintOp {
+  const w = r * HP_BAR_WIDTH;
+  const h = Math.max(HP_BAR_MIN_HEIGHT_PX, r * HP_BAR_HEIGHT);
+  const x = centre.x - w / 2;
+  const y = centre.y - r * HP_BAR_RISE;
+  const b = HP_BAR_BACKING_PX;
+  return {
+    backing: { x: x - b, y: y - b, w: w + 2 * b, h: h + 2 * b, colour: backing },
+    fill: { x, y, w: w * hpFrac, h, colour: isLowHp(hpFrac) ? lowColour : hue },
+  };
 }
 
 /** One step of the slowed telegraph's paint plan. `'ring'` is the GUARANTEED shape cue
@@ -193,18 +327,22 @@ export interface DotTelegraphPaintOp {
   readonly alpha: number;
 }
 
-// Three pips evenly spaced around the silhouette (apex up), each a filled circle.
+// Three pips evenly spaced around the silhouette (apex DOWN), each a filled circle.
 // The pip RING sits at r*1.8 — deliberately OUTSIDE the slowed ring's
 // r*1.4 (`slowTelegraphPaintOps` above), so a creep carrying BOTH statuses reads as two
 // concentric cues rather than a muddled composite (PLAN.md step 31). Their DRAWN extents
 // separate at ordinary cell sizes but touch at the narrow floor, where `DOT_PIP_MIN_PX`
 // holds the pips at 1.5px while the ring stays proportional (QC round 2) — a deliberate
 // trade: a visible pip that grazes the ring beats a sub-pixel pip that is not there.
-// Canvas y grows DOWNWARD, so apex-up is sin < 0 — 270°, not 90° (QC round 1: the
-// first draft's [90, 210, 330] put the lone pip at the BOTTOM, making this the one cue
-// pointing opposite the triangle silhouette and `scene.ts`'s hexagon, which both offset
-// by -90° for exactly this reason).
-const DOT_PIP_ANGLES_DEG = [270, 30, 150] as const;
+// Canvas y grows DOWNWARD, so apex-down is sin > 0 — the lone pip at 90°, the pair at 210°
+// and 330°, up and out to either side. Until the visual pass the triangle pointed UP, to
+// match the triangle silhouette (QC round 1 of M2-S5a turned the first draft's apex-down
+// set over for that). C3 (#181) moved it back: the HP bar now runs across the top of the
+// creep (`hpBarPaintOp`, as the style frame draws it), and a lone pip straight up sat on the
+// bar's middle — over the end of its fill, whose LENGTH carries HP, for every HP from about
+// a third to two thirds. Apex-down, the pair sits beside the bar and below it, and the lone
+// pip under the creep.
+const DOT_PIP_ANGLES_DEG = [90, 210, 330] as const;
 const DOT_PIP_RADIUS_MUL = 1.8;
 const DOT_PIP_SIZE_MUL = 0.18;
 /** Floor on a pip's drawn radius, in px. The pips are the GUARANTEED shape cue, so they
@@ -317,12 +455,13 @@ export interface StunTelegraphPaintOp {
  * The jolt sits at r×1.15 — OUTSIDE the silhouette, deliberately, and this is the one
  * geometric decision in this builder that is load-bearing rather than aesthetic. It was
  * first drawn INSIDE at r×0.55, which made its contrast partner the creep fill; below
- * `hpFrac` 0.34 that fill is `palette.creepLowHp`, against which `stunned` measures
+ * `hpFrac` 0.34 that fill was then `palette.creepLowHp`, against which `stunned` measures
  * 1.10:1 — and no colour can fix it (the luminance sandwich derived in
  * `palette.test.ts`), so a stunned creep near death carried no perceivable cue at all.
  * Outside the silhouette the partner is the board floor, exactly like the slow ring
  * (r×1.4) and the DoT pips (r×1.8), and the existing colour clears 3.87:1 there. An
- * essential cue must not depend on the health of the thing it is drawn on.
+ * essential cue must not depend on the health of the thing it is drawn on. (Since C3 a body
+ * keeps its family's hue at any HP, and the jolt's ink edge reads on any body besides.)
  *
  * The cost of sitting outside, recorded rather than left to be discovered: r×1.15 is close
  * to the slowed ring at r×1.4, and at small cell sizes the two merge. At cellPx ~= 29 (a
@@ -337,8 +476,8 @@ export interface StunTelegraphPaintOp {
  * below the 1.0 an outside ring must exceed by definition, so the band is empty there. (At
  * r ~= 10.2 the bound is 1.104, so r×1.10 would technically clear — by 0.045px, which is
  * sub-pixel and still reads as merged. A coincidence at one size, not a fix.) A real fix
- * moves the slowed ring's 1.4 or the stroke weights, which is exactly the cue-radius
- * layout pass `wardPaintOps`' own note already defers. It is the lesser of the
+ * moves the slowed ring's 1.4 or the stroke weights — a cue-radius layout pass across every
+ * telegraph family, still owed (the CUE-RADIUS ORDERING block below). It is the lesser of the
  * two defects: the low-HP invisibility this replaced applied to EVERY stunned creep below
  * 34% HP at every cell size, and stun towers deal damage, so their targets trend that way.
  *
@@ -346,7 +485,10 @@ export interface StunTelegraphPaintOp {
  * only when `reducedMotion` is false, its alpha a triangle-wave function of
  * `renderTimeMs` (the SAME `PULSE_PERIOD_MS`/double-mod-guard `slowTelegraphPaintOps`
  * uses). A non-finite `renderTimeMs` is treated as 0 (total; still renders,
- * un-animated for that frame) — same posture as `slowTelegraphPaintOps`.
+ * un-animated for that frame) — same posture as `slowTelegraphPaintOps`. It lies on the
+ * creep's own body, which since C3 wears its family's hue — and no one colour clears every
+ * family and the floor (the luminance sandwich `palette.test.ts` derives) — so it carries an
+ * ink under-stroke like the guaranteed cues (`drawCreepCues`), and the gate on it is ink's.
  */
 /** Units as `slowTelegraphPaintOps`/`dotTelegraphPaintOps` above: `creep.x`/`y` are
  *  PIXELS, not fixed-point — the same mistake `board-draw.ts`'s comment records as
@@ -409,32 +551,15 @@ export function wardPaintOps(
   return [{ kind: 'ward', x: creep.x, y: creep.y, r: r * 2.2, colour: wardedColour, alpha: 1 }];
 }
 
-/** The airborne cue's only op kind — a wing chevron. See {@link airborneCuePaintOps}. */
-export type AirborneOpKind = 'wingspan';
-
-export interface AirborneCuePaintOp {
-  readonly kind: AirborneOpKind;
-  readonly apexX: number;
-  readonly apexY: number;
-  readonly leftX: number;
-  readonly leftY: number;
-  readonly rightX: number;
-  readonly rightY: number;
-  readonly colour: number;
-  readonly alpha: number;
-  /** The light strokes' width, CSS px. */
-  readonly strokePx: number;
-  /** The ink outline: drawn UNDER the light strokes, `outlinePx` wider on each side and
-   *  `outlinePx` past each end, in `outlineColour`. */
-  readonly outlinePx: number;
-  readonly outlineColour: number;
-}
-
-// THE CUE-RADIUS ORDERING (read before changing any number here). Every other cue in
-// this file is a circle centred on the creep, so a cue's radius BAND is what decides
-// whether it collides, regardless of which angular sector it occupies:
-//   jolt (stun)    r×1.15            timed
-//   ring (slow)    r×1.40            timed
+// THE CUE-RADIUS ORDERING (read before changing any number here). Every cue in this file is
+// centred on the creep's BODY — a flyer's lifted body (C4, #181) — and every one but the HP
+// bar is a circle, so a cue's radius BAND is what decides whether it collides, regardless of
+// which angular sector it occupies. `r` is the creep's own radius, its family's size step
+// included (`creepRadius`, `creep-art.ts`), so every band scales with the body it surrounds:
+//   flicker (stun) r×0.85            timed, motion — the one cue inside the silhouette,
+//                                    drawn on the creep's own body
+//   jolt (stun)    r×1.15            timed — GUARANTEED
+//   ring (slow)    r×1.40            timed — GUARANTEED
 //   pip (DoT)      r×1.80            timed — GUARANTEED, a FILLED disc of radius
 //                                    max(1.5px, 0.18r), so its drawn extent is r×1.98
 //                                    ordinarily and r×2.23 at the narrow floor
@@ -448,206 +573,59 @@ export interface AirborneCuePaintOp {
 //                                    extent at the crest is r×2.58 ordinarily and
 //                                    r×2.83 at the narrow floor (r = 3.5), r×2.90 at
 //                                    the defensive `max(3, …)` clamp.
-//   airborne       r×3.22+           CATALOG-derived — outside the drift, for the same
-//                                    reason it is outside the ward
+//   HP bar         r×1.43 → r×1.75   above the centre, `HP_BAR_WIDTH` radii wide — not a
+//                                    ring: see below.
 //
 // THE DoT CUES ARE PART OF THIS LIST (#126). An earlier version of this block enumerated
-// only the five ring-shaped cues and read as exhaustive; it was not, and the omission was
-// load-bearing rather than cosmetic — the M2-S7 accessibility audit transcribed "the
-// airborne cue sits well outside every timed ring" from it, and the drift is a timed cue
-// that reaches further than every ring here. Its extent is a RATIO PLUS A PIXEL FLOOR
-// (`DOT_PIP_MIN_PX`), so it grows relative to `r` as cells shrink, which is exactly where
-// the airborne cue's own clearance was tightest.
+// only the ring-shaped cues and read as exhaustive; it was not, and the omission was
+// load-bearing — the M2-S7 accessibility audit transcribed "the airborne cue sits well
+// outside every timed ring" from it, and the drift is a timed cue that reaches further than
+// every ring here. Its extent is a RATIO PLUS A PIXEL FLOOR (`DOT_PIP_MIN_PX`), so it grows
+// relative to `r` as cells shrink; the same is true of every stroke width and the ink edge
+// below, which is why the stun note above finds the jolt and the slow ring merging at small
+// cells. No size-independent radius fixes that class of tightness.
 //
-// THE CO-OCCURRENCE IS A VM CONTRACT, NOT A CONTENT FACT — and the distinction is the
-// whole point (#126 ship-review). `poisoned` and `airborne` are independent booleans on the
-// render VM, so this module must draw both together on demand; it is keyed on the VM, never
-// on a catalog. In TODAY'S shipped rulesets that pairing is UNREACHABLE: every `dot` effect
-// belongs to a GROUND-domain tower (`venom` in `wynding-core.json` and `catalog-40x40.json`,
-// `stress-venom` in `stress-40x40.json` — one DoT source each, all `"domain": "ground"`),
-// and `combat.ts` rejects any impact whose domain does not cover the target's, so no shipped
-// tower can poison a flyer. `slow` is the both-domain effect since S7 — the ordering note
-// below says so correctly, and an earlier draft of THIS paragraph misattributed that
-// property to `venom`.
+// THE INK EDGE (C3, #181). Each guaranteed cue — the jolt, the slow ring, the pips and the
+// ward — and the flicker carry an ink under-stroke `CUE_INK_PX` wider on each side
+// (`drawCreepCues`, `board-draw.ts`), so every band above DRAWS a pixel wider each way than
+// its stroke. It is what makes a cue read on every surface it lands on: its colour against
+// the dark floor and plate, its ink edge against a light tower head, a rim or another creep's
+// body (`palette.test.ts` gates both halves). Every creep's ink is drawn before any creep's
+// colour, so an ink edge never covers a cue's colour — a slowed and stunned creep at a small
+// cell keeps its slow ring where the jolt's wider ink would otherwise have buried it. The
+// motion cues — the pulse and the drift — carry none: they fade by design and are gated as
+// non-essential.
 //
-// So the clearance below is DEFENSIVE, and deliberately so. The alternative — asserting the
-// pair is safe because shipped DoT sources happen to be ground-only — would pin content
-// domain assignments inside a render test, which is precisely the cross-layer rot this
-// comment block exists to correct. A ruleset that ever ships an air-capable DoT would then
-// silently reintroduce a dual-encoding defect the renderer had "proved" impossible. The
-// overlap the geometry produces is real regardless of who can currently trigger it.
+// THE HP BAR (C3) sits across the top of the band, as the style frame draws it, its fill
+// from r×1.75 above the centre down to `HP_BAR_HEIGHT` radii (or `HP_BAR_MIN_HEIGHT_PX`)
+// below that, `HP_BAR_WIDTH` radii wide, its backing a pixel past it all round. It is drawn
+// OVER the rings, so the arc of a ring under it is hidden and the ring reads around the rest,
+// and UNDER the pips, so the three guaranteed pips are whole wherever they land. That is
+// why the pips point DOWN (`DOT_PIP_ANGLES_DEG`): the pair at 210° and 330° sits beyond the
+// bar's ends and below it, the lone pip under the creep, and from a 14px cell none touches
+// the fill whose length carries HP (from 20px, the swarm's neither). Below that, where the
+// pips' 1.5px floor and the bar's 3px height are largest against `r`, the pair's ink discs
+// reach over the bar's lower corners and into its two ends — at the narrow floor up to a
+// tenth of its length from each end for a normal creep and a fifth for the swarm, never its
+// middle three fifths (`creep-paint.test.ts` measures it). The pips stay whole: they are the
+// one channel a poison has, where the bar's colour turn backs up its length.
 //
-// An earlier draft placed the apex at r×1.10 and the wingtips at (±1.3r, −0.5r), i.e.
-// radius r×1.393 — sitting ON the slow ring (1.4) and crossing the jolt ring (1.15),
-// the exact annulus this file's stun note derives a clearance rule for (ship-review,
-// M2-S7). That is reachable on this story's own headline path: S7 widened `slow` to
-// both-domain SO slow can land on flyers, and `story-flying-wave.test.ts` asserts a
-// slowed flyer — which would have drawn cyan wingtips tangent to a sky-blue slow ring,
-// the two nearest hues in the palette.
+// THE WINGS (C4) are not a cue in this file at all. Until C4 the airborne cue was a chevron
+// drawn here, DETACHED from its creep, and it had to clear every ring: its apex sat r×3.4
+// above the centre — outside even the drift (#126) — which put it in the cell to the NORTH,
+// on whatever tower stood there, and mirrored it below a creep near the canvas top. The
+// wings are part of a flyer's BODY art now (`CREEP_WINGS`, `creep-art.ts`), baked with it
+// and drawn in the creeps' paint layer, under every cue: they reach r×2.05 out to each side
+// and r×0.75 above the body's centre, the rings cross them, and each ring's ink edge
+// separates it from the light wing under it. They differ from every ring in SHAPE — two
+// straight-edged triangles fixed to the body's sides, never a closed curve — and nothing a
+// creep draws lands a cell away from it any more.
 //
-// `wardPaintOps` set the precedent: a catalog-derived, non-timed cue sits OUTSIDE the
-// timed band so it can never be misread as an active status. The airborne cue is the
-// same class, so it goes outside the ward — and outside the drift, which reaches further
-// than the ward does — in turn. Every point below is at radius ≥ r×3.22 (the wingtips,
-// the apex is r×3.4), clearing the drift's drawn extent at every supported cell size.
-//
-// THE APEX MOVED OUT FROM r×2.9 TO r×3.4 (#126), because at r×2.9 it did not clear the
-// drift. That is the whole derivation, and it is MEASURED rather than reasoned about, by
-// `creep-paint.test.ts`'s "clears the DoT drift" case, which walks the sawtooth and prints
-// the worst gap between a drift pip's filled disc and the chevron's 2px-wide strokes:
-//
-//     r = 3.5 (CELL_PX_MIN_NARROW = 10, the supported floor)   was −0.838px → now +0.823px
-//     r = 3   (the defensive `max(3, …)` clamp)                was −1.075px → now +0.348px
-//
-// Those are the values the test PRINTS, so re-running it reproduces this table exactly. The
-// test samples the 900ms sawtooth at 1ms steps, so its worst sample is phase 899/900 rather
-// than the analytic crest at phase → 1; the crest bound is fractionally tighter (−0.840 →
-// +0.820 at r = 3.5, −1.077 → +0.346 at r = 3) and is what the sign of the result rests on.
-// Both are quoted because a reader checking this block against the console must not find a
-// third set of numbers.
-//
-// The glyph's SHAPE is untouched — half-span 0.9r, tips 0.3r below the apex, both exactly
-// as before. Only its standoff from the creep centre changed, so every argument this block
-// makes about shape distinctness survives verbatim; the drift, not a reshape, is what moved
-// it. The alternative lever (pulling the drift in) needed `DOT_DRIFT_RADIUS_MUL_SPAN` cut
-// from 0.6 to 0.2 to clear the same floor — 0.6px of travel at r = 3, which is not a
-// motion cue any more.
-//
-// TWO RESIDUALS, stated rather than hidden — both belong to the deferred cue-radius
-// layout pass the stun note names, not to a fourth cue inventing its own scheme:
-//
-// (1) The clearances are RATIOS while `r` floors at 3px and the stroke/pip widths do not,
-//     so the tightest pair is whichever one the pixel floors bite hardest — and #126 MOVED
-//     which pair that is. It used to be airborne-vs-ward, ~1.2px at the clamp; with the tips
-//     now at r×3.23, and moved out a further `AIRBORNE_OUTLINE_SHIFT_PX` for the outline,
-//     that gap is 1.26px (r = 3) / 1.78px (r = 3.5) between the DRAWN edges, outline
-//     included, and no longer the constraint. The tight pair is now
-//     airborne-vs-drift: +0.348px (r = 3) / +0.823px (r = 3.5) for the light stroke alone,
-//     and — since the ink outline widened the drawn cue by 1px each side and the chevron
-//     moved out `AIRBORNE_OUTLINE_SHIFT_PX` to make room for it — +0.534px / +1.008px for
-//     the outline's edge: the numbers the test above prints, and the reason it prints them
-//     rather than merely asserting a sign. No size-independent radius fixes this class of
-//     tightness; only the layout pass can.
-// (2) THIS ANALYSIS COVERS SAME-CREEP COLLISIONS ONLY. With `r = cellPx × 0.35`
-//     (`board-draw.ts`), an apex at r×3.4 (plus the outline's shift) sits ≈1.2 × cellPx
-//     above the creep centre (1.32 at the 10px floor, where the shift weighs most) —
-//     i.e. the chevron renders in the cell to the NORTH, where ANOTHER creep's
-//     silhouette, HP pip or telegraph rings may already be. On the shipped board every
-//     creep walks the row-11 lane, so a flyer's cue lands across row 10. That is a real
-//     trade, not an oversight: the drift already reaches r×2.83 at the narrow floor, so no
-//     radius both clears every same-creep cue AND stays inside the cell. The #126 move
-//     from r×2.9 to r×3.4 deepens this residual without changing its CHARACTER — 1.19
-//     cellPx still lands in the row-10 cell (leaving it would take 1.5), so it is the same
-//     one cell, further into it. Except at the 10px floor: there the ink outline's drawn
-//     top (its 1px run past the apex, and its half-width) reaches 1.536 cells, 0.36px
-//     into the cell beyond. SHAPE still carries the load there,
-//     not colour: the cell it lands in is usually a tower footprint, so no footprint mark
-//     may be this glyph — `antiair` (the tower that co-occurs with flyers by definition)
-//     therefore draws the `'arrow'` mark, a shafted arrow, rather than the bare "^" it
-//     first shipped as (since the visual pass, #181, the arrow is antiair's head,
-//     `HEAD_ART` in `tower-art.ts`). WHAT IS GATED (`palette.test.ts`), exactly: the light stroke
-//     (`pal.airborne`) ≥ 3:1 against the floor, the plate and the plate's rim (`tower`) —
-//     the dark surfaces it lands on — and its INK OUTLINE (`ART_INK`, drawn under it 1px
-//     wider on each side and 1px past each end) ≥ 3:1 against every role colour and the
-//     rim, in every mode. The outline exists because the visual pass made light
-//     role-coloured heads a surface the cue lands on as the ordinary case (a flyer one row
-//     under a tower), and over them the light stroke alone measures as little as 1.05:1
-//     (the default support white) — it is not gated against the heads and cannot be. So
-//     the cue reads by its light core on dark ground and by its ink edge on a light head.
-//     The flyer cue's redraw (C4) replaces this chevron; the outline holds until then.
-//     The same offset puts the chevron OFF-BOARD for a flyer on row 0, on a board whose
-//     opening sits on the top border — legal in principle, unreachable on the shipped
-//     board (every creep walks the row-11 lane), and called out here because an earlier
-//     draft of this block claimed to have enumerated the adjacent-cell cases and had
-//     only enumerated the interior ones.
-const AIRBORNE_APEX_R_MUL = 3.4; // straight above centre — beyond every cue, timed or not
-const AIRBORNE_WING_Y_MUL = 3.1; // tips sit 0.3r lower than the apex, so the chevron reads as wings
-// Half-span. NARROWER than the silhouette's own half-width of r, so the tips clear the
-// silhouette VERTICALLY, never laterally. The tip radius √(0.9² + 3.1²) ≈ r×3.23 is the
-// glyph's MINIMUM radius, not its maximum: the apex at r×3.4 is its furthest point, and
-// with the apex this far out the nearest point of either stroke to the creep centre is
-// the tip itself (at r×2.9 it was an interior point of the stroke, at r×2.751).
-const AIRBORNE_WING_SPAN_MUL = 0.9;
-/** The chevron's light strokes, CSS px wide. */
-export const AIRBORNE_STROKE_PX = 2;
-/** The ink outline drawn under them: this many CSS px wider on each side, and past each end,
- *  so every edge of the cue — tips and apex included — is ringed in ink (QC round 1, #181). */
-export const AIRBORNE_OUTLINE_PX = 1;
-/** How much further out the chevron sits than its radius multipliers say, CSS px, to make
- *  room for the outline: the outline brings the drawn cue 1px closer to everything around
- *  it, and the closest of those, the DoT drift, is met DIAGONALLY from the tips, so moving
- *  the chevron out by the outline's own width would not restore the gap. 1.25px does — and
- *  slightly widens it (`creep-paint.test.ts` measures it). */
-export const AIRBORNE_OUTLINE_SHIFT_PX = 1.25;
-
-/**
- * The airborne cue's paint plan (M2-S7): a wing chevron — two strokes fanning DOWN and
- * out from an apex above the silhouette's top vertex to tips that are NARROWER than the
- * silhouette, not beyond its sides (`AIRBORNE_WING_SPAN_MUL` puts them at `x ± 0.9r`
- * against a half-width of `r`, so the glyph clears the silhouette VERTICALLY and never
- * laterally — #126; the earlier "tips beyond its sides" is what the S7 accessibility
- * audit transcribed). Layered OVER
- * whichever base silhouette `creepShapeFor` already draws (`creepId` is untouched by
- * this module; the airborne cue is a wholly independent paint plan, composed alongside
- * it, never a SIXTH mutually-exclusive `CreepShape`). That independence is exactly why
- * it composes: `armored-flyer` (S10) draws the hexagon from `creepSilhouettePaintOp`
- * AND this wingspan, so it reads as armored *and* airborne at once, which a single
- * id-keyed shape could never express.
- *
- * Like `wardPaintOps`, this is a CATALOG-derived cue (`CreepVM.domain === 'air'`), NOT a
- * timed status (see CONTEXT.md's Domain entry) — so it takes no `renderTimeMs`, has no
- * reduced-motion branch, and carries no motion cue at all. It floats clear ABOVE the
- * creep, every point at radius ≥ `r×3.22` — outside the silhouette, outside all three
- * timed telegraph rings, outside the ward, and outside the DoT drift's drawn extent at
- * every supported cell size (#126 moved the apex out from `r×2.9` for that last one; the
- * measurement is `creep-paint.test.ts`'s "clears the DoT drift" case). See the cue-radius
- * ordering derived at the constants ABOVE (this docstring follows them, and said "below"
- * until #126); that clearance is the load-bearing part, not the glyph. It keeps
- * the same posture `wardPaintOps`' own note explains (an essential cue must not depend
- * on the health of the thing it is drawn on) and adds the one this file's stun note
- * shows matters just as much: it must not be drawn through another cue either. A
- * genuinely different SHAPE from every ring/pip telegraph above (line strokes, not a
- * circle) AND from every tower footprint mark it can land on top of (`tower-paint.ts` —
- * `antiair` owns `'arrow'`, a shafted arrow, precisely so this bare "^" stays unique),
- * never colour alone (ADR 0003).
- *
- * Units as every other builder above: `creep.x`/`y` are PIXELS (the projected centre),
- * never fixed-point.
- */
-export function airborneCuePaintOps(
-  creep: { readonly x: number; readonly y: number; readonly airborne: boolean },
-  r: number,
-  airborneColour: number,
-  minY = Number.NEGATIVE_INFINITY,
-): readonly AirborneCuePaintOp[] {
-  if (!creep.airborne) return [];
-  // FLIP BELOW WHEN THE CUE WOULD LEAVE THE VIEWPORT (Codex P2, PR #87). The offsets
-  // here are upward, and a board may legally put BOTH openings on row 0 — entrance
-  // (x,0) → exit (y,0) is equal-row, so P1's axis-alignment gate admits it — which puts
-  // a flyer's centre half a cell below the top edge and the whole wingspan off-canvas
-  // for its entire route. Not cosmetic: `flying` deliberately shares `normal`'s base
-  // silhouette (see `CreepShape` above), so this cue is the ONLY channel telling air
-  // from ground, and ADR 0003 requires the shape cue to be PRESENT, not merely
-  // specified. Mirroring preserves every radius — and so every clearance derived in the
-  // CUE-RADIUS ORDERING block — because only the sign changes.
-  const flip = creep.y - (r * AIRBORNE_APEX_R_MUL + AIRBORNE_OUTLINE_SHIFT_PX) < minY;
-  const sign = flip ? 1 : -1;
-  const apexY = creep.y + sign * (r * AIRBORNE_APEX_R_MUL + AIRBORNE_OUTLINE_SHIFT_PX);
-  const wingY = creep.y + sign * (r * AIRBORNE_WING_Y_MUL + AIRBORNE_OUTLINE_SHIFT_PX);
-  return [
-    {
-      kind: 'wingspan',
-      apexX: creep.x,
-      apexY,
-      leftX: creep.x - r * AIRBORNE_WING_SPAN_MUL,
-      leftY: wingY,
-      rightX: creep.x + r * AIRBORNE_WING_SPAN_MUL,
-      rightY: wingY,
-      colour: airborneColour,
-      alpha: 1,
-      strokePx: AIRBORNE_STROKE_PX,
-      outlinePx: AIRBORNE_OUTLINE_PX,
-      outlineColour: ART_INK,
-    },
-  ];
-}
+// THE CO-OCCURRENCE IS A VM CONTRACT, NOT A CONTENT FACT (#126 ship-review). `poisoned`,
+// `stunned`, `slowed` and `airborne` are independent booleans on the render VM, so this
+// module draws any of them together on demand; it is keyed on the VM, never on a catalog.
+// In TODAY'S shipped rulesets some pairings are UNREACHABLE — every `dot` effect belongs to a
+// GROUND-domain tower, and `combat.ts` rejects an impact whose domain does not cover the
+// target's, so no shipped tower can poison a flyer — but asserting a pairing safe because
+// content happens not to reach it would pin content domain assignments inside the renderer.
+// The geometry is real either way.

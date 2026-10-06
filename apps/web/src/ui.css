@@ -1186,9 +1186,9 @@ a.wy-home:focus-visible {
   white-space: nowrap;
 }
 
-/* The creep icon (`hud-icons.ts`): the board's own silhouette. `overflow: visible` lets a
-   boss's larger silhouette and an air entry's chevron use the line's spare height rather than
-   shrinking every other icon to make room. */
+/* The creep icon (`hud-icons.ts`): the board's own creep art. `overflow: visible` lets an air
+   entry's wings reach past the icon's sides into the gap beside it, rather than shrinking every
+   icon to make room. */
 .wy-creep-icon {
   flex: none;
   width: 1.3em;
@@ -1848,9 +1848,10 @@ a.wy-home:focus-visible {
 /* FORCED COLORS (#181). Chromium leaves SVG `fill` and `stroke` unforced, so the icons would
    keep their authored inks on the user's Canvas — the countdown clock and the chips' icons
    near-white on white. Every SVG ink takes a system colour instead. The shapes carry the
-   meaning (heart, gem, star; a creep's silhouette and its airborne chevron), so they read in
-   the one colour the user's theme draws text in. The creep icons' palette inks are
-   presentation attributes, which any rule here outranks. The countdown dial is in the
+   meaning (heart, gem, star; a creep's silhouette and a flyer's wings), so they read in the
+   one colour the user's theme draws text in — a flyer's wings as outlines on the background,
+   so they stay apart from the solid body they are attached to. The creep icons' palette inks
+   are presentation attributes, which any rule here outranks. The countdown dial is in the
    control's own system ink, `ButtonText`, with the spent part of its face in `GrayText` at
    full strength — a second system colour rather than a dimmed first, which a forced palette
    would not keep apart. */
@@ -1861,8 +1862,12 @@ a.wy-home:focus-visible {
     stroke: CanvasText;
   }
 
-  .wy-icon .wy-icon-line,
-  .wy-creep-icon .wy-creep-chevron {
+  .wy-icon .wy-icon-line {
+    stroke: CanvasText;
+  }
+
+  .wy-creep-icon .wy-creep-wing {
+    fill: Canvas;
     stroke: CanvasText;
   }
 

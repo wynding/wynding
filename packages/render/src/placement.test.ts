@@ -1,16 +1,17 @@
 // placement.test.ts — which frame every sprite shows and where: hidden pending-sell towers,
 // queued builds, a tower's plate and head (the boosted head with its glow; no plate under
-// the mine), the scorches a spent mine leaves, the creep frame choice (shape, low-health
-// tint, boss size), and positions snapped to whole device pixels with the frame's anchor
-// honoured.
+// the mine), the scorches a spent mine leaves, a creep's body and shadow (its look, its
+// family's size, a flyer's lift and its cues on its lifted body, flyers over the ground),
+// and positions snapped to whole device pixels with the frame's anchor honoured.
 
 import { describe, it, expect } from 'vitest';
 import { placeCreeps, placeScorches, placeTowers, type FrameAnchor } from './placement';
 import { snapToDevicePx } from './device-px';
 import { atlasFrameSpecs, PAD_FRAME_KEY, PLATE_FRAME_KEY, SCORCH_FRAME_KEY } from './art-frames';
-import { creepRadius } from './board-draw';
+import { creepLiftPx, creepRadius } from './creep-art';
 import { createProjection, type Projection } from './projection';
-import { resolvePalette } from './palette';
+import { creepColour, resolvePalette } from './palette';
+import { recordingArtGraphics } from './test-support/recording-graphics';
 import type { CreepVM, RenderOverlay, RenderVM, TowerVM } from './types';
 
 const PAL = resolvePalette('default');
@@ -265,105 +266,168 @@ describe('placeScorches', () => {
 describe('placeCreeps', () => {
   const projection = projectionAt(1);
   const frames = framesFor(projection);
+  const place = (cs: readonly CreepIn[], p = projection, f = frames) => placeCreeps(cs, PAL, p, f);
 
-  it('centres the silhouette sprite on the projected point, and the cues on the same centre', () => {
-    const [p] = placeCreeps([creep()], PAL, projection, frames);
+  it('anchors a creep’s body and shadow at its projected point, and centres a ground creep’s cues on its body there (PR #78)', () => {
+    const { shadows, bodies } = place([creep()]);
+    const [body] = bodies;
+    const [shadow] = shadows;
     const centre = projection.fpToPixel(5 * 256, 5 * 256);
-    expect(p!.cx).toBe(centre.x);
-    expect(p!.cy).toBe(centre.y);
-    const anchor = frames.get(p!.frame)!;
-    expect(p!.x + anchor.anchorX).toBe(p!.cx);
-    expect(p!.y + anchor.anchorY).toBe(p!.cy);
+    expect(body!.cx).toBe(centre.x);
+    expect(body!.cy).toBe(centre.y);
+    const anchor = frames.get(body!.frame)!;
+    expect(body!.x + anchor.anchorX).toBe(body!.cx);
+    expect(body!.y + anchor.anchorY).toBe(body!.cy);
+    const shadowAnchor = frames.get(shadow!.frame)!;
+    expect(shadow!.x + shadowAnchor.anchorX).toBe(centre.x);
+    expect(shadow!.y + shadowAnchor.anchorY).toBe(centre.y);
   });
 
-  it('chooses the frame from the shape, the low-health tint and the boss size', () => {
-    const placed = placeCreeps(
-      [
-        creep({ creepId: 'fast' }),
-        creep({ creepId: 'swarm', hpFrac: 0.2 }),
-        creep({ creepId: 'boss', boss: true }),
-        creep({ creepId: 'resolute', hpFrac: 0.34 }),
-        creep({ creepId: 'mystery' }),
-      ],
-      PAL,
-      projection,
-      frames,
-    );
-    expect(placed.map((p) => p.frame)).toEqual([
-      'creep:diamond:normal:standard',
-      'creep:square:low:standard',
-      'creep:hexagon:normal:boss',
-      'creep:pentagon:normal:standard',
-      'creep:triangle:normal:standard',
+  it('centres a flyer’s cues on its LIFTED body, where its art is drawn — its shadow marks where it truly is', () => {
+    const { shadows, bodies } = place([creep({ creepId: 'flying', domain: 'air' })]);
+    const [body] = bodies;
+    const [shadow] = shadows;
+    const centre = projection.fpToPixel(5 * 256, 5 * 256);
+    // Both sprites are anchored at the true position…
+    const anchor = frames.get(body!.frame)!;
+    expect(body!.x + anchor.anchorX).toBe(centre.x);
+    expect(body!.y + anchor.anchorY).toBe(centre.y);
+    const shadowAnchor = frames.get(shadow!.frame)!;
+    expect(shadow!.x + shadowAnchor.anchorX).toBe(centre.x);
+    expect(shadow!.y + shadowAnchor.anchorY).toBe(centre.y);
+    // …and the cues are centred on the body as its frame draws it, `CREEP_LIFT` design units
+    // above that anchor: the art's own origin, measured from the bake rather than restated.
+    const spec = atlasFrameSpecs(projection.cellPx, projection.dpr).find(
+      (s) => s.key === body!.frame,
+    )!;
+    const g = recordingArtGraphics();
+    spec.paint(g, PAL);
+    const [, , artX, artY] = g.calls.find((c) => c.method === 'art')!.args as number[];
+    expect(body!.cx).toBeCloseTo(body!.x + artX!, 9);
+    expect(body!.cy).toBeCloseTo(body!.y + artY!, 9);
+    expect(centre.y - body!.cy).toBeCloseTo(creepLiftPx(body!.r, true), 9);
+    expect(body!.r).toBe(creepRadius(projection.cellPx, 'flying'));
+  });
+
+  it('chooses the body frame from the look — shape, family, domain — and the shadow from the family and domain', () => {
+    const { shadows, bodies } = place([
+      creep({ creepId: 'fast' }),
+      creep({ creepId: 'swarm', hpFrac: 0.2 }),
+      creep({ creepId: 'boss', boss: true }),
+      creep({ creepId: 'resolute', hpFrac: 0.34 }),
+      creep({ creepId: 'mystery' }),
     ]);
+    expect(bodies.map((p) => p.frame)).toEqual([
+      'creep:diamond:fast:ground',
+      'creep:square:swarm:ground',
+      'creep:hexagon:boss:ground',
+      'creep:pentagon:normal:ground',
+      'creep:triangle:normal:ground',
+    ]);
+    expect(shadows.map((p) => p.frame)).toEqual([
+      'creep:shadow:fast:ground',
+      'creep:shadow:swarm:ground',
+      'creep:shadow:boss:ground',
+      'creep:shadow:normal:ground',
+      'creep:shadow:normal:ground',
+    ]);
+    const air = place([creep({ creepId: 'armored-flyer', domain: 'air' })]);
+    expect(air.bodies[0]!.frame).toBe('creep:hexagon:armored:air');
+    expect(air.shadows[0]!.frame).toBe('creep:shadow:armored:air');
   });
 
-  it('tints the pip the way the frame is tinted — the low-health threshold is one test', () => {
-    const [low, edge] = placeCreeps(
-      [creep({ hpFrac: 0.33 }), creep({ hpFrac: 0.34 })],
-      PAL,
-      projection,
-      frames,
-    );
-    expect(low!.frame).toContain(':low:');
-    expect(low!.colour).toBe(PAL.creepLowHp);
-    expect(edge!.frame).toContain(':normal:');
-    expect(edge!.colour).toBe(PAL.creep);
+  // Retargeted (C3): until C3 the body's frame and the pip shared the low-HP tint, and this
+  // test pinned them to one threshold. A body now keeps its family's hue at any HP: the same
+  // frame and the same hue either side of the threshold, the HP carried to the bar, whose
+  // colour turns there (`creep-paint.test.ts`, `scene.test.ts`).
+  it('keeps a body in its family’s hue at any HP — the same frame either side of the low-HP threshold', () => {
+    const { bodies } = place([
+      creep({ creepId: 'swarm', hpFrac: 0.33 }),
+      creep({ creepId: 'swarm', hpFrac: 0.34 }),
+      creep({ creepId: 'swarm', hpFrac: 0 }),
+    ]);
+    const [low, edge, dead] = bodies;
+    expect(low!.frame).toBe(edge!.frame);
+    expect(dead!.frame).toBe(edge!.frame);
+    for (const b of bodies) expect(b.hue).toBe(creepColour(PAL, 'swarm'));
+    expect(bodies.map((b) => b.hpFrac)).toEqual([0.33, 0.34, 0]);
+    expect(PAL.creepSwarm).not.toBe(PAL.creepLowHp);
   });
 
-  it('sizes the boss 1.5× AFTER the 3px floor, so it stays larger even at the narrowest cells', () => {
+  it('sizes each creep by its family’s step AFTER the 3px floor — the boss 1.5× the armored creep even at the narrowest cells', () => {
     const tiny = createProjection({ cols: 10, rows: 10, cssWidth: 50, cssHeight: 50, dpr: 1 }); // 5px cells
-    const tinyFrames = framesFor(tiny);
-    const [standard, boss] = placeCreeps(
-      [creep(), creep({ creepId: 'boss', boss: true })],
-      PAL,
+    const { bodies } = place(
+      [
+        creep(),
+        creep({ creepId: 'armored' }),
+        creep({ creepId: 'boss', boss: true }),
+        creep({ creepId: 'swarm' }),
+      ],
       tiny,
-      tinyFrames,
+      framesFor(tiny),
     );
-    expect(standard!.r).toBe(3); // the floor binds
-    expect(boss!.r).toBe(4.5); // ... and the boss still reads larger
-    expect(boss!.r).toBe(creepRadius(5, true));
+    const [normal, armored, boss, swarm] = bodies;
+    expect(normal!.r).toBe(3); // the floor binds
+    expect(armored!.r).toBeCloseTo(3 * 1.12, 12);
+    expect(boss!.r / armored!.r).toBeCloseTo(1.5, 12); // ... and the boss still reads larger
+    expect(boss!.r).toBe(creepRadius(5, 'boss'));
+    expect(swarm!.r).toBeLessThan(normal!.r); // the swarm smallest, under the floor itself
   });
 
-  it('carries every cue state through, and maps the air domain to the airborne cue', () => {
-    const [c] = placeCreeps(
-      [
-        creep({
-          hpFrac: 0.5,
-          slowed: true,
-          poisoned: true,
-          stunned: true,
-          warded: true,
-          domain: 'air',
-        }),
-      ],
-      PAL,
-      projection,
-      frames,
-    );
-    expect(c).toMatchObject({
+  it('carries every cue state through, with the family’s hue for the HP bar', () => {
+    const { bodies } = place([
+      creep({
+        creepId: 'flying',
+        hpFrac: 0.5,
+        slowed: true,
+        poisoned: true,
+        stunned: true,
+        warded: true,
+        domain: 'air',
+      }),
+    ]);
+    expect(bodies[0]).toMatchObject({
       hpFrac: 0.5,
       slowed: true,
       poisoned: true,
       stunned: true,
       warded: true,
-      airborne: true,
+      hue: PAL.creepFlying,
     });
-    expect(placeCreeps([creep()], PAL, projection, frames)[0]!.airborne).toBe(false);
+    expect(place([creep()]).bodies[0]).toMatchObject({
+      slowed: false,
+      poisoned: false,
+      stunned: false,
+      warded: false,
+      hue: PAL.creep,
+    });
   });
 
-  it('keeps creeps in their given order, so a later creep still draws over an earlier one', () => {
-    const placed = placeCreeps(
-      [
-        creep({ creepId: 'swarm', x: 300 }),
-        creep({ creepId: 'fast', x: 310 }),
-        creep({ creepId: 'normal', x: 290 }),
-      ],
-      PAL,
-      projection,
-      frames,
-    );
-    expect(placed.map((p) => p.frame.split(':')[1])).toEqual(['square', 'diamond', 'triangle']);
+  it('draws every creep on the ground first, then every flyer over them — each in its given order — and every shadow under them all', () => {
+    const { shadows, bodies } = place([
+      creep({ creepId: 'swarm', x: 300 }),
+      creep({ creepId: 'flying', domain: 'air', x: 305 }),
+      creep({ creepId: 'fast', x: 310 }),
+      creep({ creepId: 'armored-flyer', domain: 'air', x: 315 }),
+      creep({ creepId: 'normal', x: 290 }),
+    ]);
+    // A later creep still draws over an earlier one of its own domain, and a flyer over all
+    // that walk.
+    expect(bodies.map((p) => p.frame.split(':').slice(1, 3).join(':'))).toEqual([
+      'square:swarm',
+      'diamond:fast',
+      'triangle:normal',
+      'triangle:flying',
+      'hexagon:armored',
+    ]);
+    // The shadows go in a layer of their own, under every body (`layers.ts`), in creep order.
+    expect(shadows.map((p) => p.frame.split(':')[2])).toEqual([
+      'swarm',
+      'flying',
+      'fast',
+      'armored',
+      'normal',
+    ]);
   });
 
   it('snaps a creep between pixels to a whole device pixel, by half a pixel at most', () => {
@@ -371,7 +435,8 @@ describe('placeCreeps', () => {
       const proj = projectionAt(dpr, 100, 100);
       const fr = framesFor(proj);
       const c = creep({ x: 5 * 256 + 37, y: 3 * 256 + 101 });
-      const [p] = placeCreeps([c], PAL, proj, fr);
+      const { shadows, bodies } = place([c, { ...c, creepId: 'flying', domain: 'air' }], proj, fr);
+      const [p] = bodies;
       const truth = proj.fpToPixel(c.x, c.y);
       for (const [snapped, real] of [
         [p!.cx, truth.x],
@@ -380,15 +445,78 @@ describe('placeCreeps', () => {
         expect(Math.abs(snapped * dpr - Math.round(snapped * dpr))).toBeLessThan(1e-9);
         expect(Math.abs(snapped - real)).toBeLessThanOrEqual(0.5 / dpr + 1e-9);
       }
-      // The sprite's own corner is on a whole device pixel too, on BOTH axes (the anchor is
-      // whole texels)…
-      expect(Math.abs(p!.x * dpr - Math.round(p!.x * dpr))).toBeLessThan(1e-9);
-      expect(Math.abs(p!.y * dpr - Math.round(p!.y * dpr))).toBeLessThan(1e-9);
-      // … and its corner plus its frame's anchor IS the centre the cues are drawn around, so
-      // a creep's body and its pip and rings cannot come apart by the snap.
+      // Every sprite's own corner is on a whole device pixel too, on BOTH axes (the anchor is
+      // whole texels) — the bodies, the flyer's among them, and the shadows…
+      for (const s of [...bodies, ...shadows]) {
+        expect(Math.abs(s.x * dpr - Math.round(s.x * dpr)), s.frame).toBeLessThan(1e-9);
+        expect(Math.abs(s.y * dpr - Math.round(s.y * dpr)), s.frame).toBeLessThan(1e-9);
+      }
+      // … and a ground body's corner plus its frame's anchor IS the centre its cues are drawn
+      // around, so a creep's body and its bar and rings cannot come apart by the snap.
       const anchor = fr.get(p!.frame)!;
       expect(p!.x + anchor.anchorX).toBeCloseTo(p!.cx, 9);
       expect(p!.y + anchor.anchorY).toBeCloseTo(p!.cy, 9);
     }
+  });
+
+  describe('a flyer near the canvas top (Codex P2, PR #87)', () => {
+    // A board whose openings sit on its top row — legal, though no shipped board has one —
+    // puts a flyer's true position half a cell from the canvas top, and its lifted body
+    // above it. Its wings are its airborne cue, and `flying` shares `normal`'s triangle, so a
+    // body drawn off the canvas would lose the ONLY air-vs-ground channel but hue. The
+    // detached cue the wings replace flipped below its creep there; the body is drawn down.
+    const flyerAt = (fpY: number, dpr = 1) => {
+      const proj = projectionAt(dpr, 100, 100); // 10px cells, the board at the canvas top
+      expect(proj.originY).toBe(0); // the premise: the canvas top is the board's
+      const fr = framesFor(proj);
+      const { shadows, bodies } = place(
+        [creep({ creepId: 'flying', domain: 'air', y: fpY })],
+        proj,
+        fr,
+      );
+      return {
+        proj,
+        fr,
+        body: bodies[0]!,
+        shadow: shadows[0]!,
+        lift: creepLiftPx(bodies[0]!.r, true),
+      };
+    };
+
+    it('draws its body down by whole device pixels until it starts on the canvas, its cues with it — its shadow stays put', () => {
+      for (const dpr of [1, 2, 1.5]) {
+        const { proj, fr, body, shadow, lift } = flyerAt(128, dpr); // half a cell down: row 0's centre
+        const truth = { y: snapToDevicePx(proj.fpToPixel(0, 128).y, dpr) };
+        const raised = truth.y - fr.get(body.frame)!.anchorY; // where its full lift would start it
+        expect(raised, 'the premise: the full lift starts it above the canvas').toBeLessThan(0);
+        expect(body.y).toBeGreaterThanOrEqual(0); // on the canvas…
+        expect(body.y).toBeLessThan(1 / dpr); // …by no more than it takes
+        expect(Math.abs(body.y * dpr - Math.round(body.y * dpr))).toBeLessThan(1e-9);
+        const down = body.y - raised;
+        expect(body.cy).toBeCloseTo(truth.y - lift + down, 9); // the cues come down with it
+        expect(shadow.y + fr.get(shadow.frame)!.anchorY).toBe(truth.y); // the shadow does not
+      }
+    });
+
+    it('is not moved when its body starts exactly on the canvas’s top edge, and is moved one device pixel when it starts one above', () => {
+      const { fr, body } = flyerAt(128);
+      const anchorY = fr.get(body.frame)!.anchorY; // whole px at dpr 1
+      const fpForY = (y: number): number => (y / 10) * 256; // 10px cells, origin 0
+      const exact = flyerAt(fpForY(anchorY));
+      expect(exact.body.y).toBe(0);
+      expect(exact.body.cy).toBeCloseTo(anchorY - exact.lift, 9); // its full lift
+      const above = flyerAt(fpForY(anchorY - 1));
+      expect(above.body.y).toBe(0); // drawn down exactly the one pixel…
+      expect(above.body.cy).toBeCloseTo(anchorY - above.lift, 9); // …so its body is where `exact`'s is
+    });
+
+    it('keeps its full lift where there is room above, and a creep on the ground is never moved', () => {
+      const low = flyerAt(5 * 256);
+      expect(low.body.cy).toBeCloseTo(50 - low.lift, 9);
+      const proj = projectionAt(1);
+      const { bodies } = place([creep({ y: 0 })], proj, framesFor(proj));
+      expect(bodies[0]!.cy).toBe(0); // a walking creep is drawn where it is, even at the edge
+      expect(bodies[0]!.y).toBeLessThan(0);
+    });
   });
 });

@@ -97,7 +97,7 @@ export interface CreepVM {
   /** Fixed-point sim point (256 units = 1 cell) — projected to pixels by `projection`. */
   readonly x: number;
   readonly y: number;
-  /** Remaining-health fraction in [0,1] for the health pip (dual-encoded, not colour-only). */
+  /** Remaining-health fraction in [0,1] for the HP bar (dual-encoded, not colour-only). */
   readonly hpFrac: number;
   /** Whether an active slow status affects this creep right now (`slowMulFp !== 0`,
    *  M2-S3) — drives the slowed telegraph's shape+motion cues (`creep-paint.ts`). */
@@ -119,9 +119,9 @@ export interface CreepVM {
   readonly warded: boolean;
   /** Whether `creepId`'s catalog definition carries `role === 'boss'` (M2-S10) — a
    *  catalog JOIN, exactly like `domain`/`warded` above, NOT sim state: this never
-   *  changes tick-to-tick for a given creep. Drives the boss size cue
-   *  (`board-draw.ts`'s `BOSS_SCALE`) — role stays a pure axis rather than a fourth
-   *  `CreepShape`, so it composes if a boss variant ever appears (ruling 2). `false`
+   *  changes tick-to-tick for a given creep. Puts the creep in the boss FAMILY — its size
+   *  step and hue (`creepFamilyFor`, `creep-paint.ts`) — role stays a pure axis rather than a
+   *  fourth `CreepShape`, so it composes if a boss variant ever appears (ruling 2). `false`
    *  for a forged/unresolved `creepId` (the same total-over-absent-definition posture
    *  `warded`'s join already takes). */
   readonly boss: boolean;

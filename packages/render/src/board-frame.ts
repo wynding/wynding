@@ -1,13 +1,13 @@
 // board-frame.ts — one frame of the board, Phaser-free (V2, #181). Everything the renderer
 // draws per frame is decided here: which live layer each cue goes into, which sprite shows
 // which frame where, and in what order. `scene.ts` supplies the targets — the baked board
-// image, three live `Graphics` and five sprite pools, all as structural interfaces — and
+// image, three live `Graphics` and six sprite pools, all as structural interfaces — and
 // this fills them, so the routing that keeps every aura shell under every tower body (M2-S8)
 // is a unit-tested fact rather than a property of call order in a coverage-excluded file.
 //
 // The layers composite in `layers.ts`'s order: board, scorches, shells, plates, heads,
-// pending, effects (selection, tracers), creeps, cues (pips and status cues, then the ghost,
-// then sparks).
+// pending, creep shadows, effects (selection, tracers), creeps, cues (HP bars and status
+// cues, then the ghost, then sparks).
 
 import { MS_PER_TICK } from '@wynding/sim';
 import {
@@ -47,7 +47,7 @@ export interface LiveLayers {
   readonly shells: LayerGraphics;
   /** The selection cue, then in-flight tracers — between the pending builds and the creeps. */
   readonly effects: LayerGraphics;
-  /** Every creep's pip and status cues, then the build ghost, then impact sparks — on top. */
+  /** Every creep's HP bar and status cues, then the build ghost, then impact sparks — on top. */
   readonly cues: LayerGraphics;
 }
 
@@ -69,18 +69,20 @@ export interface SpriteLayer {
 }
 
 /** A sprite layer's name — the one it is made under, and its depth is read from. */
-export type SpriteLayerName = 'scorches' | 'plates' | 'heads' | 'pending' | 'creeps';
+export type SpriteLayerName =
+  'scorches' | 'plates' | 'heads' | 'pending' | 'creepShadows' | 'creeps';
 
 /** One `S` per sprite layer. */
 export type SpriteLayers<S> = { readonly [L in SpriteLayerName]: S };
 
-/** The five sprite layers, each made by `make` under its own name, as `createLiveLayers`. */
+/** The six sprite layers, each made by `make` under its own name, as `createLiveLayers`. */
 export function createSpriteLayers<S>(make: (layer: SpriteLayerName) => S): SpriteLayers<S> {
   return {
     scorches: make('scorches'),
     plates: make('plates'),
     heads: make('heads'),
     pending: make('pending'),
+    creepShadows: make('creepShadows'),
     creeps: make('creeps'),
   };
 }
@@ -116,6 +118,9 @@ export interface BoardTargets {
   /** Committed towers' heads — boosted ones with their glow — over the plates. */
   readonly heads: SpriteLayer;
   readonly pending: SpriteLayer;
+  /** Every creep's ground shadow — under every creep's body. */
+  readonly creepShadows: SpriteLayer;
+  /** Every creep's body: those on the ground, then flyers over them. */
   readonly creeps: SpriteLayer;
 }
 
@@ -176,15 +181,16 @@ export function drawBoardFrame(t: BoardTargets, input: BoardFrameInput): void {
   // are the same points (#32/P6).
   const interpolated = interpolateCreeps(prevVm, curVm, alpha);
   drawTracers(effects, pal, overlay, renderTimeTicks, interpolated, projection);
-  // creeps — atlas sprites, in creep order.
+  // creep shadows and creeps — atlas sprites: every shadow, then every body over them.
   const creeps = placeCreeps(interpolated, pal, projection, frames);
-  t.creeps.sync(creeps);
-  // cues — every pip and status cue over every silhouette, then the ghost, then sparks.
+  t.creepShadows.sync(creeps.shadows);
+  t.creeps.sync(creeps.bodies);
+  // cues — every HP bar and status cue over every body, then the ghost, then sparks.
   // CLOCK DOMAIN (QC round 2): `renderTimeOf` is in fractional TICKS (tracers.test.ts:
   // `renderTimeOf(vm(5), vm(6), 0.5) === 5.5`); the paint-plan's pulse period is
   // MILLISECONDS (`renderTimeMs`) — convert here, or the 900ms breath becomes a
   // 900-TICK (45s) one and the motion cue is imperceptible inside a 40-tick slow.
-  drawCreepCues(cues, pal, creeps, overlay.reducedMotion, renderTimeTicks * MS_PER_TICK);
+  drawCreepCues(cues, pal, creeps.bodies, overlay.reducedMotion, renderTimeTicks * MS_PER_TICK);
   drawGhost(cues, pal, overlay, projection);
   drawSparks(cues, pal, input.sparks, overlay.reducedMotion, projection);
 }
@@ -204,6 +210,7 @@ export function resetBoardFrame(
   t.plates.hideAll();
   t.heads.hideAll();
   t.pending.hideAll();
+  t.creepShadows.hideAll();
   t.creeps.hideAll();
 }
 
