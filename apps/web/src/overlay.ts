@@ -86,9 +86,10 @@ export interface Overlay {
    *  second, disconnected one. */
   readonly modal: ModalOwner;
   update(view: HudView): void;
-  /** Re-ink the wave strip's creep icons for a colour-vision mode change (#181 L1) — the
-   *  same hook `main.ts` repaints the Card swatches from. Repaints in place; never rebuilds
-   *  the strip's rows. */
+  /** Re-ink the wave strip's creep icons for a colour-vision mode change (#181 L1), and
+   *  repaint the open Panel's art in the new mode (#181 H3; a closed Panel paints it in that
+   *  mode when it next opens) — the same hook `main.ts` repaints the Card swatches from.
+   *  Repaints in place; never rebuilds the strip's rows. */
   setColourMode(mode: ColourMode): void;
   /** Open the leave-this-run confirm dialog. PRESENTATION ONLY — the decision to open it
    *  (the modified-activation check and the live-run state read) is `main.ts`'s, which owns
@@ -493,8 +494,9 @@ export function createOverlay(
     // The corner was drawn for a digit. A label longer than two characters (a rebound key's
     // word, or "Unbound") would paint over the name or the art, so it is visually hidden on
     // every Card; any other label but a digit (a letter, "F1") fits the full form's corner but
-    // not the icon form's, beside its 34px art, so it is hidden there (`--wide`). Both stay in
-    // the Card's accessible name.
+    // not the icon form's, beside its 34px art, so it is hidden there (`--wide`). A digit is
+    // hidden there too on a tile too narrow for it, by `ui.css` alone, from the tile's own
+    // width. Each stays in the Card's accessible name.
     c.hotkey.classList.toggle('wy-card-hotkey--long', text.length > 2);
     c.hotkey.classList.toggle('wy-card-hotkey--wide', !/^\d$/.test(text));
     if (label !== null) c.root.setAttribute('aria-keyshortcuts', label);

@@ -1489,7 +1489,8 @@ a.wy-home:focus-visible {
    its Cards are too narrow for a name and a digit at the current text size (the container
    query in the two-column block), and a label of more than two characters is visually
    hidden on every Card (the `--long` modifier; any non-digit label is also hidden on the
-   icon form, the `--wide` modifier). */
+   icon form, the `--wide` modifier, and so is a digit on an icon-form tile too narrow for
+   it). */
 .wy-card-label {
   margin-right: 0.75rem;
   font-size: 0.875rem;
@@ -1838,9 +1839,10 @@ a.wy-home:focus-visible {
      exactly), and one in the 85px Rail of a 360px-wide portrait window, where two would fall
      under the 44px tap floor. A tile never asks for more than the Rail has (`min(…, 100%)`):
      at 200% text that portrait Rail is narrower than 3.5rem, and the bare minimum gave it a
-     sideways scroll range. The name is already visually hidden in every form; the hotkey
-     stays in its corner here, where there is room for it beside the art (the Compact arm
-     hides it, per L2). Repeated in the Compact fork for the reason the pin's body is. */
+     sideways scroll range. The name is already visually hidden in every form; a digit
+     hotkey stays in its corner here on a tile with room for it beside the art (the foot of
+     this arm says which; the Compact arm hides it, per L2). Repeated in the Compact fork for
+     the reason the pin's body is. */
   .wy-cards {
     grid-template-columns: repeat(auto-fill, minmax(min(3.5rem, 100%), 1fr));
     gap: 6px;
@@ -1919,8 +1921,9 @@ a.wy-home:focus-visible {
     font-size: 0.6875rem;
   }
 
-  /* The icon form's corner fits a digit beside the 34px art and nothing wider: a letter or a
-     function key ("W", "F1") is visually hidden here, as a longer label is on every Card. */
+  /* The icon form's corner fits a digit beside the 34px art on a wide enough tile (below) and
+     nothing wider on any: a letter or a function key ("W", "F1") is visually hidden here, as a
+     longer label is on every Card. */
   .wy-card-hotkey--wide {
     position: absolute;
     width: 1px;
