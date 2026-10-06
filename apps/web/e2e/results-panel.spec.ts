@@ -77,6 +77,7 @@ const FIT_SIZES: readonly Size[] = [
 
 const ITEMS = ['Verify this run', 'Copy run data', 'Save run data'] as const;
 
+/** Asserts axe finds no violations in `#app`; `when` names the state in the failure message. */
 async function axeClean(page: Page, when: string): Promise<void> {
   const audit = await new AxeBuilder({ page }).include('#app').analyze();
   expect(audit.violations, `axe violations ${when}`).toEqual([]);

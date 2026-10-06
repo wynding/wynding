@@ -60,6 +60,7 @@ const STAT_LABEL: Record<ResultsStat, () => string> = {
   towersBuilt: () => t('results.stat.towersBuilt'),
 };
 
+/** A tile's value: waves cleared out of the run's waves; the other three as plain counts. */
 function statValue(stat: ResultsStat, stats: RunStats): string {
   switch (stat) {
     case 'wavesCleared':
@@ -121,6 +122,7 @@ const REST_PROPERTY = '--wy-results-rest';
 /** Per-panel id prefix: two apps in one document (the unit suites) must not share ids. */
 let nextPanelId = 0;
 
+/** A `type="button"` button with `className` and the text `label`. */
 function button(doc: Document, className: string, label: string): HTMLButtonElement {
   const b = doc.createElement('button');
   b.type = 'button';

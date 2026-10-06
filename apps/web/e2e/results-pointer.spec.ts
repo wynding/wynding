@@ -59,6 +59,7 @@ type Pair =
   | 'two taps'
   | typeof HELD_450
   | typeof HELD_550;
+/** How long a pair's first press is held, in ms: null for a pair that holds none. */
 const holdOf = (pair: Pair): number | null =>
   pair === HELD_450 ? 450 : pair === HELD_550 ? 550 : null;
 const MOUSE_PAIRS: readonly Pair[] = ['double-click', 'two clicks 120 ms apart'];
@@ -67,8 +68,11 @@ type Point = { readonly x: number; readonly y: number };
 type Drift = { readonly dx: number; readonly dy: number };
 const NO_DRIFT: Drift = { dx: 0, dy: 0 };
 
+/** A box's horizontal centre. */
 const centreX = (b: Box): number => b.x + b.width / 2;
+/** The y a fraction `f` of the way down a box. */
 const at = (b: Box, f: number): number => b.y + b.height * f;
+/** Whether the page runs in Chromium. */
 const isChromium = (page: Page): boolean =>
   page.context().browser()?.browserType().name() === 'chromium';
 
@@ -130,6 +134,8 @@ async function recordClicks(page: Page): Promise<void> {
   });
 }
 
+/** The clicks the page recorded since `recordClicks`: when, their `detail`, and whether on Play
+ *  again. */
 const recordedClicks = (page: Page): Promise<Click[]> =>
   page.evaluate(() => (window as unknown as { __clicks: Click[] }).__clicks);
 
@@ -157,6 +163,7 @@ const PREMISE_TRIES = 3;
 /** Whether a press pair met its timing premise: null where it did, else what the page measured. */
 type Premise = string | null;
 
+/** A time for a message, rounded to whole ms. */
 const ms = (t: number): string => `${String(Math.round(t))} ms`;
 
 /** Whether `pair` reaches this browser with its own device timestamps: Chromium dispatches every
@@ -199,9 +206,10 @@ async function untilPremise<T extends { readonly premise: Premise }>(
   throw new Error('unreachable: test.skip ends the test');
 }
 
+/** The gap between a held press's release and the quick press after it, in ms. */
+const HELD_GAP = 135;
 /** A press held `hold` ms, then a single press `HELD_GAP` ms after its release (each its own
  *  click, `detail` 1): stamped in Chromium, as `stampedPair` explains. */
-const HELD_GAP = 135;
 async function heldThenQuick(page: Page, first: Point, second: Point, hold: number): Promise<void> {
   if (isChromium(page)) {
     const cdp = await page.context().newCDPSession(page);
@@ -466,6 +474,7 @@ const strayState = (page: Page) =>
     survey: !document.querySelector<HTMLElement>('.wy-survey-form')!.hidden,
   }));
 
+/** Asserts the press began no new run: the dialog still shows, and the board is still won. */
 async function expectNoNewRun(page: Page, dialog: Locator, what: string): Promise<void> {
   await expect(dialog, `${what}: no new run`).toBeVisible();
   await expect(page.locator('.wy-board'), `${what}: no new run`).toHaveAttribute(
@@ -516,6 +525,7 @@ const REPRO: Record<Case, readonly Repro[]> = {
   ],
 };
 
+/** A repro's window and text size, as the test titles name it. */
 const sizeLabel = (r: Repro): string =>
   `${String(r.width)}×${String(r.height)}, ${String(r.text)}% text`;
 
@@ -1060,6 +1070,7 @@ const firstOption = (page: Page): Promise<Straddle> =>
     };
   });
 
+/** Whether the fold lies in `lo`..`hi`: half the label or more shows, and its radio is cut. */
 const straddles = (m: Straddle): boolean => m.rel >= m.lo && m.rel <= m.hi;
 
 /** `firstOption` at a size, read after opening the survey from the keyboard. */

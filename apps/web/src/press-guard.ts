@@ -114,6 +114,7 @@ interface Place {
   readonly box: DOMRect;
 }
 
+/** Where `el` stands now, and whether it shows. */
 function placeOf(el: Element): Place {
   const style = el.ownerDocument.defaultView?.getComputedStyle(el);
   return {
@@ -122,6 +123,7 @@ function placeOf(el: Element): Place {
   };
 }
 
+/** Whether an element was shown or hidden, or moved or resized by more than `MOVED_PX`. */
 function movedFrom(was: Place, now: Place): boolean {
   return (
     was.shown !== now.shown ||

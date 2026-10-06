@@ -38,6 +38,7 @@ export async function twoFrames(page: Page): Promise<void> {
   );
 }
 
+/** The results dialog's Run data disclosure button. */
 export const toggleOf = (dialog: Locator): Locator =>
   dialog.getByRole('button', { name: 'Run data', exact: true });
 
@@ -57,6 +58,7 @@ export async function boxOf(page: Page, selector: string): Promise<Box> {
   }, selector);
 }
 
+/** Asserts `actual` matches `expected` to half a pixel on x, y, width and height. */
 export function expectSameBox(actual: Box, expected: Box, what: string): void {
   for (const k of ['x', 'y', 'width', 'height'] as const) {
     expect(Math.abs(actual[k] - expected[k]), `${what}: ${k} moved`).toBeLessThanOrEqual(0.5);

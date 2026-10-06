@@ -22,6 +22,9 @@ afterEach(() => {
   vi.restoreAllMocks();
 });
 
+/** A guarded root (buttons A and B, a label-wrapped radio, a paragraph) with a control and a
+ *  board outside it: returns them, the clicks that land, and helpers that press, click, shift
+ *  and key them. */
 function fixture() {
   const root = document.createElement('div');
   const a = document.createElement('button');
@@ -939,10 +942,12 @@ describe('press guard — QC round 6 (#181 H2)', () => {
 });
 
 // Helpers of the round 7 describes below: pointer events alone, and whole mouse presses.
+/** `event`, with its `timeStamp` set to `at`. */
 const stampedAt = <E extends Event>(event: E, at: number): E => {
   Object.defineProperty(event, 'timeStamp', { value: at });
   return event;
 };
+/** Pins `performance.now()` at `ms`. */
 const setNow = (ms: number) =>
   vi.spyOn(document.defaultView!.performance, 'now').mockReturnValue(ms);
 /** A pointer event alone (no mouse events), of `type` pointer `id`, at x (y 100). */
