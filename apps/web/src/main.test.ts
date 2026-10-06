@@ -1466,6 +1466,40 @@ describe('main — the colour-mode repaint wiring (playtest round, #181)', () =>
 
   // #181 (L1): the wave strip's creep icons ride the same subscription. Its colours come from
   // the palette, so the expectation is derived, never restated.
+  // #181 (H3): the docked Panel's art is the one canvas painted outside the Cards. It follows
+  // a mode change while the Panel is open, and a Panel opened after a change is born in it.
+  it('repaints the open Panel’s art on a colour-mode change, and paints a later Panel in the new mode (#181 H3)', () => {
+    vi.mocked(paintSwatch).mockClear();
+    const h = homeApp();
+    const setMode = (mode: string): void => {
+      const radio = h.root.querySelector<HTMLInputElement>(
+        `.wy-settings input[name="wy-colour-mode"][value="${mode}"]`,
+      )!;
+      radio.checked = true;
+      radio.dispatchEvent(new Event('change'));
+    };
+    const lastPaint = (): unknown[] => vi.mocked(paintSwatch).mock.calls.at(-1)!;
+    const basic = h.root.querySelector<HTMLButtonElement>('.wy-card')!;
+    basic.click(); // armed: the Panel opens on the next HUD refresh, its art painted
+    h.frame();
+    const art = h.root.querySelector<HTMLCanvasElement>('.wy-panel .wy-panel-art')!;
+    expect(lastPaint()[0]).toBe(art);
+    expect(lastPaint().slice(1)).toEqual(['basic', 'default']);
+    setMode('protan');
+    expect(lastPaint()[0], 'the open Panel’s art, repainted').toBe(art);
+    expect(lastPaint().slice(1)).toEqual(['basic', 'protan']);
+    // Closed while the mode changes again, then reopened: painted in the mode now in force.
+    basic.click(); // the armed Card's own press disarms
+    h.frame();
+    expect(h.root.querySelector<HTMLElement>('.wy-panel')!.hidden).toBe(true);
+    setMode('tritan');
+    basic.click();
+    h.frame();
+    expect(lastPaint()[0]).toBe(art);
+    expect(lastPaint().slice(1)).toEqual(['basic', 'tritan']);
+    h.app.destroy();
+  });
+
   it("re-inks the wave strip's creep icons on the same colour-mode change, in place", () => {
     const h = homeApp();
     h.frame(); // the first HUD render — pre-start, the strip already previews wave 1

@@ -1542,6 +1542,9 @@ describe('overlay — Card/Panel/live region (PLAN.md P2)', () => {
     const costRow = glance.querySelector('p')!;
     expect(costRow.firstElementChild!.getAttribute('class')).toContain('wy-icon--bounty');
     expect(costRow.textContent).toMatch(/^16 · /);
+    // LEADING it: the gem is the row's first node, ahead of the text — `firstElementChild`
+    // alone also passes with the gem appended after the row's text.
+    expect(costRow.firstChild).toBe(costRow.firstElementChild);
     expect(g).not.toContain('◈'); // one mark, never the glyph beside the icon
     expect(g).not.toMatch(/\b16g\b/);
   });
