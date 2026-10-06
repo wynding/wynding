@@ -157,14 +157,36 @@ export function guardPresses(root: HTMLElement): PressGuard {
   /** The last pointer to go down anywhere in the document, from its `pointerdown`: a tap's
    *  `mousedown` and `click` come only at its release, and none come where the dialog arrived
    *  over the board meanwhile. */
-  let lastDown: { readonly x: number; readonly y: number; readonly at: number } | null = null;
-  /** When the dialog last arrived, and the pointer press it arrived after. */
+  let lastDown: {
+    readonly x: number;
+    readonly y: number;
+    readonly at: number;
+    readonly id: number;
+    /** Its release (`pointerup` or `pointercancel`): null while it is still down. */
+    readonly up: number | null;
+  } | null = null;
+  /** When the dialog last arrived, and the pointer press it arrived after. Where that pointer
+   *  was still down as it arrived (`during`), the arrival is timed from its release instead. */
   let arrival: {
     readonly at: number;
     readonly from: { readonly x: number; readonly y: number };
+    readonly during: number | null;
   } | null = null;
   /** A held key press, whose release is held too. */
   let heldKey: string | null = null;
+
+  /** A keyboard activation's focus-move check, still to run: a zero-delay timer, which input
+   *  already queued behind a long task can beat. */
+  let focusMove: { readonly from: Element | null } | null = null;
+  function resolveFocusMove(): void {
+    if (focusMove === null) return;
+    const { from } = focusMove;
+    focusMove = null;
+    const to = doc.activeElement;
+    if (to !== null && to !== from && root.contains(to)) {
+      keyHold = { el: to, until: (view?.performance.now() ?? 0) + PRESS_GUARD_KEY_HOLD_MS };
+    }
+  }
 
   /** Judge a pointer press. One that passes becomes the next press's reference. */
   function judge(event: MouseEvent, type: string): boolean {
@@ -177,13 +199,14 @@ export function guardPresses(root: HTMLElement): PressGuard {
         : PRESS_GUARD_SLOP_PX;
     // The dialog has just arrived under a pointer that was pressing: a press at that spot this
     // soon after it was begun before the dialog was there.
-    if (
-      arrival !== null &&
-      root.contains(control) &&
-      event.timeStamp - arrival.at < PRESS_GUARD_WINDOW_MS &&
-      Math.hypot(event.clientX - arrival.from.x, event.clientY - arrival.from.y) <= slop
-    ) {
-      return true;
+    if (arrival !== null && root.contains(control)) {
+      const since = event.timeStamp - arrival.at;
+      if (
+        (since < PRESS_GUARD_WINDOW_MS || (event.detail > 1 && since < PRESS_GUARD_REPEAT_MS)) &&
+        Math.hypot(event.clientX - arrival.from.x, event.clientY - arrival.from.y) <= slop
+      ) {
+        return true;
+      }
     }
     if (last !== null && control !== last.control && root.contains(control)) {
       const gap = event.timeStamp - last.at;
@@ -214,7 +237,20 @@ export function guardPresses(root: HTMLElement): PressGuard {
   const onPointerDown = (event: Event): void => {
     const e = event as PointerEvent;
     pointerType = e.pointerType ?? '';
-    lastDown = { x: e.clientX, y: e.clientY, at: e.timeStamp };
+    lastDown = { x: e.clientX, y: e.clientY, at: e.timeStamp, id: e.pointerId, up: null };
+  };
+
+  /** A pointer let go. Where the dialog arrived while it was down, the arrival is timed from
+   *  here: a tap's `mousedown` and `click` come only at its release, and a slow one's never come
+   *  where the dialog arrived over the board meanwhile. */
+  const onPointerUp = (event: Event): void => {
+    const e = event as PointerEvent;
+    if (lastDown !== null && lastDown.id === e.pointerId && lastDown.up === null) {
+      lastDown = { ...lastDown, up: e.timeStamp };
+    }
+    if (arrival !== null && arrival.during === e.pointerId) {
+      arrival = { ...arrival, at: e.timeStamp, during: null };
+    }
   };
 
   const onMouseDown = (event: MouseEvent): void => {
@@ -242,13 +278,9 @@ export function guardPresses(root: HTMLElement): PressGuard {
       // Give feedback to the first question), a second press of the same key, meant for the
       // control it was on, would land on the one focus was moved to: that control takes no Enter
       // or Space for a moment, as Play again does after an accepted Send.
-      const from = doc.activeElement;
-      view?.setTimeout(() => {
-        const to = doc.activeElement;
-        if (to !== null && to !== from && root.contains(to)) {
-          keyHold = { el: to, until: (view?.performance.now() ?? 0) + PRESS_GUARD_KEY_HOLD_MS };
-        }
-      }, 0);
+      resolveFocusMove();
+      focusMove = { from: doc.activeElement };
+      view?.setTimeout(resolveFocusMove, 0);
       return;
     }
     const down = pending;
@@ -280,6 +312,7 @@ export function guardPresses(root: HTMLElement): PressGuard {
   };
 
   const onKeyDown = (event: KeyboardEvent): void => {
+    resolveFocusMove();
     if (event.key !== 'Enter' && event.key !== ' ') return;
     // A control focus has just been moved to, button or not (a radio takes Space).
     if (
@@ -292,6 +325,8 @@ export function guardPresses(root: HTMLElement): PressGuard {
       event.stopImmediatePropagation();
       return;
     }
+    // A fresh press: a release lost to focus leaving mid-press is not this one's to swallow.
+    if (!event.repeat) heldKey = null;
     const button = (event.target as Element | null)?.closest?.('button') ?? null;
     // Listening on `root`, this hears only keys pressed inside the panel.
     if (button === null) return;
@@ -301,12 +336,6 @@ export function guardPresses(root: HTMLElement): PressGuard {
       event.preventDefault();
       event.stopImmediatePropagation();
       return;
-    }
-    const now = view?.performance.now() ?? 0;
-    if (keyHold !== null && keyHold.el === button && now < keyHold.until) {
-      heldKey = event.key;
-      event.preventDefault();
-      event.stopImmediatePropagation();
     }
   };
 
@@ -319,6 +348,8 @@ export function guardPresses(root: HTMLElement): PressGuard {
   };
 
   doc.addEventListener('pointerdown', onPointerDown, true);
+  doc.addEventListener('pointerup', onPointerUp, true);
+  doc.addEventListener('pointercancel', onPointerUp, true);
   doc.addEventListener('mousedown', onMouseDown, true);
   doc.addEventListener('click', onClick, true);
   root.addEventListener('keydown', onKeyDown, true);
@@ -327,9 +358,11 @@ export function guardPresses(root: HTMLElement): PressGuard {
     arm: (): void => {
       arrivals++;
       const now = view?.performance.now() ?? 0;
+      // A press still down as the dialog arrives is never stale, however long it was held.
+      const pressing = lastDown !== null && lastDown.up === null;
       arrival =
-        lastDown !== null && now - lastDown.at < PRESS_GUARD_REPEAT_MS
-          ? { at: now, from: lastDown }
+        lastDown !== null && (pressing || now - lastDown.at < PRESS_GUARD_REPEAT_MS)
+          ? { at: now, from: lastDown, during: pressing ? lastDown.id : null }
           : null;
     },
     holdKeys: (el: Element): void => {
@@ -337,6 +370,8 @@ export function guardPresses(root: HTMLElement): PressGuard {
     },
     remove: (): void => {
       doc.removeEventListener('pointerdown', onPointerDown, true);
+      doc.removeEventListener('pointerup', onPointerUp, true);
+      doc.removeEventListener('pointercancel', onPointerUp, true);
       doc.removeEventListener('mousedown', onMouseDown, true);
       doc.removeEventListener('click', onClick, true);
       root.removeEventListener('keydown', onKeyDown, true);

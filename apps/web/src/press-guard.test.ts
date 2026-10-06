@@ -76,6 +76,7 @@ function fixture() {
     el.dispatchEvent(pointer);
     const down = stamped(new MouseEvent('mousedown', { ...init, detail }), at);
     el.dispatchEvent(down);
+    el.dispatchEvent(stamped(new MouseEvent('pointerup', { ...init, detail: 0 }), at));
     const click = stamped(new MouseEvent('click', { ...init, detail }), at);
     el.dispatchEvent(click);
     return { down, click };
@@ -545,6 +546,7 @@ describe('press guard — QC round 4 (#181 H2)', () => {
     Object.defineProperty(pointer, 'pointerType', { value: pointerType });
     el.dispatchEvent(pointer);
     el.dispatchEvent(stamped(new MouseEvent('mousedown', { ...init, detail }), at.down));
+    el.dispatchEvent(stamped(new MouseEvent('pointerup', { ...init, detail: 0 }), at.click));
     el.dispatchEvent(stamped(new MouseEvent('click', { ...init, detail }), at.click));
   };
   const nowIs = (ms: number) =>
@@ -621,6 +623,50 @@ describe('press guard — QC round 4 (#181 H2)', () => {
     expect(stale.pressed, 'a press over 2 s old is no one’s').toEqual(['B']);
   });
 
+  /** A touch's own `pointerdown` or `pointerup` on `el`, with no mouse events: a tap the dialog
+   *  arrived during, whose `mousedown` and `click` never come. */
+  const touchAt = (el: Element, type: 'pointerdown' | 'pointerup', at: number): void => {
+    const e = stamped(new MouseEvent(type, { bubbles: true, clientX: 100, clientY: 100 }), at);
+    Object.defineProperty(e, 'pointerType', { value: 'touch' });
+    Object.defineProperty(e, 'pointerId', { value: 7 });
+    el.dispatchEvent(e);
+  };
+
+  it('B (QC round 5): a tap the dialog arrived during, held 550 ms: the arrival is timed from its release', () => {
+    const h = fixture();
+    touchAt(h.board, 'pointerdown', 0);
+    nowIs(20);
+    h.guard.arm();
+    touchAt(h.board, 'pointerup', 550);
+    raw(h.b, { pointer: 685, down: 775, click: 775 }, 1, 'touch');
+    expect(h.pressed, 'a second tap 135 ms after the release').toEqual([]);
+    raw(h.b, { pointer: 1100, down: 1190, click: 1190 }, 1, 'touch');
+    expect(h.pressed, '640 ms after the release, a single tap passes').toEqual(['B']);
+  });
+
+  it('B (QC round 5): taps the system counts as repeats belong to the arrival for 2 s', () => {
+    const h = fixture();
+    touchAt(h.board, 'pointerdown', 0);
+    nowIs(70);
+    h.guard.arm();
+    touchAt(h.board, 'pointerup', 90);
+    raw(h.b, { pointer: 380, down: 530, click: 530 }, 2, 'touch');
+    raw(h.b, { pointer: 740, down: 870, click: 870 }, 3, 'touch');
+    expect(h.pressed, 'a third tap 780 ms after the release').toEqual([]);
+    raw(h.b, { pointer: 2000, down: 2090, click: 2090 }, 4, 'touch');
+    expect(h.pressed, 'past 2 s it passes').toEqual(['B']);
+  });
+
+  it('B (QC round 5): a touch still down as the dialog arrives is never stale', () => {
+    const h = fixture();
+    touchAt(h.board, 'pointerdown', 0);
+    nowIs(2100);
+    h.guard.arm();
+    touchAt(h.board, 'pointerup', 2300);
+    raw(h.b, { pointer: 2435, down: 2525, click: 2525 }, 1, 'touch');
+    expect(h.pressed).toEqual([]);
+  });
+
   it('D: a keyboard activation that moves focus to another panel control gives it a 500 ms key hold', async () => {
     const h = fixture();
     const now = nowIs(1000);
@@ -651,15 +697,108 @@ describe('press guard — QC round 4 (#181 H2)', () => {
     still.clickOnly(still.b, 2000); // focus stays on B
     await new Promise((resolve) => setTimeout(resolve, 0));
     expect(still.key(still.b, 'Enter').down.defaultPrevented, 'focus stayed: no hold').toBe(false);
-    const outside = fixture();
-    nowIs(3000);
-    outside.a.addEventListener('click', () => outside.outside.focus());
-    outside.a.focus();
-    outside.clickOnly(outside.a, 3000);
-    await new Promise((resolve) => setTimeout(resolve, 0));
+  });
+});
+
+describe('press guard — QC round 5 (#181 H2)', () => {
+  const stamped = <E extends Event>(event: E, at: number): E => {
+    Object.defineProperty(event, 'timeStamp', { value: at });
+    return event;
+  };
+  const nowIs = (ms: number) =>
+    vi.spyOn(document.defaultView!.performance, 'now').mockReturnValue(ms);
+
+  /** A press on the board at 0 (released at 0), the dialog arriving at `arriveAt`, then a press on
+   *  B at `pressAt`, `dx` px right of the board press: what was activated. The second press is
+   *  past the board press's own window (a single click), so only the arrival can hold it. */
+  function afterArrival(
+    arriveAt: number,
+    pressAt: number,
+    dx = 0,
+    pointerType = 'mouse',
+  ): string[] {
+    const h = fixture();
+    h.press(h.board, 0, {}, 1, pointerType);
+    nowIs(arriveAt);
+    h.guard.arm();
+    h.press(h.b, pressAt, { x: 100 + dx }, 1, pointerType);
+    return h.pressed;
+  }
+
+  it('the arrival window is 500 ms from the arrival: held at 499, passes at 500', () => {
+    expect(afterArrival(1000, 1499), '499 ms after the arrival').toEqual([]);
+    expect(afterArrival(1000, 1500), 'at 500 ms').toEqual(['B']);
+  });
+
+  it('a press 2 s old as the dialog arrives is stale', () => {
     expect(
-      outside.key(outside.outside, 'Enter', false).down.defaultPrevented,
-      'focus left the panel: not the panel’s to hold',
-    ).toBe(false);
+      afterArrival(PRESS_GUARD_REPEAT_MS - 1, PRESS_GUARD_REPEAT_MS + 50),
+      '1999 ms old',
+    ).toEqual([]);
+    expect(afterArrival(PRESS_GUARD_REPEAT_MS, PRESS_GUARD_REPEAT_MS + 50), '2000 ms old').toEqual([
+      'B',
+    ]);
+  });
+
+  it('the arrival’s spot is the pointer’s slop: 24px for a mouse, 48px for touch', () => {
+    expect(afterArrival(1000, 1100, PRESS_GUARD_SLOP_PX), 'a mouse, 24px off').toEqual([]);
+    expect(afterArrival(1000, 1100, 30), 'a mouse, 30px off: somewhere else').toEqual(['B']);
+    expect(afterArrival(1000, 1100, PRESS_GUARD_TOUCH_SLOP_PX, 'touch'), 'touch, 48px off').toEqual(
+      [],
+    );
+    expect(afterArrival(1000, 1100, 48.5, 'touch'), 'touch, 48.5px off').toEqual(['B']);
+  });
+
+  it('the arrival holds only a press on a control in the panel', () => {
+    const h = fixture();
+    h.press(h.board, 0);
+    nowIs(1000);
+    h.guard.arm();
+    h.press(h.outside, 1100);
+    expect(h.pressed, 'a control outside the panel').toEqual(['outside']);
+    expect(h.press(h.board, 1150).down.defaultPrevented, 'no control at all').toBe(false);
+  });
+
+  it('a keyboard activation that moves focus out of the panel leaves a hold inside it alone', async () => {
+    const h = fixture();
+    const now = nowIs(1000);
+    h.guard.holdKeys(h.a);
+    h.b.addEventListener('click', () => h.outside.focus());
+    h.b.focus();
+    h.clickOnly(h.b, 1000);
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(document.activeElement, 'focus left the panel').toBe(h.outside);
+    now.mockReturnValue(1200);
+    expect(h.key(h.a, 'Enter').down.defaultPrevented, 'A keeps its hold').toBe(true);
+  });
+
+  it('a second key before the focus-move check has run is held: input can beat the timer', () => {
+    vi.useFakeTimers();
+    try {
+      const h = fixture();
+      const now = nowIs(1000);
+      h.a.addEventListener('click', () => h.b.focus());
+      h.a.focus();
+      h.clickOnly(h.a, 1000); // Enter on A: focus moves to B; the zero-delay check is still queued
+      now.mockReturnValue(1060);
+      expect(h.key(h.b, ' ').down.defaultPrevented, 'Space on B, before the timer').toBe(true);
+      vi.runAllTimers();
+      now.mockReturnValue(1100);
+      expect(h.key(h.b, 'Enter').down.defaultPrevented, 'and after it').toBe(true);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('a held key whose release was lost does not swallow the next Space release', () => {
+    const h = fixture();
+    const now = nowIs(1000);
+    h.guard.holdKeys(h.a);
+    // Space pressed on A is held; its keyup never comes (focus left the window mid-press).
+    h.a.dispatchEvent(new KeyboardEvent('keydown', { key: ' ', bubbles: true, cancelable: true }));
+    now.mockReturnValue(1600);
+    const space = h.key(h.b, ' ');
+    expect(space.down.defaultPrevented, 'a fresh Space on B').toBe(false);
+    expect(space.up.defaultPrevented, 'its release activates').toBe(false);
   });
 });
