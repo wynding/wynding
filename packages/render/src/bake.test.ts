@@ -160,6 +160,9 @@ describe('paintAtlas', () => {
       const f = frames[i]!;
       const clip = ops.findIndex((o) => o.op === 'clip');
       expect(ops[clip - 1]).toEqual({ op: 'rect', args: [f.x, f.y, f.width, f.height] });
+      // On a fresh path: otherwise the clip would take in the previous frame's last path too,
+      // and a fade under it (`ArtGraphics.fade`) could reach a neighbour.
+      expect(ops[clip - 2]).toEqual({ op: 'beginPath', args: [] });
       // The clip is set in texels; then the transform scales CSS px to texels at the
       // frame's corner.
       const transforms = ops.filter((o) => o.op === 'setTransform').map((o) => o.args);

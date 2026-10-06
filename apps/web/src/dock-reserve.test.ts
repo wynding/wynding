@@ -2,21 +2,28 @@
 // every box is driven at the element seam; the rendered outcome (no buildable cell under the
 // Dock, the 12px floor and its one exception, whole rows at rest, the scroll cue, keyboard
 // reach inside the bounded scrollport) is `dock-overlap.spec.ts`'s.
-import { describe, it, expect } from 'vitest';
+import { afterEach, describe, it, expect, vi } from 'vitest';
 import {
-  ceil64,
   CELL_FLOOR_TOKEN,
   chooseDockRows,
   clearDockReserve,
+  DIAL_GAP_MIN_PX,
+  DIAL_PROPS,
+  DIAL_ROOM_CLASS,
+  dialFits,
+  dialGeometry,
   DOCK_MORE_ABOVE_CLASS,
   DOCK_MORE_BELOW_CLASS,
   DOCK_PROPS,
   DOCK_SCROLL_CLASS,
   measureDockRows,
   syncDockCue,
+  syncDockDial,
   syncDockReserve,
+  type DialGeometry,
   type DockReserveTargets,
 } from './dock-reserve';
+import { ceil64 } from './layout-units';
 
 function rect(top: number, height: number): DOMRect {
   return {
@@ -207,14 +214,6 @@ describe('chooseDockRows (#152)', () => {
       shown: 0,
       height: 0,
     });
-  });
-});
-
-describe('ceil64 (#152)', () => {
-  it('rounds UP to the 1/64px layout unit, and no further', () => {
-    expect(ceil64(52.4)).toBe(52.40625);
-    expect(ceil64(51.203125)).toBe(51.203125); // already a whole unit
-    expect(ceil64(52 + 1e-9)).toBe(52); // float noise in a whole unit costs nothing
   });
 });
 
@@ -423,5 +422,330 @@ describe('syncDockCue (#152)', () => {
     el.classList.add(DOCK_MORE_BELOW_CLASS, DOCK_MORE_ABOVE_CLASS);
     syncDockCue(el);
     expect(cls(el)).toEqual([false, false]);
+  });
+});
+
+// --- The countdown dial's measured room (#181 QC round 2) ------------------------------------
+
+describe('dialGeometry (#181 QC round 2)', () => {
+  it('sizes the dial from the control’s font in WHOLE px, and shifts the label just past it', () => {
+    // The base `.wy-btn` padding is 0.9rem a side and the control's font 1rem: 100%, 110%, 200%
+    // and 300% text.
+    expect(dialGeometry(16, 14.4)).toEqual({ size: 14, inset: 4, gap: 4, shift: 8, padding: 14.4 });
+    expect(dialGeometry(17.6, 15.84)).toEqual({
+      size: 16,
+      inset: 4,
+      gap: 4,
+      shift: 9,
+      padding: 15.84,
+    });
+    expect(dialGeometry(32, 28.8)).toEqual({
+      size: 29,
+      inset: 8,
+      gap: 8,
+      shift: 17,
+      padding: 28.8,
+    });
+    expect(dialGeometry(48, 43.2)).toEqual({
+      size: 43,
+      inset: 12,
+      gap: 12,
+      shift: 24,
+      padding: 43.2,
+    });
+  });
+
+  it('at every text size, a label filling its content box starts at least the gap past the dial, and the end padding can pay the shift', () => {
+    for (let font = 8; font <= 64; font += 0.4) {
+      const padding = 0.9 * font;
+      const g = dialGeometry(font, padding);
+      for (const v of [g.size, g.inset, g.gap, g.shift])
+        expect(Number.isInteger(v), `${font}`).toBe(true);
+      expect(g.gap, `${font}`).toBeGreaterThanOrEqual(DIAL_GAP_MIN_PX);
+      // The content box's start edge, moved by the shift, against the dial's far edge.
+      expect(padding + g.shift - (g.inset + g.size), `${font}`).toBeGreaterThanOrEqual(
+        g.gap - 1e-9,
+      );
+      // …by the least whole px that does it.
+      expect(padding + g.shift - 1 - (g.inset + g.size), `${font}`).toBeLessThan(g.gap);
+      expect(g.shift, `${font}`).toBeLessThanOrEqual(padding);
+    }
+  });
+
+  it('never keeps less than a 2px gap, however small the text', () => {
+    expect(DIAL_GAP_MIN_PX).toBe(2);
+    expect(dialGeometry(4, 3.6).gap).toBe(2);
+    expect(dialGeometry(7, 6.3).gap).toBe(2);
+    expect(dialGeometry(10, 9).gap).toBe(3);
+  });
+});
+
+describe('dialFits (#181 QC round 2)', () => {
+  // 100% text: a 14px dial 4px in, the label moved 8px; a 96px padding box.
+  const g: DialGeometry = dialGeometry(16, 14.4);
+  const W = 96;
+
+  it('fits a label that, moved by the shift, clears the dial by the gap and the end by the inset', () => {
+    // A 40px label centred in the content box (14.4 → 81.6): unshifted at 28 → 68.
+    expect(dialFits(g, W, [{ start: 28, end: 68 }])).toBe(true);
+  });
+
+  it('the dial side: exactly the gap fits, a hair less does not', () => {
+    const atGap = g.inset + g.size + g.gap - g.shift; // 14
+    expect(dialFits(g, W, [{ start: atGap, end: 60 }])).toBe(true);
+    expect(dialFits(g, W, [{ start: atGap - 0.02, end: 60 }])).toBe(false);
+    // A word that spills into the start padding meets the dial outright.
+    expect(dialFits(g, W, [{ start: 2, end: 60 }])).toBe(false);
+  });
+
+  it('the end side: the label must stay the dial’s inset short of the padding box’s end edge', () => {
+    const atEnd = W - g.inset - g.shift; // 84
+    expect(dialFits(g, W, [{ start: 30, end: atEnd }])).toBe(true);
+    expect(dialFits(g, W, [{ start: 30, end: atEnd + 0.02 }])).toBe(false);
+  });
+
+  it('every line of a wrapped label counts', () => {
+    expect(
+      dialFits(g, W, [
+        { start: 30, end: 60 },
+        { start: 20, end: 70 },
+      ]),
+    ).toBe(true);
+    expect(
+      dialFits(g, W, [
+        { start: 30, end: 60 },
+        { start: 10, end: 70 },
+      ]),
+    ).toBe(false);
+  });
+
+  it('every line counts wherever it sits: a line meeting the dial or the end fails the label as the first, the last or a middle line', () => {
+    const ok = { start: 30, end: 60 };
+    for (const bad of [
+      { start: 10, end: 60 },
+      { start: 30, end: 86 },
+    ]) {
+      expect(dialFits(g, W, [bad, ok]), `first ${JSON.stringify(bad)}`).toBe(false);
+      expect(dialFits(g, W, [ok, bad]), `last ${JSON.stringify(bad)}`).toBe(false);
+      expect(dialFits(g, W, [ok, bad, ok]), `middle ${JSON.stringify(bad)}`).toBe(false);
+    }
+    expect(dialFits(g, W, [ok, ok, ok])).toBe(true);
+  });
+
+  it('no ink, no box, or a shift the end padding cannot pay: no dial', () => {
+    expect(dialFits(g, W, [])).toBe(false);
+    expect(dialFits(g, 0, [{ start: 28, end: 68 }])).toBe(false);
+    expect(dialFits({ ...g, padding: g.shift - 0.5 }, W, [{ start: 28, end: 68 }])).toBe(false);
+  });
+});
+
+describe('syncDockDial (#181 QC round 2)', () => {
+  afterEach(() => {
+    vi.restoreAllMocks();
+    document.body.replaceChildren();
+  });
+
+  /** A primary control at x = 50: a 2px border, `pad` inline padding a side (as the base rule
+   *  sets it), `font` px text, and a label whose ink lines sit at `ink` — each [start, end] from
+   *  the padding box's START edge as the label lies UNSHIFTED. `applied` is the shift the
+   *  stylesheet has in force right now: it redistributes the paddings and moves the ink, as the
+   *  browser lays the control out. */
+  function primaryRig(opts: {
+    width?: number;
+    font?: number;
+    pad?: number;
+    ink: [number, number][];
+    applied?: number;
+    rtl?: boolean;
+    hidden?: boolean;
+  }): { primary: HTMLButtonElement; label: HTMLSpanElement } {
+    const width = opts.width ?? 100;
+    const pad = opts.pad ?? 14.4;
+    const applied = opts.applied ?? 0;
+    const rtl = opts.rtl ?? false;
+    const primary = document.createElement('button');
+    primary.className = 'wy-btn wy-primary';
+    primary.hidden = opts.hidden ?? false;
+    const label = document.createElement('span');
+    label.className = 'wy-btn-text';
+    label.textContent = 'Call wave';
+    primary.append(label);
+    document.body.append(primary);
+    primary.style.fontSize = `${opts.font ?? 16}px`;
+    primary.style.border = '2px solid';
+    primary.style.direction = rtl ? 'rtl' : 'ltr';
+    primary.style.paddingLeft = `${rtl ? pad - applied : pad + applied}px`;
+    primary.style.paddingRight = `${rtl ? pad + applied : pad - applied}px`;
+    const x0 = 50;
+    primary.getBoundingClientRect = () =>
+      ({
+        x: x0,
+        y: 0,
+        left: x0,
+        top: 0,
+        width,
+        height: 44,
+        right: x0 + width,
+        bottom: 44,
+      }) as DOMRect;
+    const left = x0 + 2;
+    const right = x0 + width - 2;
+    const rects = opts.ink.map(([start, end], i) => {
+      const [a, b] = rtl
+        ? [right - (end + applied), right - (start + applied)]
+        : [left + start + applied, left + end + applied];
+      return { left: a, right: b, width: b - a, top: 10 + 12 * i, height: 12 } as DOMRect;
+    });
+    // jsdom's Range has no geometry, so the label's ink lines come from a stand-in range.
+    const range = { selectNodeContents: () => undefined, getClientRects: () => rects };
+    vi.spyOn(document, 'createRange').mockReturnValue(range as unknown as Range);
+    return { primary, label };
+  }
+
+  it('sizes the dial from the CONTROL’s own font, so it grows with the text beside it', () => {
+    const { primary } = primaryRig({ font: 32, pad: 28.8, width: 220, ink: [[60, 150]] });
+    syncDockDial(primary);
+    expect(prop(primary, DIAL_PROPS.size)).toBe('29px');
+    expect(prop(primary, DIAL_PROPS.inset)).toBe('8px');
+    expect(prop(primary, DIAL_PROPS.shift)).toBe('17px');
+  });
+
+  const room = (el: HTMLElement): boolean => el.classList.contains(DIAL_ROOM_CLASS);
+
+  it('sizes the dial in whole px and opens its room where the moved label clears it', () => {
+    const { primary } = primaryRig({ ink: [[28, 68]] });
+    syncDockDial(primary);
+    expect(prop(primary, DIAL_PROPS.size)).toBe('14px');
+    expect(prop(primary, DIAL_PROPS.inset)).toBe('4px');
+    expect(prop(primary, DIAL_PROPS.shift)).toBe('8px');
+    expect(room(primary)).toBe(true);
+  });
+
+  it('withholds the dial — and so its shift — where the moved label would meet it', () => {
+    const { primary } = primaryRig({ ink: [[8, 88]] });
+    primary.classList.add(DIAL_ROOM_CLASS); // a stale verdict from a wider control
+    syncDockDial(primary);
+    expect(room(primary)).toBe(false);
+    // Sized all the same, so the dial is ready the moment there is room.
+    expect(prop(primary, DIAL_PROPS.shift)).toBe('8px');
+  });
+
+  it('withholds it where the moved label would run into the control’s end', () => {
+    // Clears the dial (starts 12px past it once moved) but would end 2px from the border.
+    const { primary } = primaryRig({ ink: [[22, 86]] });
+    primary.classList.add(DIAL_ROOM_CLASS);
+    syncDockDial(primary);
+    expect(room(primary)).toBe(false);
+  });
+
+  it('reads the same verdict from the SHIFTED layout as from the unshifted one — it can never flip back and forth', () => {
+    // The shift is in force exactly while the control carries the class (`ui.css`), so a pass
+    // after a room verdict reads a SHIFTED layout and must read it back to the unshifted one.
+    // Counted twice, the shift would spend the end clearance of a label that fits — [28, 80],
+    // 8px clear — and drop the dial it just drew, then draw it again: a flip every pass. And a
+    // class left by a wider label must come off a label that meets the dial — [8, 60], which a
+    // second shift would carry clear of it.
+    const cases: [[number, number][], boolean][] = [
+      [[[28, 68]], true],
+      [[[8, 88]], false],
+      [[[22, 86]], false],
+      [[[28, 80]], true],
+      [[[8, 60]], false],
+    ];
+    for (const [ink, fits] of cases) {
+      document.body.replaceChildren();
+      vi.restoreAllMocks();
+      const plain = primaryRig({ ink }).primary;
+      syncDockDial(plain);
+      expect(room(plain), `unshifted ${JSON.stringify(ink)}`).toBe(fits);
+      vi.restoreAllMocks();
+      const shifted = primaryRig({ ink, applied: 8 }).primary;
+      shifted.classList.add(DIAL_ROOM_CLASS); // the shift is in force only under the class
+      syncDockDial(shifted);
+      expect(room(shifted), `shifted ${JSON.stringify(ink)}`).toBe(fits);
+      expect(prop(shifted, DIAL_PROPS.shift)).toBe('8px');
+    }
+  });
+
+  it('measures from the inline START edge in a right-to-left control', () => {
+    // Each ink is [start, end] from the inline-START edge, and right to left that edge is the
+    // control's RIGHT one: the verdict must be the left-to-right verdict for the same ink. A
+    // centred label reads the same from either edge, so the lopsided ones carry this — and a
+    // label is lopsided exactly where the dial is in question, since one too wide for its
+    // control is start-aligned and overflows at its end (CSS Text). [20, 83] fits, 5px short of
+    // the end; [13, 60] starts 3px from the dial. Read from the wrong edge, each flips.
+    const cases: [[number, number][], boolean][] = [
+      [[[28, 68]], true],
+      [[[8, 88]], false],
+      [[[20, 83]], true],
+      [[[13, 60]], false],
+    ];
+    for (const [ink, fits] of cases) {
+      for (const rtl of [false, true]) {
+        vi.restoreAllMocks();
+        document.body.replaceChildren();
+        // From the other verdict, as the page holds it: a first, unshifted pass for a label that
+        // fits; a class left by a wider label — its shift still in force — for one that does not.
+        const { primary } = primaryRig({ ink, rtl, applied: fits ? 0 : 8 });
+        primary.classList.toggle(DIAL_ROOM_CLASS, !fits);
+        syncDockDial(primary);
+        expect(room(primary), `${JSON.stringify(ink)} ${rtl ? 'rtl' : 'ltr'}`).toBe(fits);
+      }
+    }
+  });
+
+  it('every line of a wrapped label counts', () => {
+    const { primary } = primaryRig({
+      ink: [
+        [30, 60],
+        [10, 70],
+      ],
+    });
+    syncDockDial(primary);
+    expect(room(primary)).toBe(false);
+  });
+
+  it('a hidden or unlaid-out control is no evidence: nothing changes', () => {
+    const { primary } = primaryRig({ ink: [[8, 88]], hidden: true });
+    primary.classList.add(DIAL_ROOM_CLASS);
+    syncDockDial(primary);
+    expect(room(primary)).toBe(true);
+    expect(prop(primary, DIAL_PROPS.size)).toBe('');
+    primary.hidden = false;
+    primary.getBoundingClientRect = () => ({ width: 0 }) as DOMRect;
+    syncDockDial(primary);
+    expect(room(primary)).toBe(true);
+    expect(prop(primary, DIAL_PROPS.size)).toBe('');
+    syncDockDial(undefined); // and no primary at all is no error
+  });
+
+  it('writes nothing when nothing moved (#98’s discipline)', async () => {
+    const { primary } = primaryRig({ ink: [[28, 68]] });
+    syncDockDial(primary);
+    const seen: MutationRecord[] = [];
+    const mo = new MutationObserver((records) => seen.push(...records));
+    mo.observe(primary, { attributes: true, subtree: true, childList: true });
+    syncDockDial(primary);
+    syncDockDial(primary);
+    await Promise.resolve();
+    mo.disconnect();
+    expect(seen).toEqual([]);
+  });
+
+  it('the Standard Dock pass sizes the dial; Compact and teardown clear its props and class', () => {
+    const r = rig({ stageHeight: 600, controls: TWO_ROWS });
+    const { primary } = primaryRig({ ink: [[28, 68]] });
+    const t = { ...r, primary };
+    syncDockReserve(t, false);
+    expect(room(primary)).toBe(true);
+    expect(prop(primary, DIAL_PROPS.shift)).toBe('8px');
+    syncDockReserve(t, true);
+    expect(room(primary)).toBe(false);
+    for (const name of Object.values(DIAL_PROPS)) expect(prop(primary, name), name).toBe('');
+    syncDockReserve(t, false);
+    expect(room(primary)).toBe(true);
+    clearDockReserve(t);
+    expect(room(primary)).toBe(false);
+    for (const name of Object.values(DIAL_PROPS)) expect(prop(primary, name), name).toBe('');
   });
 });

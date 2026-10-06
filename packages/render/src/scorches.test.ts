@@ -1,7 +1,7 @@
 // scorches.test.ts — the scorch a mine leaves where it went off (visual pass T4, #181):
 // detecting a detonation from what the renderer is handed (a blast tracer whose origin is
-// its destination; or, when a frame stepped past the whole flight, the blast's landing on
-// the centre of a burst tower that just vanished), scorching each detonation ONCE, and the
+// its destination; or, when a frame stepped past the whole flight, the blast's landing
+// marked `detonation` by the controller), scorching each detonation ONCE, and the
 // fade — linear over `SCORCH_TICKS` of render time, holding while time holds.
 
 import { describe, it, expect } from 'vitest';
@@ -39,12 +39,15 @@ const detonation = (t: TowerVM, launchTick: number): TracerVM => {
 };
 
 /** The landing of a blast at `t`'s centre, as `RenderOverlay.sparks` carries it. */
-const landing = (t: TowerVM): SparkPoint => ({ ...centreOf(t), radiusFp: 2.5 * FP_ONE });
+const landing = (t: TowerVM): SparkPoint => ({
+  ...centreOf(t),
+  radiusFp: 2.5 * FP_ONE,
+  detonation: true,
+});
 
 const frame = (over: Partial<ScorchFrame>): ScorchFrame => ({
   tracers: [],
   sparks: [],
-  towers: [],
   renderTick: 0,
   ...over,
 });
@@ -77,7 +80,6 @@ describe('createScorchTracker — detection', () => {
   it('scorches a mine’s centre when its detonation tracer appears', () => {
     const m = mine(4, 6);
     const t = createScorchTracker();
-    t.update(frame({ towers: [m], renderTick: 9 }));
     expect(t.live(9)).toEqual([]);
     // The mine fires at tick 10 — its row is consumed at the fire tick, so it is gone
     // from the towers the same frame its tracer appears.
@@ -93,10 +95,8 @@ describe('createScorchTracker — detection', () => {
     const from = centreOf(basic);
     const at = centreOf(splash);
     const t = createScorchTracker();
-    t.update(frame({ towers: [basic, splash], renderTick: 9 }));
     t.update(
       frame({
-        towers: [basic, splash],
         tracers: [
           {
             kind: 'targeted',
@@ -122,7 +122,6 @@ describe('createScorchTracker — detection', () => {
     // ... and their landings, a targeted spark and a blast ring, with both towers standing.
     t.update(
       frame({
-        towers: [basic, splash],
         sparks: [
           { x: from.x + FP_ONE, y: from.y, radiusFp: 0 },
           { x: at.x + 3 * FP_ONE, y: at.y, radiusFp: 1.5 * FP_ONE },
@@ -139,7 +138,6 @@ describe('createScorchTracker — detection', () => {
     // landing is the tracer's own, consumed rather than read as a second detonation.
     const m = mine(4, 6);
     const t = createScorchTracker();
-    t.update(frame({ towers: [m], renderTick: 9 }));
     t.update(frame({ tracers: [detonation(m, 10)], sparks: [landing(m)], renderTick: 11 }));
     expect(t.live(11)).toHaveLength(1);
   });
@@ -147,7 +145,6 @@ describe('createScorchTracker — detection', () => {
   it('scorches each detonation ONCE — not again while its tracer stays listed, nor when it lands', () => {
     const m = mine(4, 6);
     const t = createScorchTracker();
-    t.update(frame({ towers: [m], renderTick: 9 }));
     t.update(frame({ tracers: [detonation(m, 10)], renderTick: 10.2 }));
     t.update(frame({ tracers: [detonation(m, 10)], renderTick: 10.6 }));
     // The landing arrives once the flight ends, and the tracer is pruned.
@@ -155,39 +152,33 @@ describe('createScorchTracker — detection', () => {
     expect(t.live(11.1)).toHaveLength(1);
   });
 
-  it('scorches a detonation whose WHOLE flight fell between two frames, from its landing', () => {
-    // A slow frame stepped past launch and impact: the tracer was never listed. The burst
-    // tower the last frame drew is gone, and a blast landed on its centre.
+  it('scorches a detonation whose WHOLE flight fell between two frames, from its marked landing', () => {
+    // A slow frame stepped past launch and impact: the tracer was never listed, and no
+    // frame ever drew the mine (it was built and fired between two frames). Only the landing,
+    // marked a detonation, remains.
     const m = mine(10, 2);
     const t = createScorchTracker();
-    t.update(frame({ towers: [m], renderTick: 20 }));
     t.update(frame({ sparks: [landing(m)], renderTick: 22.4 }));
     expect(t.live(22.4)).toEqual([{ ...centreOf(m), alpha: 1 }]);
   });
 
-  it('does not scorch a landing on a burst tower that is still there, or on a point no burst tower held', () => {
+  it('does not scorch a blast landing that is not marked a detonation, even on a mine’s centre', () => {
+    // A splash blast landing exactly on a mine's footprint centre: not a detonation.
     const m = mine(10, 2);
-    const other = mine(20, 2, 2);
     const t = createScorchTracker();
-    t.update(frame({ towers: [m, other], renderTick: 20 }));
-    // A splash blast landing exactly on a STILL-STANDING mine's centre: not a detonation.
-    t.update(frame({ towers: [m, other], sparks: [landing(m)], renderTick: 21 }));
-    // A sold mine (gone without a blast) leaves nothing; a blast elsewhere neither.
+    t.update(frame({ sparks: [{ ...centreOf(m), radiusFp: 2.5 * FP_ONE }], renderTick: 21 }));
     t.update(
-      frame({
-        towers: [m],
-        sparks: [{ x: 3 * FP_ONE, y: 3 * FP_ONE, radiusFp: FP_ONE }],
-        renderTick: 22,
-      }),
+      frame({ sparks: [{ x: 3 * FP_ONE, y: 3 * FP_ONE, radiusFp: FP_ONE }], renderTick: 22 }),
     );
     expect(t.live(22)).toEqual([]);
   });
 
-  it('ignores a targeted impact (radius 0) even on a vanished mine’s centre', () => {
+  it('ignores a targeted impact (radius 0) even if marked a detonation', () => {
     const m = mine(10, 2);
     const t = createScorchTracker();
-    t.update(frame({ towers: [m], renderTick: 20 }));
-    t.update(frame({ sparks: [{ ...centreOf(m), radiusFp: 0 }], renderTick: 21 }));
+    t.update(
+      frame({ sparks: [{ ...centreOf(m), radiusFp: 0, detonation: true }], renderTick: 21 }),
+    );
     expect(t.live(21)).toEqual([]);
   });
 
@@ -195,7 +186,6 @@ describe('createScorchTracker — detection', () => {
     const a = mine(4, 4, 1);
     const b = mine(12, 4, 2);
     const t = createScorchTracker();
-    t.update(frame({ towers: [a, b], renderTick: 5 }));
     t.update(frame({ tracers: [detonation(a, 6)], sparks: [landing(b)], renderTick: 7.5 }));
     expect(t.live(7.5).map((s) => [s.x, s.y])).toEqual([
       [centreOf(a).x, centreOf(a).y],
@@ -209,24 +199,25 @@ describe('createScorchTracker — detection', () => {
     // one, and neither scorches a third time.
     const m = mine(4, 6);
     const t = createScorchTracker();
-    t.update(frame({ towers: [m], renderTick: 9 }));
     t.update(frame({ tracers: [detonation(m, 10)], renderTick: 10.2 }));
-    t.update(frame({ towers: [m], renderTick: 10.4 }));
+    t.update(frame({ renderTick: 10.4 }));
     t.update(frame({ tracers: [detonation(m, 11)], renderTick: 11.2 }));
     expect(t.live(11.2)).toHaveLength(2);
     t.update(frame({ sparks: [landing(m)], renderTick: 11.6 }));
     t.update(frame({ sparks: [landing(m)], renderTick: 12.1 }));
     expect(t.live(12.1)).toHaveLength(2);
+    // Both owed landings were settled, the first of them out of two: so when the mine is
+    // rebuilt and goes off seen only by its landing, that scorches a third time.
+    t.update(frame({ sparks: [landing(m)], renderTick: 42.5 }));
+    expect(t.live(42.5)).toHaveLength(3);
   });
 
   it('scorches a mine rebuilt on the same spot when it goes off again', () => {
     const m = mine(4, 6);
     const t = createScorchTracker();
-    t.update(frame({ towers: [m], renderTick: 9 }));
     t.update(frame({ tracers: [detonation(m, 10)], renderTick: 10.2 }));
     t.update(frame({ sparks: [landing(m)], renderTick: 11.1 }));
     // Rebuilt, and fired again later — a NEW detonation (a later launch tick).
-    t.update(frame({ towers: [m], renderTick: 40 }));
     t.update(frame({ tracers: [detonation(m, 41)], renderTick: 41.3 }));
     expect(t.live(41.3)).toHaveLength(2);
   });
@@ -237,10 +228,8 @@ describe('createScorchTracker — detection', () => {
     // landing shows. Had the first landing stayed owed, this one would be taken for it.
     const m = mine(4, 6);
     const t = createScorchTracker();
-    t.update(frame({ towers: [m], renderTick: 9 }));
     t.update(frame({ tracers: [detonation(m, 10)], renderTick: 10.2 }));
     t.update(frame({ sparks: [landing(m)], renderTick: 11.1 }));
-    t.update(frame({ towers: [m], renderTick: 40 }));
     t.update(frame({ sparks: [landing(m)], renderTick: 42.5 }));
     expect(t.live(42.5)).toHaveLength(2);
   });
@@ -250,7 +239,6 @@ describe('createScorchTracker — lifetime', () => {
   const m = mine(4, 6);
   const born = (): ReturnType<typeof createScorchTracker> => {
     const t = createScorchTracker();
-    t.update(frame({ towers: [m], renderTick: 99 }));
     t.update(frame({ tracers: [detonation(m, 100)], renderTick: 100 }));
     return t;
   };

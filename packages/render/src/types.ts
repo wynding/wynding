@@ -302,6 +302,10 @@ export interface SparkPoint {
   readonly x: number;
   readonly y: number;
   readonly radiusFp: number;
+  /** True when the impact is a mine going off: a blast whose shot's origin equals its
+   *  destination (`isDetonation`, `scorches.ts`). Set by the controller from the shot it
+   *  fired, so a detonation whose tracer no frame drew is still known by its landing. */
+  readonly detonation?: boolean;
 }
 
 /** Board-space presentation state handed to `draw()` alongside the two view-models.

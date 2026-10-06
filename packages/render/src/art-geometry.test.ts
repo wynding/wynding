@@ -143,6 +143,76 @@ describe('parsePath', () => {
       sweep: true,
       x: 0.5,
     });
+    // A decimal point is followed by a digit — packed behind an arc flag too ...
+    for (const bad of ['M10 10L90. 50', 'M10 10L1.e1 50', 'M10 50A40 40 0 0 190. 50']) {
+      expect(() => parsePath(bad), bad).toThrow(/unreadable/);
+    }
+    // ... and a number is one a browser can read into the 32-bit float it parses path data
+    // into, part by part: at most 39 integer digits, summing to a finite 32-bit float, an
+    // exponent field of at most 38 whatever precedes it, and a value within range. Each verdict
+    // below is Chromium's and WebKit's, measured (QC round 4): the 0e39, the 0.0…01e39 and the
+    // 40-digit 1000…0e-38 paint nothing, though they are 0, 10 and 10.
+    for (const bad of [
+      'M10 10L1e39 50',
+      'M10 10L50 -3.5e38',
+      'M10 10L0e39 50',
+      `M10 10L0.${'0'.repeat(37)}1e39 50`,
+      `M10 10L1${'0'.repeat(39)}e-38 50`,
+      'M10 10L9e0039 50',
+      'M10 10L9e0038 50',
+      // Near the float max, past the margin (a browser drops them too).
+      'M10 10L3.40282356e38 50',
+      'M10 10L340282350e30 50',
+      'M10 10L34.028235e37 50',
+    ]) {
+      expect(() => parsePath(bad), bad).toThrow(/32-bit float/);
+    }
+    // Numbers it can hold read however they are written: an exponent of 38 on any digits, 39
+    // integer digits, and a negative exponent of any size.
+    expect(parsePath('M.5 1e1L1e38-.25')).toEqual([
+      { c: 'M', x: 0.5, y: 10 },
+      { c: 'L', x: 1e38, y: -0.25 },
+    ]);
+    for (const [good, x] of [
+      [`${'0'.repeat(38)}1`, 1],
+      ['0'.repeat(39), 0],
+      ['0e38', 0],
+      [`0.${'0'.repeat(36)}1e38`, 10],
+      [`1${'0'.repeat(38)}e-37`, 10],
+      ['1e-39', 1e-39],
+      ['1e-999', 0],
+      ['3.4e38', 3.4e38],
+    ] as const) {
+      expect(parsePath(`M10 10L${good} 50`)[1], good).toEqual({ c: 'L', x, y: 50 });
+    }
+  });
+
+  it('reads no integer part Path2D will not: 40 or more digits end it whatever their value, 39 read, and the float max written out ends it', () => {
+    // Measured (QC round 5), Chromium and WebKit: each of these paints nothing, though their
+    // values are 1, 0, 0.5, 1.5, 0.1 and 7 — the parsers build the integer part in 32-bit
+    // floats, and its place value overflows one at the 40th digit.
+    for (const bad of [
+      `${'0'.repeat(39)}1`,
+      '0'.repeat(40),
+      `${'0'.repeat(40)}.5`,
+      `${'0'.repeat(39)}1.5`,
+      `${'0'.repeat(39)}1e-1`,
+      `${'0'.repeat(60)}7`,
+      // The float max in full: its digits sum, in floats, past the max.
+      '340282346638528859811704183484516925440',
+      '340282346638528859811704183484516925440e-1',
+      // Digits just past it, though an exponent brings the value back.
+      '340282350000000000000000000000000000000e-1',
+    ]) {
+      expect(() => parsePath(`M10 10L${bad} 50`), bad).toThrow(/32-bit float/);
+    }
+    for (const [good, x] of [
+      [`${'0'.repeat(38)}1`, 1],
+      [`${'0'.repeat(39)}.5`, 0.5],
+      ['0'.repeat(39), 0],
+    ] as const) {
+      expect(parsePath(`M10 10L${good} 50`)[1], good).toEqual({ c: 'L', x, y: 50 });
+    }
   });
 });
 

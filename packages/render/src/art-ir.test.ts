@@ -87,13 +87,19 @@ describe('alignRectToTexels — a crisp stroke on whole texels', () => {
 
   it('makes the width whole texels — never under its CSS-px floor, rounded up; else the nearest to its own, the thinner at a tie; never under one', () => {
     // 10px cells: 0.3125 px per unit, so the 1px floor rules (3.2 units), rounded UP to whole
-    // texels — two at every fractional dpr, never thinner than the floor.
+    // texels — two at dpr 1.25, 1.5 and 1.75, never thinner than the floor.
     const unit = 0.3125;
     expect(texelWidth(alignRectToTexels(RIM, unit, 1), unit, 1)).toBeCloseTo(1, 9);
     expect(texelWidth(alignRectToTexels(RIM, unit, 1.25), unit, 1.25)).toBeCloseTo(2, 9);
     expect(texelWidth(alignRectToTexels(RIM, unit, 1.5), unit, 1.5)).toBeCloseTo(2, 9);
     expect(texelWidth(alignRectToTexels(RIM, unit, 1.75), unit, 1.75)).toBeCloseTo(2, 9);
     expect(texelWidth(alignRectToTexels(RIM, unit, 3), unit, 3)).toBeCloseTo(3, 9);
+    // Below dpr 1 the floor is under a texel, so it is one: never fewer (0.9 as a browser
+    // reports it, too).
+    for (const scale of [0.9, 0.8, 0.8999999761581421]) {
+      const width = texelWidth(alignRectToTexels(RIM, unit, scale), unit, scale);
+      expect(width, `${scale}`).toBeCloseTo(1, 9);
+    }
     // 40px cells: 1.25 px per unit, so its own 2 units (2.5px) rule — a tie, so 2.
     expect(texelWidth(alignRectToTexels(RIM, 1.25, 1), 1.25, 1)).toBeCloseTo(2, 9);
     // 27px cells: its own 1.6875px is nearer 2 than 1.
@@ -167,6 +173,18 @@ describe('alignRectToTexels — a crisp stroke on whole texels', () => {
     const nearStart = (r: ArtRect): number => o[0] + r.x * k - texelWidth(r, unit, 1.25) / 2;
     expect(nearStart(alignRectToTexels(RIM, unit, 1.25, o))).toBeCloseTo(0, 9);
     expect(nearStart(alignRectToTexels(RIM, unit, 1.25, o, [0, 0, 64, 64]))).toBeCloseTo(1, 9);
+    // Each side keeps to its own bound, in a box that is not square: at 10px cells and dpr 1
+    // the 1-texel rim runs from texel 0 to 20 across, but from 1 to 19 down a box that
+    // starts 2 units (0.625 texels) lower and ends 2 units sooner.
+    const tall = alignRectToTexels(RIM, 0.3125, 1, [0, 0], [0, 2, 64, 62]);
+    const th = texelWidth(tall, 0.3125, 1) / 2;
+    const outer = [
+      tall.x * 0.3125 - th,
+      tall.y * 0.3125 - th,
+      (tall.x + tall.w) * 0.3125 + th,
+      (tall.y + tall.h) * 0.3125 + th,
+    ];
+    outer.forEach((v, i) => expect(v, `edge ${i}`).toBeCloseTo([0, 1, 20, 19][i]!, 9));
     // Everywhere, wherever the footprint's corner falls in a texel: inside it, on whole texels.
     for (const scale of [1, 1.25, 1.5, 1.75, 2, 3]) {
       for (let cellPx = 10; cellPx <= 40; cellPx++) {

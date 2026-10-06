@@ -38,6 +38,7 @@ import {
   deriveViewModel,
   deriveHud,
   renderTimeOf,
+  isDetonation,
   type RenderVM,
   type HudVM,
   type GhostVM,
@@ -190,8 +191,9 @@ export interface Controller {
   /** Impact points resolved since the last call, then cleared. Accumulated per sim tick
    *  so a multi-tick catch-up frame still flashes every kill. `radiusFp` is `0` for a
    *  `targeted` impact (a spark) or a `blast`'s true radius (M2-S4a step 11, an
-   *  expanding-and-fading ring — `scene.ts`). */
-  drainSparks(): { x: number; y: number; radiusFp: number }[];
+   *  expanding-and-fading ring — `scene.ts`). `detonation` is `true` only on the landing
+   *  of a mine going off (`SparkPoint.detonation`). */
+  drainSparks(): { x: number; y: number; radiusFp: number; detonation?: boolean }[];
   /** Derived HUD fields for the DOM overlay. */
   hud(): HudVM;
   isPaused(): boolean;
@@ -549,7 +551,7 @@ export function createController(
   // selected — `selection` is only reassigned on aim/tick.
   let selOverlaySrc: (SelectionVM & { id: number }) | null = null;
   let selOverlay: SelectionVM | null = null;
-  let pendingSparks: { x: number; y: number; radiusFp: number }[]; // impact points resolved since the last drain
+  let pendingSparks: { x: number; y: number; radiusFp: number; detonation?: boolean }[]; // impact points resolved since the last drain
   // Live in-flight-shot list (Tracer, #32/P6): appended from each tick's drained `fired`
   // events, pruned in `frame()` once render time passes a flight's `impactTick` — no
   // tracer crosses run identity (cleared on `reset()`) or survives past terminal.
@@ -695,7 +697,21 @@ export function createController(
     hooks?.begin('derive');
     curVm = deriveViewModel(state, ruleset);
     hooks?.end('derive');
-    for (const pt of events.impactPoints) pendingSparks.push(pt);
+    for (const pt of events.impactPoints) {
+      // A blast landing at a detonation tracer's origin (still listed: `frame()` prunes it,
+      // and a catch-up frame may never have drawn it) is that mine going off — mark it so
+      // the scorch survives the tracer being pruned unseen (`SparkPoint.detonation`).
+      const detonated =
+        pt.radiusFp > 0 &&
+        tracers.some(
+          (f) =>
+            isDetonation(f) &&
+            f.originX === pt.x &&
+            f.originY === pt.y &&
+            f.impactTick <= state.tick,
+        );
+      pendingSparks.push(detonated ? { ...pt, detonation: true } : pt);
+    }
     for (const f of events.fired) tracers.push(f);
     // Reconcile the selection with the post-step world: if the selected tower was sold or
     // destroyed this tick, drop the selection so the scene stops drawing a phantom range
@@ -1311,7 +1327,7 @@ export function createController(
         tracers,
       };
     },
-    drainSparks(): { x: number; y: number; radiusFp: number }[] {
+    drainSparks(): { x: number; y: number; radiusFp: number; detonation?: boolean }[] {
       if (pendingSparks.length === 0) return [];
       const out = pendingSparks;
       pendingSparks = [];

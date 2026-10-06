@@ -1,7 +1,8 @@
 // insets.spec.ts — the safe-area seam's rendered half (#136).
 //
 // `ui.css` computes real geometry from the safe-area insets, including two grid track widths
-// and three subtractive height bounds. None of it had ever been exercised at a NONZERO inset:
+// and two subtractive height bounds (a third, the wave preview's reserved hud row, went with
+// #181's one-line strip). None of it had ever been exercised at a NONZERO inset:
 // `env()` cannot be set from a test, so the suite could only pin the source text of two
 // declarations. Every read now goes through a `--wy-safe-*` token whose first term is
 // `--safe-area-inset-*` — the exact property Capacitor sets on `document.documentElement`
@@ -9,10 +10,10 @@
 //
 // WHY EACH TEST NAMES ITS VIEWPORT. Several inset reads are unconditional in source but
 // OVERRIDDEN in one fork, and asserting one at the wrong viewport is silently vacuous:
-// `.wy-dock`'s bottom padding is zeroed in Compact (ui.css `padding-bottom: 0`), `.wy-hud`'s
-// `max-height` becomes `none` there, and `.wy-hud:has(> .wy-wave-preview)`'s height becomes
-// `auto`. Each assertion below therefore sits at the layout where its mechanism is live.
-// Source-level completeness across all twenty-two call sites is `layout.test.ts`'s job; this file
+// `.wy-dock`'s bottom padding is zeroed in Compact (ui.css `padding-bottom: 0`), and `.wy-hud`'s
+// `max-height` becomes `none` there. Each assertion below therefore sits at the layout where its
+// mechanism is live.
+// Source-level completeness across all twenty-one call sites is `layout.test.ts`'s job; this file
 // covers six MECHANISMS (the sixth, #153, is the Compact Rail paying the top inset) and
 // structurally cannot reach the rest. It also holds #172's Standard Rail walks, which share
 // #153's walk and check that Standard's Rail needs no top inset of its own.
@@ -479,6 +480,12 @@ test.describe('the Standard Rail parks a focused Card with its ring inside the s
   // 640x560 Cards are 189-226px tall against ~160px of room above the Panel.
   const STANDARD_TALL = { width: 360, height: 640 }; // portrait phone, Standard by height
   const TWO_COLUMN = { width: 1440, height: 900 };
+  // The unarmed 100% walk needs a Rail that SCROLLS far enough for a Shift+Tab stop to park a
+  // Card at its top bound — or the top-reserve assertion checks only Infinity. At 1000×720 it
+  // did while #101's reserved hud row held the status row at 248px; since #181's one-line
+  // strip that row is 52px, the Rail is ~196px taller and barely scrolls there. 1000×524
+  // restores the Rail height this walk was calibrated against.
+  const STANDARD_SHORT = { width: 1000, height: 524 };
   const WALKS: {
     view: { width: number; height: number };
     armed: boolean;
@@ -493,7 +500,7 @@ test.describe('the Standard Rail parks a focused Card with its ring inside the s
     { view: TABLET, armed: false, pinned: false, zoom: 200, insets: [0] },
     { view: STANDARD_TALL, armed: false, pinned: false, zoom: 100, insets: [0] },
     { view: STANDARD_TALL, armed: true, pinned: true, zoom: 100, insets: [0] },
-    { view: STANDARD, armed: false, pinned: false, zoom: 100, insets: [0] },
+    { view: STANDARD_SHORT, armed: false, pinned: false, zoom: 100, insets: [0] },
     { view: STANDARD, armed: true, pinned: false, zoom: 100, insets: [0] },
     { view: STANDARD, armed: false, pinned: false, zoom: 200, insets: [0] },
     { view: TWO_COLUMN, armed: false, pinned: false, zoom: 200, insets: [0] },

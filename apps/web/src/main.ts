@@ -53,9 +53,9 @@ import { createSurveyForm, type SurveyForm } from './survey-form';
 import type { Replay } from '@wynding/replay';
 import { createRotate, type MatchMediaFn, type RotateMediaQueryList } from './rotate';
 import { COMPACT_QUERY } from './layout';
-import { placePreviewFloat, type PreviewFloat, type PreviewFloatInput } from './preview-place';
 import { clearDockReserve, syncDockCue, syncDockReserve } from './dock-reserve';
-import { paintSwatch } from './swatch';
+import { clearHudCut, syncHudCut } from './hud-cut';
+import { paintSwatch, releaseSwatch } from './swatch';
 import { requestFullscreen } from './fullscreen';
 import { createWakeLock, type WakeLockApi } from './wakelock';
 import {
@@ -229,7 +229,7 @@ export function createApp(doc: Document, root: HTMLElement, deps: AppDeps): AppH
 
   // --- The playtrace recorder (#133, ADR 0011) ---
   // Declared HERE, above the overlay/rotate wiring, and not beside the `compactMq` the
-  // wave preview uses, for the reason the `resultsShown` declaration a few lines below
+  // Dock pass uses, for the reason the `resultsShown` declaration a few lines below
   // spells out: `createRotate` calls `evaluate()` eagerly at construction, that reaches
   // `ensurePaused()` and can reach `refreshHud()`, and a `const` declared after that
   // wiring would sit in its temporal dead zone. The viewport bucket is therefore resolved
@@ -431,7 +431,9 @@ export function createApp(doc: Document, root: HTMLElement, deps: AppDeps): AppH
   let reducedMotion = initialSettings.reducedMotion;
   reflectReducedMotion(reducedMotion); // initialize from the first snapshot, not just changes
   /** The Cards' footprint-glyph tiles (playtest round, `swatch.ts`) — painted at boot and
-   *  again on a colour-mode change, never per frame. */
+   *  again on a colour-mode change, never per frame. The wave strip's creep icons (#181 L1)
+   *  ride the same hook: the overlay inks them from the boot mode itself and re-inks them in
+   *  place on a change. */
   const paintSwatches = (): void => {
     for (const c of shell.cards) paintSwatch(c.swatch, c.towerId, colourMode);
   };
@@ -440,267 +442,39 @@ export function createApp(doc: Document, root: HTMLElement, deps: AppDeps): AppH
     // Write-through (#142). First, and unconditionally: persistence must not depend on
     // which of the two settings moved, and it must not be skipped by the memo below.
     deps.settingsPersistence?.write(s);
-    // The swatches' one palette input — repainted only when the mode actually moved, so a
-    // reduced-motion toggle never repaints nine canvases for nothing.
+    // The swatches' (and the strip icons') one palette input — repainted only when the mode
+    // actually moved, so a reduced-motion toggle never repaints nine canvases for nothing.
     const modeChanged = s.colourMode !== colourMode;
     colourMode = s.colourMode;
     reducedMotion = s.reducedMotion;
     reflectReducedMotion(s.reducedMotion);
-    if (modeChanged) paintSwatches();
+    if (modeChanged) {
+      paintSwatches();
+      overlay.setColourMode(s.colourMode);
+    }
   });
 
-  // The wave preview's home (playtest round; re-shaped by #101): floating over the Stage
-  // wherever the Stage has dead space wide enough to hold a legible card — at EVERY zoom
-  // level (Codex #96 P1: a zoom-keyed hud fallback parked the preview in the content-sized
-  // status row, where wave changes re-projected the board for zoomed users; the px-capped
-  // card + in-place scroll form serve zoom instead) — and in the bounded chips scrollport
-  // on Compact, and wherever no compliant band exists. That last case REPLACED a
-  // hand-picked sub-400px width bucket: the same viewports still land in the hud, now
-  // because the space was measured rather than because a threshold guessed at it.
-  // `shell.placePreview` owns the topology and `preview-place.ts` the geometry; this
-  // decides only which home — via the same injectable matchMedia seam as the rotate
-  // prompt, plus a ResizeObserver (jsdom, which lacks it, also lacks the rendering that
-  // would make its signals meaningful).
+  // The layout fork, read through the same injectable matchMedia seam as the rotate prompt:
+  // the Dock pass below clears every Standard-only grant on Compact. (The wave preview has ONE
+  // home since #181 — the `.wy-hud` group, styled per layout by `ui.css` — so nothing here
+  // places it any more.)
   const compactMq = matchMediaFn(COMPACT_QUERY);
-  const previewEl = shell.preview.root;
-  /** The float's overflow remedy, IN PLACE — a re-home cannot be the remedy for
-   *  content-driven overflow: the hud lives in `.wy-status`, the shell's content-sized
-   *  first grid row, so moving there re-projects the board mid-run, the exact defect this
-   *  round exists to fix (measured: wave 9's four-entry preview arriving would have cost
-   *  cellPx 33 → 25-28). The card flips from a click-through overlay to a scrollable one
-   *  exactly while its content exceeds its clamp: pointer access to the occluded rows
-   *  yields to content completeness (WCAG 1.4.4 — hidden + pointer-none text would be
-   *  unreachable by ANY input), and the `.wy-hud` scrollport's own discipline (decision
-   *  10, shell.ts) applies to the tab stop — a scrollable region is keyboard-operable AND
-   *  named, never a bare div (axe's scrollable-region-focusable checks only the
-   *  focusability half). Stable by construction: the toggle changes no geometry (the box
-   *  is already at its clamp), so nothing feeds back into the ResizeObserver driving it.
-   *  This form serves EVERY zoom level — the card is px-capped, so zoom grows only its
-   *  internal wrapping, never its box — which is what lets a Stage with a compliant dead
-   *  band keep the float (and the board-stability invariant) at any text size. */
-  const setFloatScroll = (scrollable: boolean): void => {
-    previewEl.classList.toggle('wy-wave-preview--scroll', scrollable);
-    if (scrollable) {
-      previewEl.tabIndex = 0;
-      previewEl.setAttribute('role', 'group');
-      previewEl.setAttribute('aria-label', t('preview.label'));
-    } else {
-      previewEl.removeAttribute('tabindex');
-      previewEl.removeAttribute('role');
-      previewEl.removeAttribute('aria-label');
-    }
-  };
-  /** The float's BAND grants (#101) — the three custom properties `ui.css` reads for the
-   *  card's compliant position and width cap, plus the reduced-weight companion class. All
-   *  cleared together, so a re-home to the hud can never leave a stale cap on the in-flow
-   *  form (which sizes to its column, not to a dead band that no longer exists). */
-  const setFloatBand = (band: PreviewFloat): void => {
-    const style = previewEl.style;
-    if (band.kind !== 'band') {
-      style.removeProperty('--wy-preview-left');
-      style.removeProperty('--wy-preview-right');
-      style.removeProperty('--wy-preview-max-w');
-      previewEl.classList.remove('wy-wave-preview--over-board');
-      return;
-    }
-    const inset = `${band.inset}px`;
-    style.setProperty('--wy-preview-left', band.side === 'left' ? inset : 'auto');
-    style.setProperty('--wy-preview-right', band.side === 'right' ? inset : 'auto');
-    style.setProperty('--wy-preview-max-w', `${band.maxWidth}px`);
-    // Candidate 5 (#101), applied EXACTLY where the plan scopes it: only when the card is
-    // borrowing the board's blocked border ring does it need to read as an overlay sitting
-    // on terrain rather than as a panel replacing it.
-    previewEl.classList.toggle('wy-wave-preview--over-board', band.overBoard);
-  };
-
-  /** The home-INDEPENDENT inputs to the placement decision — the ones that change only
-   *  because the user changed something (window size, text zoom, the install banner's
-   *  reserved row appearing or going).
-   *
-   *  This key exists to break a feedback loop that is otherwise fatal, not to save work.
-   *  The hud home spends the status row's whole 40dvh budget, which SHRINKS the Stage —
-   *  measured at 1280×900/200%: stage 819px tall floating, ~550px in the hud. A shorter
-   *  Stage means smaller cells, which means WIDER letterbox margins, which would say "a
-   *  compliant band exists" and send the card back to the Stage, which restores the tall
-   *  Stage and the narrow margins, which says "no band"… forever, once per ResizeObserver
-   *  tick. Keying the decision on inputs the home cannot move is what makes it terminate.
-   *
-   *  BOUNDARY, stated rather than implied: safe-area insets are not in the key. They move
-   *  on a device rotation, which moves `innerWidth`/`innerHeight` too, so the key still
-   *  turns over — but a hypothetical inset change at a fixed viewport size would not
-   *  re-decide until the next real one. */
-  const previewHomeKey = (): string => {
-    const view = doc.defaultView;
-    return [
-      view?.innerWidth ?? 0,
-      view?.innerHeight ?? 0,
-      view === null || view === undefined
-        ? ''
-        : view.getComputedStyle(doc.documentElement).fontSize,
-      shell.banner.root.hidden ? '0' : '1',
-    ].join('|');
-  };
-  /** The key that was in force when the hud last took the card, or `null` while it floats.
-   *  ONLY the hud home is latched — see `previewHomeKey`. Floating needs no latch at all:
-   *  the card is `position: absolute` inside the Stage, so it contributes nothing to the
-   *  layout the decision reads, and re-deciding on every tick from live geometry is both
-   *  safe and strictly more correct (a mid-run status-row rewrap re-places the card instead
-   *  of stranding it on a stale band). */
-  let hudLatchKey: string | null = null;
-
-  /** The placement's inputs, read off whatever frame the card is in right now. */
-  const measureStageFrame = (): PreviewFloatInput => {
-    const stageBox = shell.stage.getBoundingClientRect();
-    const boardBox = shell.board.getBoundingClientRect();
-    return {
-      stageWidth: stageBox.width,
-      stageHeight: stageBox.height,
-      boardLeft: boardBox.x - stageBox.x,
-      boardWidth: boardBox.width,
-      // The STAGE's height, not the board's, since #152 stopped the Standard board short of
-      // the Dock. Deciding against the unreserved board keeps every home decision exactly
-      // where it was measured before the reserve existed — and the reserve must not move it:
-      // a shorter board means smaller cells and wider margins, which can flip a hud-parked
-      // card to the float, and floating un-pins the hud's flex basis, so the status row can
-      // WRAP TALLER (measured at 640×560, banner up, 200%: 112 → 153px) and crush the board
-      // under its floor. The band stays compliant on the real board, because it is
-      // CONSERVATIVE there: a taller board has larger cells and narrower margins, and with
-      // `c1 ≥ c2` the real buildable edge `m1 + 14·c1 − 13·c2` never falls inside the
-      // `m1 + c1` a band can borrow.
-      boardHeight: stageBox.height,
-      cols: grid.width,
-      rows: grid.height,
-    };
-  };
-
-  /** Send the card to its in-flow hud home and drop every float grant. Idempotent by
-   *  construction — `placePreview` moves conditionally and both grant setters are no-ops at
-   *  their cleared values — so calling it on an already-parked card mutates no DOM at all,
-   *  which is what lets the "stay put" path below cost the chips scrollport nothing. */
-  const parkPreviewInHud = (): void => {
-    setFloatScroll(false); // the hud scrollport owns overflow in this home
-    setFloatBand({ kind: 'none' });
-    shell.placePreview('hud');
-  };
-
-  /** True while the Compact branch owns the card, so leaving Compact can be told apart from
-   *  an ordinary Standard tick. */
-  let compactOwned = compactMq.matches;
-
-  const applyPreviewHome = (): void => {
-    if (compactMq.matches) {
-      parkPreviewInHud();
-      hudLatchKey = null; // re-measure on the way back out of Compact
-      compactOwned = true;
-      return;
-    }
-    if (compactOwned) {
-      // LEAVING COMPACT IS A FRESH START for Standard, so it restores the same starting
-      // placement `init` does. Without this the card would stay in the hud wherever the very
-      // first Standard tick has no measurement to act on — since "no signal moves nothing"
-      // below is now unconditional, nothing else would ever move it back. The transient is
-      // bounded and self-correcting: the ResizeObserver fires with a real box immediately
-      // after a fork crossing (the crossing IS a resize), so the default placement lasts at
-      // most that one tick, and every steady state reaches this function with a measurement.
-      compactOwned = false;
-      shell.placePreview('stage');
-    }
-    // Held by the latch: nothing the card can do moves this key, so nothing to re-decide.
-    if (hudLatchKey !== null && hudLatchKey === previewHomeKey()) return;
-
-    // MEASURE WHERE WE STAND — no exploratory re-home. Physically moving the live node just
-    // to measure would flush layout with the row reservation lifted, and a scroll container
-    // whose content shrinks has its `scrollTop` CLAMPED by the browser: a reader scrolled
-    // down the chips column would be yanked to the top by nothing more than a window resize.
-    //
-    // Measuring from the hud home is sound because it is OPTIMISTIC in a provable direction.
-    // Stage WIDTH is identical in both homes (the status row spans the shell and the Rail
-    // track is viewport-derived); only the height moves, and the reservation can only ADD to
-    // the status row, so `stageHeight_hud <= stageHeight_float`. `cellPx` is monotone
-    // non-decreasing in stage height, and BOTH tiers' band widths — `(W - cellPx*cols)/2`
-    // and that plus one `cellPx` — are monotone non-INcreasing in `cellPx` for any board
-    // wider than two cells. So the hud frame reports an UPPER BOUND on the dead space the
-    // float frame would offer, and an optimistic "no compliant band" is a PROOF of the real
-    // one. That is the common case (a resize while parked), and it now costs zero DOM moves.
-    const parked = previewEl.parentElement !== shell.stage;
-    let band = placePreviewFloat(measureStageFrame());
-    // NO SIGNAL MOVES NOTHING, EVER — one rule, checked before anything else can act on it
-    // (CodeRabbit, PR #164). A degenerate box means "nothing was laid out", which is not the
-    // claim "there is room" and not the claim "there is none"; the only honest response to
-    // no evidence is to leave the card exactly where it is, with the grants it already
-    // carries. The starting placement is chosen ONCE, at init, so this branch never has to
-    // double as a default — see the `placePreview('stage')` beside `applyPreviewHome()`.
-    //
-    // Two earlier shapes of this guard each covered one caller and left the other exposed:
-    // first `hudLatchKey !== null` (the parked card), then `!parked` beside it (the floating
-    // one). The second was still wrong, because `parked` is sampled BEFORE the exploratory
-    // move below and the re-measurement can land here with it stale — a Compact→Standard
-    // hand-off with a momentarily degenerate box would then fall straight through to
-    // `setFloatBand`, clear the grants, and drop the card on the pre-#101 default over the
-    // buildable corner. One unconditional rule has no such seam.
-    if (band.kind === 'unmeasured') return;
-    if (band.kind === 'band' && parked) {
-      // Only a MAYBE — the bound above is one-sided. Take the home change we were going to
-      // take anyway, then read the truth in the frame that now actually exists, so a band
-      // computed against the shrunken Stage is never painted even for a frame.
-      const chipsScrollTop = shell.hudBox.scrollTop;
-      shell.placePreview('stage');
-      band = placePreviewFloat(measureStageFrame());
-      if (band.kind !== 'band') {
-        // UNDO, keyed on the RE-measurement rather than on anything sampled before the move.
-        // Two different reasons to land here and they must not be conflated: `none` is
-        // evidence (the one-sided bound did its job) and latches; `unmeasured` is the box
-        // going degenerate between the two reads, which is no evidence at all and must leave
-        // the latch open so the next real tick decides.
-        parkPreviewInHud();
-        // The bounce ends where it started, so it must cost the reader nothing either.
-        shell.hudBox.scrollTop = chipsScrollTop;
-        hudLatchKey = band.kind === 'none' ? previewHomeKey() : null;
-        return;
-      }
-    }
-    // NO COMPLIANT BAND — the hud home is the escape hatch the ratified plan names, and the
-    // one that already carries the row RESERVATION (`ui.css`: `.wy-hud:has(>
-    // .wy-wave-preview)` fixes the hud at its cap) so wave changes cannot re-project the
-    // board from there either. This subsumes the old sub-400px width bucket: a stage that
-    // narrow has no dead band wide enough for a legible card, so it lands here by
-    // measurement rather than by a separate hand-picked threshold.
-    if (band.kind === 'none') {
-      parkPreviewInHud();
-      hudLatchKey = previewHomeKey();
-      return;
-    }
-    // Only a real band reaches here — `unmeasured` returned above and `none` parked.
-    shell.placePreview('stage');
-    hudLatchKey = null;
-    setFloatBand(band);
-    setFloatScroll(!previewEl.hidden && previewEl.scrollHeight > previewEl.clientHeight);
-  };
-  // THE STARTING PLACEMENT, chosen here rather than inside the loop. `shell.ts` builds the
-  // preview into its hud slot, and `applyPreviewHome` now treats "no measurement" as "move
-  // nothing" without exception — so the Standard default has to be stated once, explicitly,
-  // instead of falling out of a branch that also has to answer mid-resize questions. jsdom,
-  // which lays nothing out and therefore never measures anything, gets exactly this.
-  shell.placePreview('stage');
-  applyPreviewHome();
-  compactMq.addEventListener('change', applyPreviewHome);
-  // Observing BOTH boxes: content and zoom changes resize the preview (the scroll-form
-  // trigger); a window resize changes the stage (the placement's own input) without
-  // touching the preview's own box. Reads the injected document's view, not the global —
-  // the same discipline as the dpr lookup.
-  const PreviewRO = doc.defaultView?.ResizeObserver;
-  const previewResizeObserver = PreviewRO ? new PreviewRO(() => applyPreviewHome()) : null;
-  previewResizeObserver?.observe(shell.preview.root);
-  previewResizeObserver?.observe(shell.stage);
+  // Reads the injected document's view, not the global — the same discipline as the dpr
+  // lookup. jsdom, which lacks it, also lacks the rendering that would make its signals
+  // meaningful.
+  const RO = doc.defaultView?.ResizeObserver;
 
   // THE STANDARD DOCK'S FOOTPRINT (#152) — `dock-reserve.ts` owns the measurement and the
   // whole-row bound, `ui.css` spends them. The board's row count is the one geometry input no
-  // stylesheet can hold (the cell floor is a stylesheet token; the rows are board data).
+  // stylesheet can hold (the cell floor is a stylesheet token; the rows are board data). The
+  // same pass sizes the countdown dial inside the primary control and decides, from its
+  // label's measured ink, whether there is room for it (#181 QC round 2).
   const dockTargets = {
     shell: shell.root,
     stage: shell.stage,
     dock: shell.dock.root,
     rows: grid.height,
+    primary: shell.dock.primary,
   };
   const syncDock = (): void => syncDockReserve(dockTargets, compactMq.matches);
   syncDock();
@@ -715,8 +489,8 @@ export function createApp(doc: Document, root: HTMLElement, deps: AppDeps): AppH
   // it triggers converges (it writes the values already in force, which resizes nothing).
   let dockFrame = 0;
   const dockResizeObserver =
-    PreviewRO && view
-      ? new PreviewRO(() => {
+    RO && view
+      ? new RO(() => {
           if (dockFrame !== 0) return;
           dockFrame = view.requestAnimationFrame(() => {
             dockFrame = 0;
@@ -730,6 +504,11 @@ export function createApp(doc: Document, root: HTMLElement, deps: AppDeps): AppH
   // already held at its bound does not change size when that happens — its controls do
   // (a hidden control's box collapses to nothing), so they are what reports the change.
   for (const control of Array.from(shell.dock.root.children)) dockResizeObserver?.observe(control);
+  // ...and the primary control's LABEL (#181 QC round 2): the dial's room is decided from the
+  // words in it, and "Start" giving way to "Call wave" can change them inside a control its
+  // row holds at one width — the label's own box is what reports that.
+  const primaryLabel = shell.dock.primary.querySelector('.wy-btn-text');
+  if (primaryLabel) dockResizeObserver?.observe(primaryLabel);
   // ...and the bottom SAFE-AREA INSET. In scroll form the inset lifts the Dock by `bottom`,
   // which MOVES it without resizing any box above, so a runtime inset change (a native write
   // of `--safe-area-inset-bottom`, or `env()` changing) would leave the reserve stale and the
@@ -746,6 +525,37 @@ export function createApp(doc: Document, root: HTMLElement, deps: AppDeps): AppH
     passive: true,
     signal: dockScroll.signal,
   });
+
+  // COMPACT'S CHIPS COLUMN RESTS ON WHOLE ITEMS (#181 QC round 2) — `hud-cut.ts` owns the cut,
+  // `ui.css` spends it. Re-measured, one coalesced frame later (the Dock pass's reason), when
+  // anything that decides where the column's room ends, or where an item does, changes size:
+  // the column itself, the Dock under the chips (Start giving way to Pause + Call wave), each
+  // chip, and the wave strip. Never the chips scrollport: the cut is ITS size.
+  const syncCut = (): void => syncHudCut(shell.hudBox, compactMq.matches);
+  syncCut();
+  let cutFrame = 0;
+  const cutObserver =
+    RO && view
+      ? new RO(() => {
+          if (cutFrame !== 0) return;
+          cutFrame = view.requestAnimationFrame(() => {
+            cutFrame = 0;
+            syncCut();
+          });
+        })
+      : null;
+  for (const target of [
+    shell.status,
+    shell.dock.root,
+    shell.hud.wave.root,
+    shell.hud.lives.root,
+    shell.hud.bounty.root,
+    shell.hud.stars.root,
+    shell.hud.score.root,
+    shell.preview.root,
+  ]) {
+    cutObserver?.observe(target);
+  }
 
   const unsubscribeInstall = install.onChange(() => {
     installRev++;
@@ -1299,17 +1109,17 @@ export function createApp(doc: Document, root: HTMLElement, deps: AppDeps): AppH
     destroy(): void {
       cancel();
       unsubscribe();
-      compactMq.removeEventListener('change', applyPreviewHome);
-      previewResizeObserver?.disconnect();
       // The Dock footprint (#152): observer, scroll listener, pending frame, and every property and
-      // class it wrote — cleared by its owner, like the preview grants below.
+      // class it wrote — cleared by its owner.
       dockResizeObserver?.disconnect();
       dockScroll.abort();
       if (dockFrame !== 0) view?.cancelAnimationFrame(dockFrame);
       clearDockReserve(dockTargets);
       insetProbe.remove();
-      setFloatScroll(false); // the preview grants this module owns, cleared by its owner
-      setFloatBand({ kind: 'none' }); // ...and the band grants beside them (#101)
+      // The chips cut (#181 QC round 2): observer, pending frame, and the property it wrote.
+      cutObserver?.disconnect();
+      if (cutFrame !== 0) view?.cancelAnimationFrame(cutFrame);
+      clearHudCut(shell.hudBox);
       guardListener.abort(); // the home-link exit guard
       lifecycle.abort(); // the backgrounding listeners (#139)
       backHandler.destroy(); // the native Back + lifecycle listeners (#138)
@@ -1324,6 +1134,8 @@ export function createApp(doc: Document, root: HTMLElement, deps: AppDeps): AppH
       handle.destroy();
       surveyForm?.destroy();
       overlay.destroy();
+      // The Cards' swatch observers (#181): disconnected before the canvases are removed.
+      for (const c of shell.cards) releaseSwatch(c.swatch);
       shell.destroy();
       // Remove the rotate element too — overlay.destroy()/shell.destroy() only remove
       // their own roots, so leaving this behind would stack a duplicate on every

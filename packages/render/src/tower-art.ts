@@ -19,6 +19,7 @@
 // fixed art inks, decorative or always drawn against colours the gate does cover.
 
 import { roleColour, type Palette } from './palette';
+import { ART_INK } from './art-ink';
 import type { ArtBox, ArtColour, ArtRect, ArtShape } from './art-ir';
 import type { TowerFootprintMark, TowerRole } from './tower-paint';
 
@@ -32,9 +33,8 @@ const C = ART_BOX / 2;
 
 // ---- Fixed art inks ----
 
-/** Outline and glyph ink: near-black, so a head's silhouette and the glyph inside it read
- *  against every role colour (`palette.test.ts` gates ink against each, ≥ 3:1). */
-export const ART_INK = 0x0b0e14;
+// `ART_INK` (outline and glyph ink) lives in the leaf `art-ink.ts`; re-exported here.
+export { ART_INK };
 /** The plate's top-edge highlight — decorative. */
 export const ART_BEVEL = 0x3d4a66;
 export const ART_SHADOW = 0x000000;
@@ -86,13 +86,14 @@ export const PLATE_RECT = { x: 3, y: 3, w: 58, h: 58, rx: 9 } as const;
  *  floor in every mode. That contrast is only shown if the rim's pixels are wholly rim, so
  *  the rim is drawn CRISP (`ArtRect.crisp`, `alignRectToTexels`): baked on whole device
  *  pixels, never thinner than its one CSS px rounded UP (two pixels at dpr 1.25 or 1.5),
- *  else the whole number nearest its design width; moved under half a pixel onto the pixel
- *  grid, any width the rounding added going outward (so its plate side keeps its place), and
- *  never past the footprint. Without it, a one-pixel rim whose centre fell inside a pixel was
- *  smeared across two half-lit ones — 2.19:1 at 10px cells on a dpr 1 screen (QC round 2,
- *  A4). Two pixels at a fractional dpr also keep one wholly lit where the compositor blends
- *  the board's canvas by part of a pixel, as it does when the board's CSS size × dpr is not
- *  whole (`scene.ts`): a one-pixel rim measured as low as 2.37:1 there (10px cells, dpr 1.5). */
+ *  else the whole number nearest its design width. Any width that rounding adds goes
+ *  outward, so its plate side keeps its place; each edge then moves to the nearest place on
+ *  the pixel grid, at most half a pixel away — or, where that would cross the footprint's
+ *  edge, inward to the first place inside it. Without it, a one-pixel rim whose centre fell
+ *  inside a pixel was smeared across two half-lit ones — 2.19:1 at 10px cells on a dpr 1
+ *  screen (QC round 2, A4). And it needs the board's canvas shown pixel for pixel, which
+ *  `scene.ts` sizes it to be: a canvas scaled into its box smears a one-pixel line the same
+ *  way (as low as 1.88:1 at dpr 1, QC round 3). */
 export const PLATE_RIM_WIDTH = 2;
 export const PLATE_RIM_MIN_PX = 1;
 
@@ -118,9 +119,15 @@ const PLATE_BEVEL: ArtShape = {
 const PLATE_FILL: ArtShape = { kind: 'rect', ...PLATE_RECT, fill: 'plate' };
 
 /** The plate's rim: a rect of its own, so that drawing it crisp moves only the stroke. The
- *  fill's edge, on the rim's design centre line, always lies under the moved stroke (it is
- *  at least one pixel wide and moves under half of one), so no sliver of plate shows past
- *  the rim and none of the floor inside it. */
+ *  fill's edge, on the rim's design centre line, lies under the moved stroke — so no sliver
+ *  of plate shows past the rim and none of the floor inside it — at every cell size from 11
+ *  px, from dpr 1 up. Where the footprint ends inside a pixel, which stops the rim's far side
+ *  on the whole pixel before it, the edge can lie a fraction of a pixel past the rim, a faint
+ *  blend of plate into the footprint's last pixel: from dpr 1 up at 9 and 10 px cells (0.11
+ *  px at most), and below dpr 1 at 9 to 13 px (0.30 px at most, at 9 px). Below dpr 1 the
+ *  floor can also show inside the rim, at 11 to 19 px, by 0.10 px at most. (Each the worst
+ *  case at any dpr from 0.8 to 3, measured on both sides of every scale where the rim's
+ *  pixels change: `art-frames.test.ts`.) */
 const PLATE_RIM: ArtRect = {
   kind: 'rect',
   ...PLATE_RECT,
@@ -130,9 +137,13 @@ const PLATE_RIM: ArtRect = {
   crisp: true,
 };
 
-/** A committed tower's plate: its soft offset shadow, the slate plate, its rim, and the
- *  bevel along its top edge. Shared by every tower that has a plate. */
-export const PLATE_ART: readonly ArtShape[] = [PLATE_SHADOW, PLATE_FILL, PLATE_RIM, PLATE_BEVEL];
+/** A committed tower's plate: its soft offset shadow, the slate plate, the bevel along its
+ *  top edge, and its rim last, over all three. The rim must be on top: on whole pixels it
+ *  can share pixels with the bevel's top edge at cells of 16 px and under — at dpr 1 at 11
+ *  to 13 px, at 0.9 at 13 and 14, at 0.8 at 15 and 16; never from 17 px, at any dpr from
+ *  0.8 to 3 (`tower-art.test.ts`) — and its colour is the footprint's edge. Shared by every
+ *  tower that has a plate. */
+export const PLATE_ART: readonly ArtShape[] = [PLATE_SHADOW, PLATE_FILL, PLATE_BEVEL, PLATE_RIM];
 
 /** The PAD a plateless tower (the mine) stands on in the plates layer: the plate's own
  *  rectangle, filled opaque in the floor colour — no rim, no shadow, no bevel — so it is

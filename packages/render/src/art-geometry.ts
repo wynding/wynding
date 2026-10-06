@@ -47,9 +47,27 @@ export type PathCommand =
   | { readonly c: 'Z' };
 
 const COMMAND_LETTERS = 'MmLlHhVvCcSsQqTtAaZz';
-const TOKEN = /[MmLlHhVvCcSsQqTtAaZz]|[-+]?(?:\d+\.?\d*|\.\d+)(?:[eE][-+]?\d+)?/g;
+const TOKEN = /[MmLlHhVvCcSsQqTtAaZz]|[-+]?(?:\d+(?:\.\d+)?|\.\d+)(?:[eE][-+]?\d+)?/g;
 /** A whole token that is a number without a sign — what may follow a packed arc flag. */
-const UNSIGNED_NUMBER = /^(?:\d+\.?\d*|\.\d+)(?:[eE][-+]?\d+)?$/;
+const UNSIGNED_NUMBER = /^(?:\d+(?:\.\d+)?|\.\d+)(?:[eE][-+]?\d+)?$/;
+/** A number token's integer digits and exponent field, which a browser checks one by one. */
+const NUMBER_PARTS = /^[-+]?(\d*)(?:\.\d+)?(?:[eE]([-+]?\d+))?$/;
+/**
+ * A number's integer digits as a browser reads them: right to left, each digit times its
+ * place value, summed in 32-bit floats. The 40th place value overflows a float, so a part
+ * of 40 or more digits is not finite (infinite, or NaN where an overflowed place value meets a
+ * 0) — zeros included — and so is the float's maximum written
+ * out in full, whose sum rounds up past it.
+ */
+function floatInteger(digits: string): number {
+  let integer = 0;
+  let place = 1;
+  for (let k = digits.length - 1; k >= 0; k--) {
+    integer = Math.fround(integer + Math.fround(place * (digits.charCodeAt(k) - 48)));
+    place = Math.fround(place * 10);
+  }
+  return integer;
+}
 
 /** Whether `token` is a number rather than a command letter. */
 const isNumber = (token: string): boolean => !COMMAND_LETTERS.includes(token);
@@ -65,9 +83,16 @@ const isNumber = (token: string): boolean => !COMMAND_LETTERS.includes(token);
  * here. So the path must open with a moveto (`'L50 50'` and `'h40'` paint nothing); a comma
  * may only separate two numbers, once (`'M10,,10L50 50'` and `',M10 10L50 50'` paint nothing
  * either) — the SVG grammar's `comma-wsp`; whitespace is SVG's own (space, tab, line feed,
- * form feed, carriage return — not the no-break or ideographic spaces JS's `\s` admits); and
- * an arc flag is the one character `0` or `1`, which may be packed against what follows it
- * (`'A40 40 0 0190 50'` is flags 0 and 1, then 90 50).
+ * form feed, carriage return — not the no-break or ideographic spaces JS's `\s` admits); a
+ * decimal point is followed by a digit (`'L90. 50'` and `'L1.e1 50'` paint nothing); a number
+ * is one the browser can read into the 32-bit float it parses path data into, which it
+ * checks part by part: at most 39 integer digits, summing to a finite 32-bit float, an
+ * exponent field of at most 38 whatever comes before it, and a value within range (`'L1e39 50'`,
+ * `'L0e39 50'` and a 40-digit `'L1000…0e-38 50'` paint nothing, though the last two are 0 and
+ * 10; a negative
+ * exponent may be any size, as it only underflows); and an arc flag is the one character
+ * `0` or `1`, which may be packed against what follows it (`'A40 40 0 0190 50'` is flags 0
+ * and 1, then 90 50).
  */
 export function parsePath(d: string): PathCommand[] {
   /** What may stand between the token `before` and the token `after` (either missing at the
@@ -113,7 +138,21 @@ export function parsePath(d: string): PathCommand[] {
     if (t === undefined || COMMAND_LETTERS.includes(t)) {
       throw new Error(`path data ends early: '${d}'`);
     }
-    return Number(t);
+    const v = Number(t);
+    // A browser reads path data into 32-bit floats, and a number it cannot hold ends it:
+    // integer digits that sum past a float's range, an exponent field over 38 (`0e39`, though it
+    // is 0), or a value past the range. Values in (3.4028e38, FLT_MAX] are dropped too, on the
+    // safe side. (Measured in Chromium and WebKit, which agree but for a sliver of 39-digit
+    // integers near 3.4028233e38, which WebKit, summing with fused multiply-adds, reads.)
+    const [, whole, exponent] = NUMBER_PARTS.exec(t) ?? [];
+    if (
+      !Number.isFinite(floatInteger(whole ?? '')) ||
+      (exponent !== undefined && Number(exponent) > 38) ||
+      !(Math.abs(v) <= 3.4028e38)
+    ) {
+      throw new Error(`a number past a 32-bit float, which a browser reads it into: '${d}'`);
+    }
+    return v;
   };
   /** An arc flag: the one character `0` or `1` at the front of the next token. What follows
    *  it in a packed token (`'0190'`) is left to be read as the next token — and must be a

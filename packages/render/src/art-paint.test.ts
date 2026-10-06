@@ -10,6 +10,7 @@ import type { ArtColour, ArtShape } from './art-ir';
 import {
   fakeContext as sharedContext,
   fakePath,
+  stylesAtDraws,
   type CtxOp as Op,
 } from './test-support/fake-context';
 
@@ -158,6 +159,32 @@ describe('paintArtShapes — paint', () => {
     expect(ops.find((o) => o.op === 'set:strokeStyle')!.args[0]).toBe('rgba(201, 182, 255, 0.5)');
   });
 
+  it('runs every fill and stroke under its own shape’s style — written before the draw', () => {
+    // Each draw is given a style no draw before it had, so a style written after its draw,
+    // or never, would leave it under the previous one.
+    const ops = paint([
+      { kind: 'circle', cx: 10, cy: 10, r: 5, fill: 'role', stroke: 'ink', width: 2 },
+      {
+        kind: 'rect',
+        x: 0,
+        y: 0,
+        w: 8,
+        h: 8,
+        rx: 1,
+        fill: 'aura',
+        stroke: 'role',
+        width: 3,
+        alpha: 0.5,
+      },
+    ]);
+    expect(stylesAtDraws(ops)).toEqual([
+      { op: 'fill', fillStyle: 'rgba(244, 169, 64, 1)' },
+      { op: 'stroke', strokeStyle: 'rgba(11, 14, 20, 1)', lineWidth: 2 },
+      { op: 'fill', fillStyle: 'rgba(201, 182, 255, 0.5)' },
+      { op: 'stroke', strokeStyle: 'rgba(244, 169, 64, 0.5)', lineWidth: 3 },
+    ]);
+  });
+
   it('a shape with no fill paints no fill, and one with no stroke no stroke', () => {
     expect(
       paint([{ kind: 'circle', cx: 0, cy: 0, r: 1, stroke: 'ink' }]).map((o) => o.op),
@@ -263,6 +290,18 @@ describe('artGraphics', () => {
       { op: 'fillRect', args: [-1e6, -1e6, 2e6, 2e6] },
       { op: 'restore', args: [] },
     ]);
+  });
+
+  it('fade() paints the GraphicsLike batch first, so it fades what was drawn before it', () => {
+    const ctx = fakeContext();
+    const g = artGraphics(ctx, fakePath);
+    g.fillStyle(0x1b1f2a, 1);
+    g.fillRect(0, 0, 36, 36); // batched by the adapter until something else draws
+    g.fade(0.5);
+    g.flush();
+    const ops = pathOps(ctx.ops).map((o) => o.op);
+    expect(ops.indexOf('rect')).toBeGreaterThanOrEqual(0);
+    expect(ops.indexOf('rect')).toBeLessThan(ops.indexOf('fillRect'));
   });
 
   it('fade() clamps its alpha to [0, 1]', () => {

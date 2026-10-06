@@ -1,7 +1,7 @@
 // scorches.ts — the scorch a mine leaves where it went off (visual pass T4, #181): which
 // detonations the board has seen, and how far each scorch has faded. Pure and Phaser-free;
-// `scene.ts` feeds it each frame and shows what `live` returns as sprites on the floor
-// layer (`placement.ts`'s `placeScorches`).
+// `scene.ts` feeds it every `draw()`, before any early return, and shows what `live` returns
+// as sprites on the floor layer (`placement.ts`'s `placeScorches`).
 //
 // DETECTION reads what the renderer is already handed, never the sim. A mine fires a blast
 // whose origin IS its destination — it detonates on its own footprint centre, never leading
@@ -13,9 +13,10 @@
 // The tracer list is pruned once a shot lands, though, and a frame that covers two sim ticks
 // (a slow frame, or 2× speed on a slow device) can step past a mine's whole one-tick flight
 // before any frame sees its tracer. The blast's LANDING is never lost — impact points are
-// accumulated per tick until a frame drains them (`RenderOverlay.sparks`) — so a blast
-// landing exactly on the footprint centre of a burst tower the previous frame drew, and
-// this frame no longer does, is the same detonation seen from its other end. Each
+// accumulated per tick until a frame drains them (`RenderOverlay.sparks`) — and the
+// controller marks a landing `detonation` when the shot that made it was a detonation
+// (`SparkPoint.detonation`), so a marked landing no seen tracer already scorched is the same
+// detonation seen from its other end, even if the mine itself was never drawn. Each
 // detonation scorches once: a landing whose tracer was already seen is consumed, not
 // scorched again.
 //
@@ -25,10 +26,8 @@
 // backwards within a run, so a scorch "born" after the time being drawn belongs to a time
 // base that is gone (a new run the scene was not reset for) and is dropped.
 
-import { FP_ONE } from '@wynding/engine';
-import { towerRoleFor } from './tower-paint';
 import type { ScorchPoint } from './placement';
-import type { SparkPoint, TowerVM, TracerVM } from './types';
+import type { SparkPoint, TracerVM } from './types';
 
 /** How long a scorch takes to fade away: 4 s of game time at the 20 Hz tick. */
 export const SCORCH_TICKS = 80;
@@ -39,8 +38,6 @@ export interface ScorchFrame {
   readonly tracers: readonly TracerVM[];
   /** The impacts that landed since the last frame (`RenderOverlay.sparks`). */
   readonly sparks: readonly SparkPoint[];
-  /** The towers the sim holds this frame (`curVm.towers`). */
-  readonly towers: readonly TowerVM[];
   /** Render time, in fractional ticks (`renderTimeOf`). */
   readonly renderTick: number;
 }
@@ -62,18 +59,6 @@ export function isDetonation(t: TracerVM): t is Extract<TracerVM, { kind: 'blast
 
 const pointKey = (x: number, y: number): string => `${x},${y}`;
 
-/** The footprint centres of every burst tower in `towers`, in fixed-point sim units — the
- *  point a burst tower's blast is anchored to (the 2×2 anchor's far corner). */
-function burstCentres(towers: readonly TowerVM[]): Set<string> {
-  const out = new Set<string>();
-  for (const t of towers) {
-    if (towerRoleFor(t.towerId) === 'burst') {
-      out.add(pointKey((t.col + 1) * FP_ONE, (t.row + 1) * FP_ONE));
-    }
-  }
-  return out;
-}
-
 interface Scorch {
   readonly x: number;
   readonly y: number;
@@ -87,11 +72,9 @@ export function createScorchTracker(): ScorchTracker {
   /** Points scorched from a tracer whose landing has not arrived yet, so it is not
    *  scorched twice — a count, since two mines can share a centre across a rebuild. */
   const awaitingLanding = new Map<string, number>();
-  /** The burst towers the last frame drew. */
-  let lastBurst = new Set<string>();
 
   return {
-    update({ tracers, sparks, towers, renderTick }) {
+    update({ tracers, sparks, renderTick }) {
       const stillListed = new Set<string>();
       for (const t of tracers) {
         if (!isDetonation(t)) continue;
@@ -104,7 +87,6 @@ export function createScorchTracker(): ScorchTracker {
       }
       seen = stillListed;
 
-      const nowBurst = burstCentres(towers);
       for (const s of sparks) {
         if (s.radiusFp <= 0) continue;
         const at = pointKey(s.x, s.y);
@@ -113,13 +95,11 @@ export function createScorchTracker(): ScorchTracker {
           // The landing of a detonation already scorched from its tracer.
           if (waiting === 1) awaitingLanding.delete(at);
           else awaitingLanding.set(at, waiting - 1);
-        } else if (lastBurst.has(at) && !nowBurst.has(at)) {
-          // A burst tower the last frame drew is gone, and a blast landed on its centre:
-          // it went off, and its tracer came and went between two frames.
+        } else if (s.detonation === true) {
+          // A detonation's landing whose tracer came and went between two frames.
           scorches.push({ x: s.x, y: s.y, bornTick: renderTick });
         }
       }
-      lastBurst = nowBurst;
     },
     live(renderTick) {
       scorches = scorches.filter((s) => {
@@ -136,7 +116,6 @@ export function createScorchTracker(): ScorchTracker {
       scorches = [];
       seen = new Set();
       awaitingLanding.clear();
-      lastBurst = new Set();
     },
   };
 }

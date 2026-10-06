@@ -15,6 +15,7 @@ export { resolvePalette, roleColour, COLOUR_MODES } from './palette';
 export type { Palette } from './palette';
 export { renderTimeOf, positionTracers, tracerPaintOps } from './tracers';
 export type { PositionedTracer, TracerPaintOp } from './tracers';
+export { isDetonation } from './scorches';
 export { creepShapeFor, creepSilhouettePaintOp, slowTelegraphPaintOps } from './creep-paint';
 export type { CreepShape, CreepSilhouettePaintOp, SlowTelegraphPaintOp } from './creep-paint';
 export { towerFootprintMarkFor, towerRoleFor, towerLookFor } from './tower-paint';
@@ -32,6 +33,9 @@ export {
   FIRE_FEEDBACK_TICKS,
   MAX_FLASHES_PER_SECOND,
 } from './tower-fire';
+// The backing store a canvas needs to be shown pixel for pixel — a Card swatch's as the board's.
+export { backingStoreSize, devicePixelReport, observesDevicePixels } from './device-px';
+export type { DevicePixelReport } from './device-px';
 export type { GraphicsLike } from './board-draw';
 export type {
   CreepVM,

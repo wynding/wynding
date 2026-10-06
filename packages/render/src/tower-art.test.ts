@@ -27,6 +27,8 @@ import {
   artColour,
 } from './tower-art';
 import { COLOUR_MODES, resolvePalette, roleColour } from './palette';
+import { artUnit, boostArtAt } from './art-frames';
+import { drawnRim, rimScales } from './test-support/rim-scales';
 import {
   TOWER_FOOTPRINT_MARKS,
   TOWER_LOOKS,
@@ -478,6 +480,8 @@ describe('the plate, the boost glow and the pending rim', () => {
     // 1.875px rules: 5.625 device px at dpr 3, so 6.)
     if (rim.kind !== 'rect') throw new Error('the rim is a rect');
     for (const [cellPx, scale, pixels] of [
+      [10, 0.9, 1], // below dpr 1 one CSS px is under a pixel: one, never none
+      [26, 0.8, 1],
       [10, 1, 1],
       [10, 1.25, 2],
       [13, 1.5, 2],
@@ -489,6 +493,31 @@ describe('the plate, the boost glow and the pending rim', () => {
       expect(baked, `${cellPx}px at dpr ${scale}`).toBeCloseTo(pixels, 9);
       expect(baked, `${cellPx}px at dpr ${scale}`).toBeGreaterThanOrEqual(scale - 1e-9);
     }
+  });
+
+  it('the rim shares pixels with the bevel only at cells of 16 px and under, at any dpr from 0.8 to 3 — so it is painted over the bevel', () => {
+    // Where the rim's top run, on whole pixels, ends below the bevel's top edge, the two
+    // meet in a pixel, and what is painted last shows there: the rim (`PLATE_ART`'s order).
+    const bevel = PLATE_ART.find((s) => s.stroke === 'bevel')!;
+    const bevelTop = artBounds([bevel], Infinity).minY; // its design width: 5.6 - 0.8
+    expect(PLATE_ART.at(-1)?.stroke).toBe('rim');
+    const meets = new Map<number, number[]>();
+    for (let cellPx = 9; cellPx <= 64; cellPx++) {
+      const unit = artUnit(cellPx);
+      // At every 0.005 of dpr, and both sides of each change of the rim's texels: between
+      // two, the bevel's edge moves one way past the rim's pixels (`rimScales`).
+      for (const scale of rimScales(cellPx)) {
+        const rim = drawnRim(cellPx, scale);
+        const k = unit * scale;
+        if ((rim.y + strokeWidthAt(rim, unit) / 2) * k - bevelTop * k > 1e-9) {
+          meets.set(scale, [...(meets.get(scale) ?? []), cellPx]);
+        }
+      }
+    }
+    expect(meets.get(1)).toEqual([11, 12, 13]);
+    expect(meets.get(0.9)).toEqual([13, 14]);
+    expect(meets.get(0.8)).toEqual([15, 16]);
+    expect(Math.max(...[...meets.values()].flat())).toBe(16);
   });
 
   it('the boost glow lies wholly on the plate — inside its rim — at every supported cell size', () => {
@@ -514,9 +543,24 @@ describe('the plate, the boost glow and the pending rim', () => {
     // line: the share of it no head shape covers.
     const inner = BOOST_ART[0]!;
     if (inner.kind !== 'circle') throw new Error('the glow is rings');
+    // As designed, and as the smallest frames fit it inside their drawn rim (`boostArtAt`, at
+    // 9 and 10 px cells): a smaller ring, which a head covers more of — at its smallest, which
+    // lies just short of a change of the rim's texels (`rimScales`).
+    let fitted = inner.r;
+    for (const cellPx of [9, 10]) {
+      for (const scale of rimScales(cellPx)) {
+        const [cue] = boostArtAt(artUnit(cellPx), scale);
+        if (cue?.kind === 'circle') fitted = Math.min(fitted, cue.r);
+      }
+    }
+    // The least any frame draws — 9px cells just under dpr 19/18, as art-frames.test.ts pins
+    // it — so the shares below are checked at the true worst, not a sampled near miss.
+    expect(fitted / inner.r).toBeCloseTo(0.9144, 4);
     const N = 720;
     const shown: string[] = [];
-    for (const look of TOWER_LOOKS.filter((l) => l.role !== 'support')) {
+    for (const [look, r] of TOWER_LOOKS.filter((l) => l.role !== 'support').flatMap((l) =>
+      [inner.r, fitted].map((r) => [l, r] as const),
+    )) {
       const prepared = HEAD_ART[look.mark].shapes
         .filter((s) => s.fill !== 'shadow')
         .map((s) => ({
@@ -527,8 +571,8 @@ describe('the plate, the boost glow and the pending rim', () => {
       let covered = 0;
       for (let k = 0; k < N; k++) {
         const t = (2 * Math.PI * k) / N;
-        const x = inner.cx + inner.r * Math.cos(t);
-        const y = inner.cy + inner.r * Math.sin(t);
+        const x = inner.cx + r * Math.cos(t);
+        const y = inner.cy + r * Math.sin(t);
         if (
           prepared.some(
             (p) =>
@@ -545,8 +589,8 @@ describe('the plate, the boost glow and the pending rim', () => {
         }
       }
       const share = 1 - covered / N;
-      shown.push(`${look.mark}=${share.toFixed(3)}`);
-      expect(share, look.mark).toBeGreaterThanOrEqual(0.9);
+      shown.push(`${look.mark}@r${r.toFixed(2)}=${share.toFixed(3)}`);
+      expect(share, `${look.mark} at r ${r}`).toBeGreaterThanOrEqual(0.9);
     }
     console.info(`[tower-art.test] boost ring shown around each head: ${shown.join(' ')}`);
   });

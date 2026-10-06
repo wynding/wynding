@@ -138,11 +138,8 @@ export type ArtBox = readonly [number, number, number, number];
  * fractional part matters: a whole-texel offset moves nothing).
  *
  * WIDTH: a whole number of texels — never under its CSS-px floor, which rounds UP (a one-CSS-
- * px floor is 2 texels at dpr 1.25 or 1.5), and otherwise the nearest to its own width, the
- * thinner at a tie; never fewer than one. A stroke at least two texels wide keeps a texel
- * wholly covered even when the canvas it lands on is shown a fraction of a device pixel off
- * the texel grid, as a browser may at a fractional dpr; a one-texel stroke there is smeared
- * across two.
+ * px floor is 2 texels at dpr 1.25 or 1.5), so the floor holds as a floor; otherwise the
+ * nearest to its own width, the thinner at a tie; never fewer than one.
  *
  * PLACE: each straight edge's centre line moves to the nearest place where the stroke covers
  * whole texels, once any width the rounding ADDED has been put on the outside — so a
@@ -151,8 +148,11 @@ export type ArtBox = readonly [number, number, number, number];
  * thinner keeps its centre line within half a texel. So the edges are drawn in the stroke's
  * full colour, rather than anti-aliased across two partly covered texels (a one-texel line
  * centred inside a texel shows about half its colour's contrast). With `within`, the
- * stroke's outer edges stay inside that box (a tower's footprint), moving inward where they
- * would not.
+ * stroke's outer edges stay inside that box (a tower's footprint, cut to the surface it is
+ * drawn on), an edge that would cross it moving inward to the first place inside it — which
+ * can take it further than half a texel from the design's. (Whole texels reach the screen as
+ * whole device pixels only where the surface is shown pixel for pixel, as `scene.ts` sizes
+ * the board's canvas to be.)
  *
  * The corner radius is kept, and the result is a plain stroke at its final width, with no
  * CSS-px floor left to apply. A rect with no stroke is returned as it is.

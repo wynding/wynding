@@ -760,14 +760,14 @@ describe('tower heads — the remaining committed/pending heads, the boost glow,
     for (const span of [w!, h!]) {
       expect(span + 2 * half).toBeLessThanOrEqual(PROJECTION.cellPx * 2); // never past it
     }
-    // The rim read here IS the plate's, moved under half a pixel onto the pixel grid.
+    // The rim read here IS the plate's, moved at most half a pixel onto the pixel grid.
     expect(Math.abs(rim.x - PLATE_RECT.x) * u).toBeLessThanOrEqual(0.5 + 1e-9);
     expect(rim.x).not.toBe(PLATE_RECT.x); // (and at this size it did move)
   });
 
-  it('the attackless outline’s outer edge is never inside the rim, at any cell size or dpr — covering the rim at small cells, clear of it from 32 px', () => {
-    for (const dpr of [1, 1.25, 1.5, 1.75, 2, 3]) {
-      for (const cellPx of [10, 11, 12, 13, 16, 20, 24, 31, 32, 40, 60]) {
+  it('the attackless outline’s outer edge is never inside the rim, on any side, at any cell size or dpr — at dpr 1 covering the rim up to 21 px, clear of it at 22–24 px and from 29 px (its near sides from 28)', () => {
+    for (const dpr of [0.8, 0.9, 1, 1.25, 1.5, 1.75, 2, 3]) {
+      for (const cellPx of [10, 11, 12, 13, 16, 20, 21, 22, 24, 25, 27, 28, 29, 31, 32, 40, 60]) {
         const at = `cellPx ${cellPx} at dpr ${dpr}`;
         const projection = createProjection({
           cols: 10,
@@ -788,9 +788,7 @@ describe('tower heads — the remaining committed/pending heads, the boost glow,
           projection,
         );
         const half = (g.calls.find((c) => c.method === 'lineStyle')!.args[0] as number) / 2;
-        const [x] = g.calls.find((c) => c.method === 'strokeRoundedRect')!.args as number[];
-        // From the corner the outline is drawn at — the sprite's, snapped to a device pixel.
-        const edge = x! - snapToDevicePx(projection.cellToPixel(2, 2).x, dpr);
+        const [x, , w] = g.calls.find((c) => c.method === 'strokeRoundedRect')!.args as number[];
         // The rim as the plate frame draws it at this cell size and dpr: on whole device
         // pixels.
         const plateSpec = atlasFrameSpecs(cellPx, dpr).find((s) => s.key === PLATE_FRAME_KEY)!;
@@ -800,19 +798,48 @@ describe('tower heads — the remaining committed/pending heads, the boost glow,
         const rim = plate!.shapes.find((s) => s.stroke === 'rim')!;
         if (rim.kind !== 'rect') throw new Error('the rim is the plate rect’s stroke');
         const u = plate!.unit;
-        const rimOuter = (rim.x - strokeWidthAt(rim, u) / 2) * u;
-        const rimInner = (rim.x + strokeWidthAt(rim, u) / 2) * u;
-        // Always: the outline's outer edge inside the footprint, and at or outside the
-        // rim's — no pixel of the rim lies outside the outline.
-        expect(edge - half, at).toBeGreaterThanOrEqual(-1e-9);
-        expect(edge - half, at).toBeLessThanOrEqual(rimOuter + 1e-9);
-        // At dpr 1 — small cells: it covers the whole rim, so its inner edge meets the plate.
-        // Large cells: the floor margin holds all of it. (Between, its inner edge ends on the
-        // rim — the residual docs/accessibility-checklist.md records. At a fractional dpr each
-        // threshold can move a few cell sizes, the rim being on whole device pixels.)
-        if (dpr === 1 && cellPx <= 16)
-          expect(edge + half, at).toBeGreaterThanOrEqual(rimInner - 1e-9);
-        if (dpr === 1 && cellPx >= 32) expect(edge + half, at).toBeLessThanOrEqual(rimOuter + 1e-9);
+        const sw = strokeWidthAt(rim, u);
+        // Each side's outline centre line and rim edges, CSS px in from that side's footprint
+        // edge — from the corner the outline is drawn at (the sprite's, snapped to a device
+        // pixel), and two cells on from it.
+        const corner = snapToDevicePx(projection.cellToPixel(2, 2).x, dpr);
+        const foot = 2 * cellPx;
+        for (const side of [
+          {
+            name: 'near',
+            edge: x! - corner,
+            rimOuter: (rim.x - sw / 2) * u,
+            rimInner: (rim.x + sw / 2) * u,
+          },
+          {
+            name: 'far',
+            edge: corner + foot - (x! + w!),
+            rimOuter: foot - (rim.x + rim.w + sw / 2) * u,
+            rimInner: foot - (rim.x + rim.w - sw / 2) * u,
+          },
+        ]) {
+          const on = `${at}, ${side.name} side`;
+          // Always: the outline's outer edge inside the footprint, and at or outside the
+          // rim's — no pixel of the rim lies outside the outline.
+          expect(side.edge - half, on).toBeGreaterThanOrEqual(-1e-9);
+          expect(side.edge - half, on).toBeLessThanOrEqual(side.rimOuter + 1e-9);
+          // At dpr 1 — up to 21 px: it covers the whole rim, so its inner edge meets the
+          // plate. At 22–24 px and from 29 px: the floor margin holds all of it. Between, at
+          // 25–27 px, where the rim's own width rounds up to two pixels and widens outward, its
+          // inner edge ends on the rim, and its floor-side edge carries the cue — and at 28 px
+          // on the far sides: there the widened rim's place is an exact tie, which rounds up
+          // on both axes, moving the near sides in and the far sides out. (A fractional dpr
+          // moves these bands, the rim being on whole device pixels.)
+          if (dpr !== 1) continue;
+          if (cellPx <= 21)
+            expect(side.edge + half, on).toBeGreaterThanOrEqual(side.rimInner - 1e-9);
+          else if (cellPx <= 24 || cellPx >= 29 || (cellPx === 28 && side.name === 'near')) {
+            expect(side.edge + half, on).toBeLessThanOrEqual(side.rimOuter + 1e-9);
+          } else {
+            expect(side.edge + half, on).toBeGreaterThan(side.rimOuter + 1e-9);
+            expect(side.edge + half, on).toBeLessThan(side.rimInner - 1e-9);
+          }
+        }
       }
     }
   });

@@ -3,6 +3,7 @@ import { validate, MAX_INPUTS_PER_TICK } from '@wynding/replay';
 import { getBundledRuleset } from '@wynding/content';
 import type { TracerVM } from '@wynding/render';
 import type { SimInput } from '@wynding/sim';
+import { isDetonation } from '@wynding/render';
 import { createController, enqueueVerdict, outcomesMatch, type Controller } from './controller';
 
 const TICK = 50; // MS_PER_TICK
@@ -848,6 +849,40 @@ describe('controller — impact-spark plumbing via StepEvents (#31)', () => {
     // Every spark from a splash blast carries the SAME true radius — never 0 (the
     // targeted-spark sentinel) and never a fabricated/half value.
     for (const pt of sparks) expect(pt.radiusFp).toBe(splashRadiusFp);
+  });
+
+  it('a mine that is built, fires and lands inside one catch-up advance yields a `detonation` landing; a splash blast’s landing does not (#181)', () => {
+    const c = createController(1);
+    c.start();
+    c.armTower('mine');
+    c.aimAt(10, 9);
+    expect(c.confirm()).toBe(true);
+    // Frames prune landed tracers but nothing drains the sparks until the end, as in a
+    // slow frame: the tracer is pruned (never drawn by a drain-time reader), the landing
+    // is all that is left.
+    for (let i = 0; i < 600 && !c.isTerminal(); i++) {
+      c.advance(TICK);
+      c.frame();
+    }
+    expect(c.frame().tracers.some((t) => isDetonation(t))).toBe(false);
+    const blasts = c.drainSparks().filter((pt) => pt.radiusFp > 0);
+    expect(blasts.length).toBeGreaterThan(0);
+    for (const pt of blasts) expect(pt.detonation).toBe(true);
+
+    const s = createController(1);
+    startAndCall(s);
+    s.armTower('splash');
+    s.aimAt(2, 10);
+    s.confirm();
+    let sparks: { radiusFp: number; detonation?: boolean }[] = [];
+    let n = 0;
+    while (sparks.length === 0 && !s.isTerminal() && n < 300) {
+      s.advance(TICK);
+      sparks = s.drainSparks();
+      n++;
+    }
+    expect(sparks.some((pt) => pt.radiusFp > 0)).toBe(true);
+    for (const pt of sparks) expect(pt.detonation).toBeUndefined();
   });
 });
 

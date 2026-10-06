@@ -110,3 +110,29 @@ export function fakeContext(options: FakeContextOptions = {}): ArtCanvas2DLike &
 
 /** A stand-in `Path2D` factory: the "path" carries the string it was made from. */
 export const fakePath = (d: string): Path2D => ({ d }) as unknown as Path2D;
+
+/** One draw in a recording, with the style it ran under: the fill style for a `fill` or
+ *  `fillRect`, the stroke style and line width for a `stroke`. */
+export type StyledDraw =
+  | { readonly op: 'fill' | 'fillRect'; readonly fillStyle: unknown }
+  | { readonly op: 'stroke'; readonly strokeStyle: unknown; readonly lineWidth: unknown };
+
+/** Every draw in `ops` — recorded with `recordStyles` — with the style in force when it ran,
+ *  replaying the style writes as a real context holds them (`save`/`restore` included, from
+ *  its defaults). So a test can tell a style written before its draw from one written after
+ *  it, or never. */
+export function stylesAtDraws(ops: readonly CtxOp[]): StyledDraw[] {
+  let style: Record<string, unknown> = { ...STYLE_DEFAULTS };
+  const saved: Record<string, unknown>[] = [];
+  const draws: StyledDraw[] = [];
+  for (const { op, args } of ops) {
+    if (op === 'save') saved.push({ ...style });
+    else if (op === 'restore') style = saved.pop() ?? style;
+    else if (op.startsWith('set:')) style[op.slice(4)] = args[0];
+    else if (op === 'fill' || op === 'fillRect') draws.push({ op, fillStyle: style.fillStyle });
+    else if (op === 'stroke') {
+      draws.push({ op, strokeStyle: style.strokeStyle, lineWidth: style.lineWidth });
+    }
+  }
+  return draws;
+}
