@@ -798,8 +798,11 @@ describe('every creep cue reads on every surface it lands on — by its colour o
   // between the ink and a cue's own luminance, where neither clears 3:1. MEASURED and PINNED,
   // not passed: these are the only shaded surfaces under 3:1 at the style frame's shadow
   // strengths, every one on a tower — its rim, a 1–2px line between a plate and the floor that
-  // each read, and in protan/deutan two of the six heads. Recorded in
-  // docs/accessibility-checklist.md; a change that adds a pair, or deepens the worst, fails.
+  // each read, and in protan/deutan two of the six heads. That is ONE shadow (30 combinations,
+  // worst 2.53:1); overlapping shadows go deeper and wider, and the next test pins them (by
+  // depth: 20, 37, 22 and 8 triples under 3:1 at one to four shadows, worst 2.53, 2.16, 2.13
+  // and 2.29:1; none from five on). Recorded in docs/accessibility-checklist.md; a change that
+  // adds a pair, or deepens the worst, fails.
   const SHADED_UNDER_3: readonly string[] = [
     'default poisoned rim@0.34',
     'default poisoned rim@0.28',
@@ -852,6 +855,72 @@ describe('every creep cue reads on every surface it lands on — by its colour o
     );
     expect([...under].sort()).toEqual([...SHADED_UNDER_3].sort());
     expect(worst).toBeGreaterThanOrEqual(2.5);
+  });
+
+  // UNDER OVERLAPPING SHADOWS (R4 QC, #181). Every creep's shadow lies in one layer, each
+  // composited over those drawn before it, in creep order — ground and air in either order —
+  // so where creeps bunch (a fast creep overtaking the swarm, a slowed or stunned group, a line
+  // of flyers crossing the towers) a surface is darkened two, three or four times. Each depth
+  // carries a different band of surfaces into the zone where neither the ink nor a cue's colour
+  // clears 3:1; from five shadows on, every surface is dark enough for the cue colours. MEASURED
+  // and PINNED, not passed: on the heads and the rim, never the floor or a plate.
+  const SHADED_STACKED_UNDER_3: readonly string[] = [
+    ...['poisoned', 'stunned'].flatMap((cue) =>
+      ['air', 'burst', 'control', 'damage', 'poison', 'support'].map((s) => `default ${cue} ${s}`),
+    ),
+    'default stunned rim',
+    ...(['protan', 'deutan'] as const).flatMap((m) => [
+      `${m} poisoned air`,
+      `${m} poisoned control`,
+      `${m} poisoned damage`,
+      `${m} poisoned support`,
+      `${m} slowed air`,
+      `${m} slowed control`,
+      `${m} slowed damage`,
+      ...['air', 'burst', 'control', 'damage', 'poison', 'rim', 'support'].map(
+        (s) => `${m} stunned ${s}`,
+      ),
+    ]),
+    'tritan slowed air',
+    'tritan slowed control',
+  ];
+
+  it('under two to four overlapping creep shadows, in either order, only the pinned surfaces fall under 3:1 — none under 2.13, and none from five shadows on', () => {
+    const { ground: G, air: A } = CREEP_SHADOW_ALPHA;
+    const under = new Set<string>();
+    let worst = Infinity;
+    for (const mode of COLOUR_MODES) {
+      const pal = resolvePalette(mode);
+      const shadable: Record<string, number> = {
+        floor: pal.floor,
+        plate: pal.plate,
+        rim: pal.tower,
+        ...Object.fromEntries(TOWER_ROLES.map((r) => [r, roleColour(pal, r)])),
+      };
+      for (let depth = 2; depth <= 6; depth++) {
+        // Every order of ground and air shadows: the rounding of each composite differs.
+        for (let bits = 0; bits < 1 << depth; bits++) {
+          const stack = Array.from({ length: depth }, (_, i) => ((bits >> i) & 1 ? A : G));
+          for (const [name, surface] of Object.entries(shadable)) {
+            const shaded = stack.reduce((s, a) => compositeOver(ART_SHADOW, s, a), surface);
+            for (const cue of STATUS_CUES) {
+              const v = reads(pal[cue], shaded);
+              if (v >= MIN_CUE_CONTRAST) continue;
+              expect(depth, `${mode} ${cue} ${name} under ${stack.join('+')}`).toBeLessThanOrEqual(
+                4,
+              );
+              under.add(`${mode} ${cue} ${name}`);
+              worst = Math.min(worst, v);
+            }
+          }
+        }
+      }
+    }
+    console.info(
+      `[palette.test] creep cues under 2–4 stacked shadows under 3:1 (worst ${worst.toFixed(3)}): ${[...under].join(', ')}`,
+    );
+    expect([...under].sort()).toEqual([...SHADED_STACKED_UNDER_3].sort());
+    expect(worst).toBeGreaterThanOrEqual(2.13);
   });
 });
 

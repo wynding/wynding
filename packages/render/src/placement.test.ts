@@ -520,3 +520,91 @@ describe('placeCreeps', () => {
     });
   });
 });
+
+// ---- R4 QC (#181): the per-atlas look table, and the canvas-top step at fractional dprs ----
+
+describe('placeCreeps — each look found once per atlas, and the canvas-top step (R4 QC)', () => {
+  /** A frame map that counts its lookups. */
+  class CountingFrames extends Map<string, FrameAnchor> {
+    gets = 0;
+    override get(key: string): FrameAnchor | undefined {
+      this.gets++;
+      return super.get(key);
+    }
+  }
+
+  it('finds a look’s frames once per atlas — every later creep of that look asks the map nothing', () => {
+    const projection = projectionAt(1);
+    const frames = new CountingFrames(framesFor(projection));
+    const first = placeCreeps([creep({ creepId: 'cache-probe' })], PAL, projection, frames);
+    const asked = frames.gets;
+    expect(asked, 'the premise: the first placement looks its frames up').toBeGreaterThan(0);
+    for (let i = 0; i < 3; i++) {
+      const again = placeCreeps(
+        [creep({ creepId: 'cache-probe', x: 300 + i })],
+        PAL,
+        projection,
+        frames,
+      );
+      expect(again.bodies[0]!.frame).toBe(first.bodies[0]!.frame);
+    }
+    expect(frames.gets).toBe(asked);
+  });
+
+  it('keeps an id’s four looks apart — ground and air, with and without the boss role — whatever order they come in', () => {
+    const projection = projectionAt(1);
+    const frames = framesFor(projection);
+    const order = [
+      [false, 'air'],
+      [true, 'ground'],
+      [true, 'air'],
+      [false, 'ground'],
+      [false, 'air'],
+      [true, 'ground'],
+    ] as const;
+    for (const [boss, domain] of order) {
+      const { bodies, shadows } = placeCreeps(
+        [creep({ creepId: 'slot-probe', boss, domain })],
+        PAL,
+        projection,
+        frames,
+      );
+      const family = boss ? 'boss' : 'normal';
+      expect(bodies[0]!.frame, `boss=${boss} ${domain}`).toBe(`creep:triangle:${family}:${domain}`);
+      expect(shadows[0]!.frame, `boss=${boss} ${domain}`).toBe(`creep:shadow:${family}:${domain}`);
+      expect(bodies[0]!.r).toBeCloseTo(creepRadius(projection.cellPx, family), 12);
+    }
+  });
+
+  it('steps a flyer down by the fewest whole device pixels at every dpr — fractional ones included', () => {
+    // At 1.25, 1.5 and 1.75 the step's arithmetic lands a float's width past a whole number of
+    // device pixels hundreds of times in this sweep: that is what the epsilon is for.
+    for (const dpr of [1, 1.25, 1.5, 1.75, 2]) {
+      for (const css of [100, 130]) {
+        const proj = projectionAt(dpr, css, css);
+        expect(proj.originY).toBe(0);
+        const fr = framesFor(proj);
+        for (const creepId of ['flying', 'armored-flyer']) {
+          for (let fpY = 0; fpY <= 256; fpY += 3) {
+            const { bodies } = placeCreeps(
+              [creep({ creepId, domain: 'air', y: fpY })],
+              PAL,
+              proj,
+              fr,
+            );
+            const body = bodies[0]!;
+            const top = snapToDevicePx(proj.fpToPixel(0, fpY).y, dpr) - fr.get(body.frame)!.anchorY;
+            if (top >= 0) {
+              expect(body.y).toBe(top);
+              continue;
+            }
+            const at = `${creepId} at dpr ${dpr}, ${css}px, fpY ${fpY}`;
+            expect(body.y, `${at}: on the canvas`).toBeGreaterThan(-1e-9);
+            expect(body.y, `${at}: by no more than it takes`).toBeLessThan(1 / dpr - 1e-9);
+            expect(Math.abs(body.y * dpr - Math.round(body.y * dpr)), at).toBeLessThan(1e-9);
+          }
+        }
+      }
+    }
+  });
+});

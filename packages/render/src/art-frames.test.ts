@@ -1325,3 +1325,25 @@ describe('the boost glow stays inside the rim as the frames draw them (QC round 
     }
   });
 });
+
+// ---- R4 QC (#181): an id's four creep slots ----
+
+describe('creepFrameKeys — four slots per id (R4 QC)', () => {
+  it('keeps an id’s four keys apart — ground and air, with and without the boss role — whatever order they are asked in', () => {
+    const order = [
+      [false, true],
+      [true, false],
+      [true, true],
+      [false, false],
+      [false, true],
+      [true, false],
+    ] as const;
+    for (const [boss, air] of order) {
+      const keys = creepFrameKeys('slot-probe-keys', boss, air);
+      const look = creepLookFor('slot-probe-keys', boss, air);
+      expect(keys.look, `boss=${boss} air=${air}`).toEqual(look);
+      expect(keys.body).toBe(`creep:${creepLookKey(look)}`);
+      expect(keys.shadow).toBe(`creep:shadow:${look.family}:${air ? 'air' : 'ground'}`);
+    }
+  });
+});
