@@ -1097,9 +1097,13 @@ board looks the same by construction rather than by a second copy of the shapes:
 
 - the **board** — floor, border ring, entrance, exit — one texture sized to the board in device
   pixels, shown as one image;
-- one **atlas** — every tower footprint mark as committed, buffed (with the recipient ✦) and
-  pending, and every creep silhouette shape at normal and low-health tint, standard and boss
-  size — shown by pooled sprites placed each frame.
+- one **atlas** — the towers' art: the plate every tower but the mine stands on, the mine's
+  floor-coloured pad, each tower look's head as committed and as boosted (the boost glow
+  baked into the boosted head), each look's whole translucent Pending picture with its dashed
+  rim, and the scorch a spent mine leaves; and every creep silhouette shape at normal and
+  low-health tint, standard and boss size — shown by pooled sprites placed each frame.
+  (_Updated by R2, the visual pass's tower art:_ the atlas first baked each tower footprint
+  mark as committed, buffed with the recipient ✦, and pending with its outline.)
 
 Both are repainted only when the cell size, the effective dpr or the colour mode changes,
 never per frame; a texture that would exceed the renderer's maximum size is baked at a lower
@@ -1111,11 +1115,14 @@ under the towers; the selection cue and tracers between the pending builds and t
 health pips, status cues, the build ghost and sparks over everything. ADR 0003's cue
 vocabulary — the choice the S10 Finding said the frame budget may be paying for — is split
 between the two by what it marks, not by kind. The cues that belong to a piece's own art are
-baked with it: a tower's footprint mark and two tower STATE cues, the buffed recipient's ✦ and
-the pending-build outline; and two creep cues, the low-health tint and the boss size — each an
-atlas variant of its tower's or creep's frame. Everything else stays stroked `Graphics`, drawn
-per frame: the status rings and pips, the airborne chevron, the aura shells, the selection
-cue, the ghost and the sparks.
+baked with it: a tower's silhouette and glyph (its head) and two tower STATE cues, the boost
+glow (the boosted head's frame) and the Pending picture with its dashed rim (a frame per
+look); and two creep cues, the low-health tint and the boss size — each an atlas variant of
+its tower's or creep's frame. A spent mine's scorch is a frame too, its fade the sprite's
+opacity. (_Updated by R2:_ the tower STATE cues were first the buffed recipient's ✦ and the
+pending-build outline.) Everything else stays stroked `Graphics`, drawn per frame: the
+status rings and pips, the airborne chevron, the aura shells, the selection cue, the ghost
+and the sparks.
 
 **Measured before/after.** The record-only browser perf suite (`playwright.perf.config.ts`: the
 `catalog` and `stress` scenes on the `mid-range` and `low-end` emulation profiles), run twice

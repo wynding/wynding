@@ -1,7 +1,7 @@
 import { test, expect, type CDPSession, type Page } from '@playwright/test';
 import AxeBuilder from '@axe-core/playwright';
 import { PNG } from 'pngjs';
-import { createProjection, resolvePalette } from '@wynding/render';
+import { createProjection, resolvePalette, roleColour, towerRoleFor } from '@wynding/render';
 import { COMPACT_QUERY } from '../src/layout';
 import { fullscreenCallCount, stubFullscreen } from './fullscreen-stub';
 import { GRID } from './layout-probe';
@@ -179,8 +179,18 @@ test.describe('touch placement: press-adjust-release + tap-vs-drag (PLAN.md P3/P
     const panel = page.locator('.wy-panel');
     await expect(panel.getByRole('button', { name: /^Sell/ })).toBeVisible();
 
-    // Rendered proof: the ANCHOR cell (2 rows above the finger) reads as pal.tower; the
-    // finger's own cell stays floor — the commit landed at the offset, not under the finger.
+    // Rendered proof: the ANCHOR cell (2 rows above the finger) shows the basic tower's
+    // head; the finger's own cell stays floor — the commit landed at the offset, not under
+    // the finger. The head (`tower-art.ts`, a 64-unit box over the 2×2 footprint) is a
+    // role-coloured ring around an ink core, 3.6 to 11.5 units from the footprint centre —
+    // the anchor cell's far corner. Its point 7.5 units out, up and to the left at 45°
+    // (clear of the barrel, which points straight up), lies inside the anchor cell.
+    const unit = cellPx / 32;
+    const headPoint = {
+      x: anchorPx.x + (32 - 7.5 / Math.SQRT2) * unit,
+      y: anchorPx.y + (32 - 7.5 / Math.SQRT2) * unit,
+    };
+    expect(headPoint.x - anchorPx.x).toBeLessThan(cellPx); // inside the anchor cell
     const clipX = anchorPx.x - 2;
     const clipY = anchorPx.y - 2;
     const clip = {
@@ -195,10 +205,10 @@ test.describe('touch placement: press-adjust-release + tap-vs-drag (PLAN.md P3/P
         const buf = await page.screenshot({ clip, scale: 'css' });
         png = PNG.sync.read(buf);
         return closeTo(
-          sampleCssPoint(png, clipX, clipY, anchorPx.x + cellPx / 2, anchorPx.y + cellPx / 2),
-          toRgb(pal.tower),
+          sampleCssPoint(png, clipX, clipY, headPoint.x, headPoint.y),
+          toRgb(roleColour(pal, towerRoleFor('basic'))),
         );
-      }, 'build painted: anchor cell reads as pal.tower')
+      }, 'build painted: the anchor cell shows the head in basic’s role colour')
       .toBe(true);
     const fingerSample = sampleCssPoint(
       png,

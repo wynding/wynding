@@ -12,7 +12,8 @@ export default defineConfig({
     coverage: {
       provider: 'v8',
       include: ['src/**/*.ts'],
-      exclude: ['src/**/*.test.ts', 'src/scene.ts'],
+      // `src/test-support/` holds the shared test fakes — test code, not shipped code.
+      exclude: ['src/**/*.test.ts', 'src/test-support/**', 'src/scene.ts'],
       thresholds: {
         lines: 90,
         branches: 90,

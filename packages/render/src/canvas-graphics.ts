@@ -11,18 +11,21 @@
 //  - Styles LATCH. `fillStyle`/`lineStyle` apply to every later shape until restated, and
 //    their alpha defaults to 1, as Phaser's do.
 //  - Every primitive composites ON ITS OWN. Two strokes at alpha 0.6 that cross read 0.84
-//    where they overlap, exactly as two Phaser primitives blended one after the other do —
-//    the pending-build variant is baked primitive by primitive at its own alphas for that
-//    reason, never flattened and then faded as a whole.
+//    where they overlap, exactly as two Phaser primitives blended one after the other do.
+//    (Where a picture should fade as ONE — a pending build, whose head must cover its
+//    plate as a built tower's does rather than show it through — the art kit says so
+//    explicitly: `artGraphics`' `fade()`, which `art-frames.ts` calls on the finished
+//    picture. Nothing here flattens on its own.)
 //  - Rounded rects trace Phaser's own paths: the fill as one continuous outline with the 20px
 //    default radius; the stroke clamped to half the shorter side and built from separate
 //    edge and corner sub-paths (Phaser's `strokeRoundedRect` moves between them).
 //  - A radius is never negative. Phaser draws whatever a negative radius describes; Canvas2D's
-//    `arc()` THROWS (`IndexSizeError`). The board reaches one for real: under ~56×48 CSS px
-//    (a hidden board measures 0×0) the projection falls back to 1px cells, and a 2×2
-//    footprint's `size - 4` inset goes negative, which the stroke's half-the-shorter-side
-//    clamp turns into a negative radius. Every arc here takes `nonNegative(radius)`, so a
-//    degenerate size draws a degenerate shape instead of throwing out of the bake.
+//    `arc()` THROWS (`IndexSizeError`). The board reached one for real: under ~56×48 CSS px
+//    (a hidden board measures 0×0) the projection falls back to 1px cells, where an inset size
+//    goes negative — the pending outline's `size - 4` did, and the stroke's
+//    half-the-shorter-side clamp turned it into a negative radius. Every arc here takes
+//    `nonNegative(radius)`, so a degenerate size draws a degenerate shape instead of throwing
+//    out of the bake; the tower art's painter (`art-paint.ts`) clamps its radii the same way.
 //
 // One deliberate departure, made so the bake LOOKS like the WebGL draw rather than merely
 // calling the same functions: consecutive OPAQUE `fillRect`s of one colour fill as ONE path.

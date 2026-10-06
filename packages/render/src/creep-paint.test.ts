@@ -11,8 +11,10 @@ import {
   stunTelegraphPaintOps,
   wardPaintOps,
   airborneCuePaintOps,
+  AIRBORNE_OUTLINE_SHIFT_PX,
 } from './creep-paint';
 import { resolvePalette } from './palette';
+import { ART_INK } from './tower-art';
 
 // The narrow floor's cell size (apps/web/e2e/compact.spec.ts's CELL_PX_MIN_NARROW) — the
 // silhouette radius the scene actually draws at that floor (`max(3, cellPx * 0.35)`).
@@ -362,18 +364,25 @@ describe('airborneCuePaintOps (M2-S7) — the airborne cue', () => {
     expect(airborneCuePaintOps({ x: 0, y: 0, airborne: false }, R, AIRBORNE)).toEqual([]);
   });
 
-  it('is emitted for an air creep — a single wingspan op', () => {
+  it('is emitted for an air creep — a single wingspan op, outlined in ink', () => {
     expect(airborneCuePaintOps({ x: 5, y: 6, airborne: true }, R, AIRBORNE)).toEqual([
       {
         kind: 'wingspan',
+        // The radius multipliers, plus the 1.25px the chevron moves out to make room for
+        // its ink outline (QC round 1, #181).
         apexX: 5,
-        apexY: 6 - R * 3.4,
+        apexY: 6 - (R * 3.4 + 1.25),
         leftX: 5 - R * 0.9,
-        leftY: 6 - R * 3.1,
+        leftY: 6 - (R * 3.1 + 1.25),
         rightX: 5 + R * 0.9,
-        rightY: 6 - R * 3.1,
+        rightY: 6 - (R * 3.1 + 1.25),
         colour: AIRBORNE,
         alpha: 1,
+        // A 2px light stroke over the art kit's near-black ink, 1px wider each side: the
+        // light core reads on dark ground, the ink edge on a light tower head.
+        strokePx: 2,
+        outlinePx: 1,
+        outlineColour: ART_INK,
       },
     ]);
   });
@@ -430,10 +439,26 @@ describe('airborneCuePaintOps (M2-S7) — the airborne cue', () => {
     expect(op!.rightX).toBeGreaterThan(0);
   });
 
-  // The lineWidth `board-draw.ts` strokes the wingspan with. Strokes are centred, so half
-  // of it spills INSIDE the geometric radius — the same correction this file's stun note
-  // makes for the jolt/slow pair, and the reason a radius ladder alone under-counts.
-  const AIRBORNE_STROKE_PX = 2;
+  // What `board-draw.ts` actually draws for the wingspan: the ink outline, `strokePx +
+  // 2 × outlinePx` wide and run `outlinePx` past both ends, under the light stroke — so the
+  // OUTLINE's edge is the cue's outermost drawn extent, and the clearance is measured from
+  // it. Strokes are centred, so half the width spills INSIDE the geometric radius — the same
+  // correction this file's stun note makes for the jolt/slow pair, and the reason a radius
+  // ladder alone under-counts.
+  const drawnHalfWidth = (op: { strokePx: number; outlinePx: number }): number =>
+    op.strokePx / 2 + op.outlinePx;
+
+  /** A wing's drawn segment: apex to tip, run `outlinePx` past both ends as the outline is. */
+  const drawnWing = (
+    op: { apexX: number; apexY: number; outlinePx: number },
+    tx: number,
+    ty: number,
+  ): [number, number, number, number] => {
+    const len = Math.hypot(tx - op.apexX, ty - op.apexY);
+    const ux = ((tx - op.apexX) / len) * op.outlinePx;
+    const uy = ((ty - op.apexY) / len) * op.outlinePx;
+    return [op.apexX - ux, op.apexY - uy, tx + ux, ty + uy];
+  };
 
   /** Distance from a point to a line SEGMENT (not its infinite line — the chevron's
    *  strokes stop at the apex and the tips, and treating them as infinite would report a
@@ -470,14 +495,12 @@ describe('airborneCuePaintOps (M2-S7) — the airborne cue', () => {
         ms,
       )) {
         if (d.kind !== 'drift') continue;
-        for (const [bx, by] of [
+        for (const [tx, ty] of [
           [wing!.leftX, wing!.leftY],
           [wing!.rightX, wing!.rightY],
         ]) {
-          const g =
-            distToSegment(d.x, d.y, wing!.apexX, wing!.apexY, bx!, by!) -
-            d.r -
-            AIRBORNE_STROKE_PX / 2;
+          const [ax, ay, bx, by] = drawnWing(wing!, tx!, ty!);
+          const g = distToSegment(d.x, d.y, ax, ay, bx, by) - d.r - drawnHalfWidth(wing!);
           if (g < gap) {
             gap = g;
             atMs = ms;
@@ -516,6 +539,11 @@ describe('airborneCuePaintOps (M2-S7) — the airborne cue', () => {
     );
     expect(supported.gap).toBeGreaterThan(0);
     expect(clamped.gap).toBeGreaterThan(0);
+    // The ink outline (QC round 1, #181) cost no clearance: measured from the OUTLINE's
+    // edge, both gaps still beat what the light stroke alone had before it — 0.823px and
+    // 0.348px — because the chevron moved out `AIRBORNE_OUTLINE_SHIFT_PX` to make room.
+    expect(supported.gap).toBeGreaterThan(0.823);
+    expect(clamped.gap).toBeGreaterThan(0.348);
     // And it only gets easier as cells grow — the drift's extent is a ratio plus a pixel
     // floor, so the floor's contribution shrinks relative to r.
     for (const r of [5, 10, 20, 40]) expect(worstDriftGap(r).gap).toBeGreaterThan(0);
@@ -542,6 +570,25 @@ describe('airborneCuePaintOps (M2-S7) — the airborne cue', () => {
     expect(Math.abs(down.apexY)).toBeCloseTo(Math.abs(up.apexY), 10);
     expect(Math.abs(down.leftY)).toBeCloseTo(Math.abs(up.leftY), 10);
     expect(down.leftX).toBe(up.leftX); // horizontal span untouched
+  });
+
+  it('flips at the boundary the outline’s shift sets, not the bare apex’s', () => {
+    // Half a pixel more than the bare apex needs (r × 3.4 above the centre) is still too
+    // little once the chevron has moved out `AIRBORNE_OUTLINE_SHIFT_PX` for its outline: the
+    // apex would sit at −0.75px. It flips, and the apex and both tips stay on the canvas.
+    const y = R * 3.4 + 0.5;
+    const [op] = airborneCuePaintOps({ x: 100, y, airborne: true }, R, AIRBORNE, 0);
+    expect(op!.apexY).toBeGreaterThan(y);
+    for (const v of [op!.apexY, op!.leftY, op!.rightY]) expect(v).toBeGreaterThanOrEqual(0);
+  });
+
+  it('does not flip once the apex and its outline’s shift fit — the boundary from the other side', () => {
+    // A hundredth of a pixel more than the apex (r × 3.4) and the outline's shift need: the
+    // chevron stays above its creep, its apex on the canvas.
+    const y = R * 3.4 + AIRBORNE_OUTLINE_SHIFT_PX + 0.01;
+    const [op] = airborneCuePaintOps({ x: 100, y, airborne: true }, R, AIRBORNE, 0);
+    expect(op!.apexY).toBeLessThan(y);
+    expect(op!.apexY).toBeGreaterThanOrEqual(0);
   });
 
   it('does NOT flip when there is room above — the default stays upward', () => {

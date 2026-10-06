@@ -253,7 +253,7 @@
     {
       "term": "layer",
       "pattern": "disarm or deselect one layer at a time|paint layer",
-      "why": "Escape/Close backing out one modal/UI layer at a time, and the render paint layer (`drawCreeps`/`drawTowers`) \u2014 neither is a creep's domain.",
+      "why": "Escape/Close backing out one modal/UI layer at a time, and the render paint layer (the board's draw calls \u2014 `drawCreepCues` and the atlas frame painters in `art-frames.ts`) \u2014 neither is a creep's domain.",
       "files": ["docs/accessibility-checklist.md"]
     },
     {
@@ -332,6 +332,12 @@
       "term": "frame",
       "pattern": "rather than relying on a frame|frame that refreshes|can tick every few frames",
       "why": "The render-frame (rAF) sense. `relying on a frame` is anchored to \"rather than relying on a frame\" \u2014 bare, it would exempt \"the sim advances by relying on a frame counter\", which IS the tick sense.",
+      "files": ["docs/accessibility-checklist.md"]
+    },
+    {
+      "term": "frame",
+      "pattern": "style frame",
+      "why": "The visual pass's owner-approved style frame (#181): the art reference the tower and creep art is built to \u2014 an image, neither a tick nor the Shell.",
       "files": ["docs/accessibility-checklist.md"]
     }
   ]

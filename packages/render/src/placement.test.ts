@@ -1,11 +1,13 @@
 // placement.test.ts — which frame every sprite shows and where: hidden pending-sell towers,
-// queued builds, the buffed variant, the creep frame choice (shape, low-health tint, boss
-// size), and positions snapped to whole device pixels with the frame's anchor honoured.
+// queued builds, a tower's plate and head (the boosted head with its glow; no plate under
+// the mine), the scorches a spent mine leaves, the creep frame choice (shape, low-health
+// tint, boss size), and positions snapped to whole device pixels with the frame's anchor
+// honoured.
 
 import { describe, it, expect } from 'vitest';
-import { placeCreeps, placeTowers, type FrameAnchor } from './placement';
+import { placeCreeps, placeScorches, placeTowers, type FrameAnchor } from './placement';
 import { snapToDevicePx } from './device-px';
-import { atlasFrameSpecs } from './art-frames';
+import { atlasFrameSpecs, PAD_FRAME_KEY, PLATE_FRAME_KEY, SCORCH_FRAME_KEY } from './art-frames';
 import { creepRadius } from './board-draw';
 import { createProjection, type Projection } from './projection';
 import { resolvePalette } from './palette';
@@ -75,42 +77,80 @@ describe('placeTowers', () => {
   const projection = projectionAt(1);
   const frames = framesFor(projection);
 
-  it('anchors each committed tower frame at its footprint corner', () => {
+  it('anchors a committed tower’s plate and head at its footprint corner — the same pixels', () => {
     const placed = placeTowers(vmWith([tower('slow', 2, 3)]), NO_OVERLAY, projection, frames);
-    expect(placed.committed).toHaveLength(1);
-    const p = placed.committed[0]!;
-    expect(p.frame).toBe('tower:ringed:committed');
+    expect(placed.plates.map((p) => p.frame)).toEqual([PLATE_FRAME_KEY]);
+    expect(placed.heads.map((p) => p.frame)).toEqual(['tower:head:ringed:control:committed']);
     const corner = projection.cellToPixel(2, 3);
-    const anchor = frames.get(p.frame)!;
-    expect(p.x + anchor.anchorX).toBe(corner.x);
-    expect(p.y + anchor.anchorY).toBe(corner.y);
+    for (const p of [placed.plates[0]!, placed.heads[0]!]) {
+      const anchor = frames.get(p.frame)!;
+      expect(p.x + anchor.anchorX).toBe(corner.x);
+      expect(p.y + anchor.anchorY).toBe(corner.y);
+      expect(p.alpha ?? 1).toBe(1);
+    }
     expect(placed.pending).toEqual([]);
   });
 
-  it('shows the buffed variant — the ✦ — only on a tower a support aura reaches', () => {
+  it('shows the boosted head — the glow — only on a tower a beacon boosts; the plate is the same', () => {
     const placed = placeTowers(
       vmWith([tower('basic', 2, 2, { buffed: true }), tower('basic', 5, 2)]),
       NO_OVERLAY,
       projection,
       frames,
     );
-    expect(placed.committed.map((p) => p.frame)).toEqual([
-      'tower:plain:buffed',
-      'tower:plain:committed',
+    expect(placed.heads.map((p) => p.frame)).toEqual([
+      'tower:head:plain:damage:buffed',
+      'tower:head:plain:damage:committed',
+    ]);
+    expect(placed.plates.map((p) => p.frame)).toEqual([PLATE_FRAME_KEY, PLATE_FRAME_KEY]);
+  });
+
+  it('stands every committed tower on a plate but the mine, which stands on its floor-coloured pad', () => {
+    const placed = placeTowers(
+      vmWith([tower('mine', 2, 2), tower('beacon', 5, 2), tower('no-such-tower', 2, 5)]),
+      NO_OVERLAY,
+      projection,
+      frames,
+    );
+    expect(placed.heads.map((p) => p.frame)).toEqual([
+      'tower:head:charge:burst:committed',
+      'tower:head:pylon:support:committed',
+      'tower:head:plain:damage:committed', // an unknown id looks like basic
+    ]);
+    // One ground sprite per head, in the same order, each at its own footprint corner: the
+    // mine's is the pad, so nothing — a neighbouring beacon's shell above all — shows
+    // through a footprint its studded head leaves bare.
+    expect(placed.plates.map((p) => p.frame)).toEqual([
+      PAD_FRAME_KEY,
+      PLATE_FRAME_KEY,
+      PLATE_FRAME_KEY,
+    ]);
+    const at = (key: string, col: number, row: number): number[] => {
+      const c = projection.cellToPixel(col, row);
+      const a = frames.get(key)!;
+      return [c.x - a.anchorX, c.y - a.anchorY];
+    };
+    expect(placed.plates.map((p) => [p.x, p.y])).toEqual([
+      at(PAD_FRAME_KEY, 2, 2),
+      at(PLATE_FRAME_KEY, 5, 2),
+      at(PLATE_FRAME_KEY, 2, 5),
     ]);
   });
 
-  it('hides a committed tower whose sell is pending, and only that one', () => {
+  it('hides a committed tower whose sell is pending — plate and head alike — and only that one', () => {
     const placed = placeTowers(
       vmWith([tower('basic', 2, 2), tower('venom', 5, 2)]),
       { pendingAdds: [], pendingSells: [{ col: 2, row: 2 }] },
       projection,
       frames,
     );
-    expect(placed.committed.map((p) => p.frame)).toEqual(['tower:droplet:committed']);
+    expect(placed.heads.map((p) => p.frame)).toEqual(['tower:head:droplet:poison:committed']);
+    expect(placed.plates).toHaveLength(1);
+    const corner = projection.cellToPixel(5, 2);
+    expect(placed.plates[0]!.x + frames.get(PLATE_FRAME_KEY)!.anchorX).toBe(corner.x);
   });
 
-  it('shows each queued build as the pending variant of ITS OWN mark (Codex R1-7)', () => {
+  it('shows each queued build as the pending picture of ITS OWN look (Codex R1-7)', () => {
     const placed = placeTowers(
       vmWith([]),
       {
@@ -123,10 +163,11 @@ describe('placeTowers', () => {
       projection,
       frames,
     );
-    expect(placed.committed).toEqual([]);
+    expect(placed.plates).toEqual([]);
+    expect(placed.heads).toEqual([]);
     expect(placed.pending.map((p) => p.frame)).toEqual([
-      'tower:ringed:pending',
-      'tower:charge:pending',
+      'tower:pending:ringed:control',
+      'tower:pending:charge:burst',
     ]);
     const corner = projection.cellToPixel(6, 6);
     const p = placed.pending[1]!;
@@ -141,34 +182,83 @@ describe('placeTowers', () => {
       projection,
       frames,
     );
-    expect(placed.committed.map((p) => p.frame)).toEqual([
-      'tower:bolt:committed',
-      'tower:ringed:committed',
-      'tower:arrow:committed',
+    expect(placed.heads.map((p) => p.frame)).toEqual([
+      'tower:head:bolt:control:committed',
+      'tower:head:ringed:control:committed',
+      'tower:head:arrow:air:committed',
     ]);
+    expect(placed.plates.map((p) => p.x)).toEqual(placed.heads.map((p) => p.x));
   });
 
-  it('puts a frame on a whole device pixel at a fractional dpr', () => {
+  it('puts plate and head on a whole device pixel at a fractional dpr', () => {
     // 1.5 × the 2×2-cell offset of an odd corner lands mid-pixel unsnapped.
     const p15 = projectionAt(1.5, 110, 110);
     const f15 = framesFor(p15);
     const placed = placeTowers(vmWith([tower('basic', 1, 1)]), NO_OVERLAY, p15, f15);
-    const s = placed.committed[0]!;
-    const deviceX = s.x * 1.5;
-    const deviceY = s.y * 1.5;
-    expect(Math.abs(deviceX - Math.round(deviceX))).toBeLessThan(1e-9);
-    expect(Math.abs(deviceY - Math.round(deviceY))).toBeLessThan(1e-9);
-    // ... within half a device pixel of where the footprint really is.
-    const corner = p15.cellToPixel(1, 1);
-    expect(Math.abs(s.x + f15.get(s.frame)!.anchorX - corner.x)).toBeLessThanOrEqual(
-      0.5 / 1.5 + 1e-9,
-    );
+    for (const s of [placed.plates[0]!, placed.heads[0]!]) {
+      const deviceX = s.x * 1.5;
+      const deviceY = s.y * 1.5;
+      expect(Math.abs(deviceX - Math.round(deviceX))).toBeLessThan(1e-9);
+      expect(Math.abs(deviceY - Math.round(deviceY))).toBeLessThan(1e-9);
+      // ... within half a device pixel of where the footprint really is.
+      const corner = p15.cellToPixel(1, 1);
+      expect(Math.abs(s.x + f15.get(s.frame)!.anchorX - corner.x)).toBeLessThanOrEqual(
+        0.5 / 1.5 + 1e-9,
+      );
+    }
   });
 
   it('refuses to point a sprite at a frame the atlas does not have', () => {
     expect(() =>
       placeTowers(vmWith([tower('basic', 2, 2)]), NO_OVERLAY, projection, new Map()),
-    ).toThrow(/no frame 'tower:plain:committed'/);
+    ).toThrow(/no frame 'tower:plate'/);
+    expect(() =>
+      placeTowers(
+        vmWith([tower('basic', 2, 2)]),
+        NO_OVERLAY,
+        projection,
+        new Map([[PLATE_FRAME_KEY, { anchorX: 0, anchorY: 0 }]]),
+      ),
+    ).toThrow(/no frame 'tower:head:plain:damage:committed'/);
+  });
+});
+
+describe('placeScorches', () => {
+  it('centres each scorch on its point, carrying its fade', () => {
+    const projection = projectionAt(1);
+    const frames = framesFor(projection);
+    const placed = placeScorches(
+      [
+        { x: 5 * 256, y: 4 * 256, alpha: 1 },
+        { x: 2 * 256, y: 7 * 256, alpha: 0.25 },
+      ],
+      projection,
+      frames,
+    );
+    expect(placed.map((p) => [p.frame, p.alpha])).toEqual([
+      [SCORCH_FRAME_KEY, 1],
+      [SCORCH_FRAME_KEY, 0.25],
+    ]);
+    const anchor = frames.get(SCORCH_FRAME_KEY)!;
+    const centre = projection.fpToPixel(2 * 256, 7 * 256);
+    expect(placed[1]!.x + anchor.anchorX).toBe(centre.x);
+    expect(placed[1]!.y + anchor.anchorY).toBe(centre.y);
+  });
+
+  it('puts a scorch on a whole device pixel at a fractional dpr, within half a pixel', () => {
+    const p15 = projectionAt(1.5, 110, 110);
+    const f15 = framesFor(p15);
+    const [s] = placeScorches([{ x: 3 * 256, y: 3 * 256, alpha: 0.5 }], p15, f15);
+    expect(Math.abs(s!.x * 1.5 - Math.round(s!.x * 1.5))).toBeLessThan(1e-9);
+    const centre = p15.fpToPixel(3 * 256, 3 * 256);
+    expect(Math.abs(s!.x + f15.get(SCORCH_FRAME_KEY)!.anchorX - centre.x)).toBeLessThanOrEqual(
+      0.5 / 1.5 + 1e-9,
+    );
+  });
+
+  it('places nothing when no scorch is showing', () => {
+    const projection = projectionAt(1);
+    expect(placeScorches([], projection, framesFor(projection))).toEqual([]);
   });
 });
 
