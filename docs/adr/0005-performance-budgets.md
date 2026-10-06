@@ -1372,6 +1372,17 @@ builds each creep's and each head's atlas frame key as a new string and looks it
 map, so every lookup hashes a fresh string. It predates T3 (R1 and R2), and is left for a later
 pass; the creep frame keys change with the creep art (R4) anyway.
 
+**The rim repaint (`rims`, after the turned-rim fix).** A turned or knocked-back head on a plated
+tower darkened the plate's rim at fractional device scales, so the sprite layer `rims` repaints the
+rim's four straight runs over every posed head, as one baked frame, placed in `placeTowers` beside
+the head. It adds sprites only for posed heads, and the record-only suite on that head, one run,
+gated, on AC power with the fast policy, shows no cost beyond this suite's own run-to-run spread:
+catalog mid-range 8.3 / 10.2 / 10.3, stress mid-range 16.6 / 18.6 / 24.9, catalog low-end
+24.1 / 33.0 / 35.0 and stress low-end 51.6 / 59.7 / 60.3 ms (p50 / p95 / p99), inside the ranges the
+runs above record for T3 on. The catalog low-end p95 landed at 33.0 ms, under the 33.3 ms line it
+sits on, so T3's claim about that line holds unchanged. It changes no budget, no trigger, `R0`,
+`TOLERANCE` or the CI ratio gate.
+
 **What this evidence is.** Emulation on one development machine (Chrome 149.0.7827.55, ANGLE Metal
 on an Apple M4 Pro), the same class of evidence as V2's entry: the CPU throttles slow JavaScript,
 not the GPU. It does not stand in for the real-device pass that ruling 6 above still holds open.
