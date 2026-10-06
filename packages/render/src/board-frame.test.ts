@@ -1,55 +1,33 @@
-// board-frame.test.ts — one frame of the board, drawn into three recording layers and three
+// board-frame.test.ts — one frame of the board, drawn into three recording layers and five
 // recording sprite layers: what goes into WHICH live layer (the aura shells into `shells` and
 // nowhere else — M2-S8's guarantee that no shell stripes a tower body, now held by the layer
 // order — the selection and tracers into `effects`, every creep cue, the ghost and the sparks
-// into `cues`, in that order), what each sprite layer is shown, where the board image sits,
-// that a reset hides everything, and that an arrived tracer lands exactly on its creep.
+// into `cues`, in that order), what each sprite layer is shown — a spent mine's scorch on the
+// frame's own clock among them — where the board image sits, that a reset hides everything,
+// and that an arrived tracer lands exactly on its creep.
 
 import { describe, it, expect } from 'vitest';
 import {
   createLiveLayers,
   createSpriteLayers,
   drawBoardFrame,
+  forEachLayerSprite,
   resetBoardFrame,
   type BoardFrameInput,
   type BoardTargets,
-  type LayerGraphics,
 } from './board-frame';
-import { atlasFrameSpecs } from './art-frames';
+import { createSpritePool } from './sprite-pool';
+import { atlasFrameSpecs, PAD_FRAME_KEY, PLATE_FRAME_KEY, SCORCH_FRAME_KEY } from './art-frames';
 import { AURA_SHELL_ALPHA } from './board-draw';
 import { layerDepth } from './layers';
 import { resolvePalette } from './palette';
 import { createProjection, type Projection } from './projection';
 import type { CreepPlacement, FrameAnchor, SpritePlacement } from './placement';
+import { createScorchTracker } from './scorches';
+import { renderTimeOf } from './tracers';
 import type { LiveSpark } from './sparks';
+import { recordingLayer, type Call } from './test-support/recording-graphics';
 import type { CreepVM, RenderOverlay, RenderVM, TowerVM } from './types';
-
-type Call = { method: string; args: unknown[] };
-
-/** A recording live layer: every call in order. */
-function recordingLayer(): LayerGraphics & { calls: Call[] } {
-  const calls: Call[] = [];
-  const record =
-    (method: string) =>
-    (...args: unknown[]): void => {
-      calls.push({ method, args });
-    };
-  return {
-    calls,
-    clear: record('clear'),
-    fillStyle: record('fillStyle'),
-    lineStyle: record('lineStyle'),
-    fillRect: record('fillRect'),
-    strokeRect: record('strokeRect'),
-    fillRoundedRect: record('fillRoundedRect'),
-    strokeRoundedRect: record('strokeRoundedRect'),
-    fillTriangle: record('fillTriangle'),
-    fillCircle: record('fillCircle'),
-    strokeCircle: record('strokeCircle'),
-    fillPoints: record('fillPoints'),
-    lineBetween: record('lineBetween'),
-  };
-}
 
 /** Each drawing call of a layer as `method colour` — the fill or line colour in force. */
 function drawn(layer: { calls: Call[] }): string[] {
@@ -93,7 +71,9 @@ function targets() {
       setVisible: (v: boolean) => board.visible.push(v),
     },
     layers: { shells: recordingLayer(), effects: recordingLayer(), cues: recordingLayer() },
-    towers: recordingSprites(),
+    scorches: recordingSprites(),
+    plates: recordingSprites(),
+    heads: recordingSprites(),
     pending: recordingSprites(),
     creeps: recordingSprites(),
   };
@@ -181,6 +161,7 @@ function busyFrame(projection = PROJECTION): BoardFrameInput {
     projection,
     frames: framesFor(projection),
     sparks,
+    scorches: createScorchTracker(),
   };
 }
 
@@ -221,7 +202,7 @@ describe('drawBoardFrame — which live layer each thing is drawn into', () => {
     drawBoardFrame(t, busyFrame());
     expect(drawn(t.layers.effects)).toEqual([
       `strokeCircle ${hex(PAL.range)}`,
-      `fillCircle ${hex(PAL.tower)}`,
+      `fillCircle ${hex(PAL.tracer)}`,
     ]);
   });
 
@@ -264,13 +245,21 @@ describe('drawBoardFrame — which live layer each thing is drawn into', () => {
 });
 
 describe('drawBoardFrame — the sprite layers and the board image', () => {
-  it('shows each sprite layer its placements: committed towers, queued builds, creeps', () => {
+  it('shows each sprite layer its placements: plates, heads, queued builds, creeps — and no scorch with nothing gone off', () => {
     const { t } = targets();
     drawBoardFrame(t, busyFrame());
-    expect(t.towers.syncs.map((s) => s.map((p) => p.frame))).toEqual([
-      ['tower:pylon:committed', 'tower:plain:buffed'],
+    // Each committed tower is two sprites: its plate in `plates`, its head — the buffed one
+    // wearing the boost glow — in `heads`.
+    expect(t.plates.syncs.map((s) => s.map((p) => p.frame))).toEqual([
+      [PLATE_FRAME_KEY, PLATE_FRAME_KEY],
     ]);
-    expect(t.pending.syncs.map((s) => s.map((p) => p.frame))).toEqual([['tower:ringed:pending']]);
+    expect(t.heads.syncs.map((s) => s.map((p) => p.frame))).toEqual([
+      ['tower:head:pylon:support:committed', 'tower:head:plain:damage:buffed'],
+    ]);
+    expect(t.scorches.syncs).toEqual([[]]);
+    expect(t.pending.syncs.map((s) => s.map((p) => p.frame))).toEqual([
+      ['tower:pending:ringed:control'],
+    ]);
     expect(t.creeps.syncs.map((s) => s.map((p) => p.frame))).toEqual([
       ['creep:triangle:normal:standard'],
     ]);
@@ -306,12 +295,20 @@ describe('drawBoardFrame — the sprite layers and the board image', () => {
   it('a reset clears every layer and hides the board and every sprite layer; the next frame shows them', () => {
     const { t, board } = targets();
     drawBoardFrame(t, busyFrame());
-    resetBoardFrame(t);
+    let scorchResets = 0;
+    resetBoardFrame(t, { scorches: { reset: () => (scorchResets += 1) } });
+    expect(scorchResets).toBe(1);
     for (const layer of [t.layers.shells, t.layers.effects, t.layers.cues]) {
       expect(layer.calls[layer.calls.length - 1]!.method).toBe('clear');
     }
     expect(board.visible).toEqual([true, false]);
-    expect([t.towers.hidden, t.pending.hidden, t.creeps.hidden]).toEqual([1, 1, 1]);
+    expect([
+      t.scorches.hidden,
+      t.plates.hidden,
+      t.heads.hidden,
+      t.pending.hidden,
+      t.creeps.hidden,
+    ]).toEqual([1, 1, 1, 1, 1]);
     drawBoardFrame(t, busyFrame());
     expect(board.visible).toEqual([true, false, true]);
     expect(t.creeps.syncs).toHaveLength(2);
@@ -462,6 +459,136 @@ describe('drawBoardFrame — a tracer converges on where its creep is DRAWN', ()
   });
 });
 
+/** One frame as the scene draws it: the tracker is fed first (`scene.ts`'s `draw()`), then
+ *  `drawBoardFrame` reads the scorches still fading. */
+function fedFrame(t: ReturnType<typeof targets>['t'], input: BoardFrameInput): void {
+  input.scorches.update({
+    tracers: input.overlay.tracers,
+    sparks: input.overlay.sparks,
+    renderTick: renderTimeOf(input.prevVm, input.curVm, input.alpha),
+  });
+  drawBoardFrame(t, input);
+}
+
+describe('drawBoardFrame — a spent mine’s scorch, in the scorches layer, on the frame’s own clock', () => {
+  it('shows a detonated mine’s scorch at its footprint centre, fading from the render tick it went off at', () => {
+    const { t } = targets();
+    const scorches = createScorchTracker();
+    // A mine anchored at (6, 2): its footprint centre — where its blast is anchored — is the
+    // corner of cells (7, 3).
+    const mine = tower(3, 'mine', 6);
+    const centre = { x: 7 * 256, y: 3 * 256 };
+    const frame = (
+      prevTick: number,
+      alpha: number,
+      towers: readonly TowerVM[],
+      tracers: RenderOverlay['tracers'],
+    ): BoardFrameInput => ({
+      prevVm: { ...vm(towers, []), tick: prevTick },
+      curVm: { ...vm(towers, []), tick: prevTick + 1 },
+      alpha,
+      overlay: { ...OVERLAY, tracers },
+      projection: PROJECTION,
+      frames: framesFor(PROJECTION),
+      sparks: [],
+      scorches,
+    });
+    // The mine stands, on its pad in the plates layer, and nothing has gone off.
+    fedFrame(t, frame(20, 0, [mine], []));
+    expect(t.plates.syncs[0]!.map((p) => p.frame)).toEqual([PAD_FRAME_KEY]);
+    expect(t.scorches.syncs[0]).toEqual([]);
+    // It goes off — a blast whose origin is its destination, at its footprint centre — in a
+    // frame drawn at render tick 21.25: the previous tick plus the frame's alpha.
+    const blast = {
+      kind: 'blast' as const,
+      originX: centre.x,
+      originY: centre.y,
+      destX: centre.x,
+      destY: centre.y,
+      launchTick: 21,
+      impactTick: 21,
+    };
+    fedFrame(t, frame(21, 0.25, [], [blast]));
+    expect(t.scorches.syncs[1]).toHaveLength(1);
+    const scorch = t.scorches.syncs[1]![0]!;
+    expect(scorch.frame).toBe(SCORCH_FRAME_KEY);
+    expect(scorch.alpha).toBe(1);
+    // Its frame's anchor sits on the footprint centre, snapped to a device pixel.
+    const at = PROJECTION.fpToPixel(centre.x, centre.y);
+    const anchor = framesFor(PROJECTION).get(SCORCH_FRAME_KEY)!;
+    expect(Math.abs(scorch.x + anchor.anchorX - at.x)).toBeLessThanOrEqual(0.5);
+    expect(Math.abs(scorch.y + anchor.anchorY - at.y)).toBeLessThanOrEqual(0.5);
+    // 40.5 ticks later on the same clock — a frame at render tick 61.75, its previous tick
+    // plus its alpha — it is just past half faded; and the tracer, still listed, is not
+    // scorched again.
+    fedFrame(t, frame(61, 0.75, [], [blast]));
+    expect(t.scorches.syncs[2]).toHaveLength(1);
+    expect(t.scorches.syncs[2]![0]!.alpha).toBeCloseTo(1 - 40.5 / 80, 9);
+    // At 80 ticks it is gone.
+    fedFrame(t, frame(101, 0.25, [], []));
+    expect(t.scorches.syncs[3]).toEqual([]);
+  });
+
+  it('feeds the tracker the frame’s impacts: a mine seen standing, then gone with only its marked blast landing at its centre, leaves a scorch', () => {
+    const { t } = targets();
+    const scorches = createScorchTracker();
+    const mine = tower(3, 'mine', 6); // footprint centre: the corner of cells (7, 3)
+    const frame = (tick: number, towers: readonly TowerVM[], overlay: RenderOverlay) =>
+      ({
+        prevVm: { ...vm(towers, []), tick },
+        curVm: { ...vm(towers, []), tick: tick + 1 },
+        alpha: 0,
+        overlay,
+        projection: PROJECTION,
+        frames: framesFor(PROJECTION),
+        sparks: [],
+        scorches,
+      }) satisfies BoardFrameInput;
+    fedFrame(t, frame(20, [mine], OVERLAY)); // the mine stands
+    // Gone, with no tracer: only the blast's impact, at its footprint centre.
+    fedFrame(
+      t,
+      frame(21, [], {
+        ...OVERLAY,
+        sparks: [{ x: 7 * 256, y: 3 * 256, radiusFp: 2.5 * 256, detonation: true }],
+      }),
+    );
+    expect(t.scorches.syncs[1]!.map((p) => p.frame)).toEqual([SCORCH_FRAME_KEY]);
+  });
+
+  it('a reset forgets every scorch the run left: the next frame’s floor is clean', () => {
+    const { t } = targets();
+    const scorches = createScorchTracker();
+    const centre = 7 * 256;
+    const blast = {
+      kind: 'blast' as const,
+      originX: centre,
+      originY: 3 * 256,
+      destX: centre,
+      destY: 3 * 256,
+      launchTick: 21,
+      impactTick: 21,
+    };
+    const frame = (tick: number, tracers: RenderOverlay['tracers']) =>
+      ({
+        prevVm: { ...vm([], []), tick },
+        curVm: { ...vm([], []), tick: tick + 1 },
+        alpha: 0,
+        overlay: { ...OVERLAY, tracers },
+        projection: PROJECTION,
+        frames: framesFor(PROJECTION),
+        sparks: [],
+        scorches,
+      }) satisfies BoardFrameInput;
+    fedFrame(t, frame(21, [blast]));
+    expect(t.scorches.syncs[0]).toHaveLength(1); // held
+    resetBoardFrame(t, { scorches });
+    fedFrame(t, frame(22, []));
+    expect(t.scorches.syncs[1]).toEqual([]);
+    expect(scorches.live(22)).toEqual([]);
+  });
+});
+
 describe('createLiveLayers / createSpriteLayers — each layer made under its own name', () => {
   it('makes each live layer under its own name', () => {
     const layers = createLiveLayers((name) => Object.assign(recordingLayer(), { name }));
@@ -472,16 +599,44 @@ describe('createLiveLayers / createSpriteLayers — each layer made under its ow
     ]);
   });
 
-  it('makes each sprite layer under its own name', () => {
-    const layers = createSpriteLayers((name) => ({ name }));
-    expect([layers.towers.name, layers.pending.name, layers.creeps.name]).toEqual([
-      'towers',
-      'pending',
-      'creeps',
-    ]);
+  it('forEachLayerSprite visits every sprite of all five sprite layers — what a rebake repoints at its new atlas', () => {
+    // As `scene.ts` makes them: a pool per layer, each sprite knowing which layer made it.
+    const layers = createSpriteLayers((layer) =>
+      createSpritePool((p) => ({
+        layer,
+        frame: p.frame,
+        visible: true,
+        alpha: 1,
+        setPosition: () => undefined,
+        setFrame: () => undefined,
+        setVisible(this: { visible: boolean }, v: boolean) {
+          this.visible = v;
+        },
+        setAlpha: () => undefined,
+      })),
+    );
+    const names = ['scorches', 'plates', 'heads', 'pending', 'creeps'] as const;
+    for (const name of names) {
+      layers[name].sync([0, 1].map((i) => ({ frame: `${name}:${i}`, x: 0, y: 0 })));
+    }
+    layers.creeps.sync([{ frame: 'creeps:0', x: 0, y: 0 }]); // one hidden — still visited
+    const seen: string[] = [];
+    forEachLayerSprite(layers, (sprite, frame) => seen.push(`${sprite.layer} ${frame}`));
+    expect(seen.sort()).toEqual(names.flatMap((n) => [`${n} ${n}:0`, `${n} ${n}:1`]).sort());
   });
 
-  it('so depths read from those names keep every shell under every tower body (M2-S8), and the rest in order', () => {
+  it('makes each sprite layer under its own name', () => {
+    const layers = createSpriteLayers((name) => ({ name }));
+    expect([
+      layers.scorches.name,
+      layers.plates.name,
+      layers.heads.name,
+      layers.pending.name,
+      layers.creeps.name,
+    ]).toEqual(['scorches', 'plates', 'heads', 'pending', 'creeps']);
+  });
+
+  it('so depths read from those names keep every shell under every plate and head (M2-S8), every scorch under every shell, and the rest in order', () => {
     // How `scene.ts` makes them: each object's depth is `layerDepth` of the name it was made under.
     const live = createLiveLayers((name) =>
       Object.assign(recordingLayer(), { depth: layerDepth(name) }),
@@ -489,12 +644,14 @@ describe('createLiveLayers / createSpriteLayers — each layer made under its ow
     const sprites = createSpriteLayers((name) => layerDepth(name));
     expect([
       layerDepth('board'),
+      sprites.scorches,
       live.shells.depth,
-      sprites.towers,
+      sprites.plates,
+      sprites.heads,
       sprites.pending,
       live.effects.depth,
       sprites.creeps,
       live.cues.depth,
-    ]).toEqual([0, 1, 2, 3, 4, 5, 6]);
+    ]).toEqual([0, 1, 2, 3, 4, 5, 6, 7, 8]);
   });
 });

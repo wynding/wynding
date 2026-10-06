@@ -212,7 +212,8 @@ describe('view-model + hud derivation', () => {
   });
 
   // M2-S8. The view model must classify support/buffed by calling the SIM's own aura
-  // rule, so the ✦ can never mark a tower `runCombat` is not actually buffing.
+  // rule, so the boost glow (once the ✦) can never mark a tower `runCombat` is not
+  // actually buffing.
   it('marks a support tower and the attackers its aura reaches (M2-S8)', () => {
     let s = createInitialState(1, ruleset);
     // `beacon` at (4,12) occupies cols 4-5, rows 12-13; its ring includes (6,12), so the
@@ -1155,9 +1156,29 @@ describe('palette — colourblind modes (GAG §2)', () => {
     }
   });
 
-  it('shifts the tower/creep hues off the red–green axis for protan/deutan', () => {
+  it('re-tunes the tower role colours for protan/deutan, off the red–green axis', () => {
     expect(resolvePalette('protan')).toEqual(resolvePalette('deutan'));
-    expect(resolvePalette('protan').tower).not.toBe(resolvePalette('default').tower);
+    // Before the visual pass this pinned `protan.tower !== default.tower`: the one tower
+    // colour, moved off the red–green axis. Towers are coloured by ROLE now, and `tower` is
+    // the plate's rim — a neutral slate, one value in every mode. What each mode re-tunes is
+    // the six role colours, and `palette.test.ts` holds the stronger property directly:
+    // under SIMULATED protanopia and deuteranopia the protan/deutan six stay ≥ 25 ΔE76
+    // apart, where the default six fall to 20.40 and 11.23.
+    const protan = resolvePalette('protan');
+    const def = resolvePalette('default');
+    for (const key of [
+      'roleDamage',
+      'roleControl',
+      'rolePoison',
+      'roleAir',
+      'roleSupport',
+      'roleBurst',
+    ] as const) {
+      expect(protan[key], key).not.toBe(def[key]);
+    }
+    for (const m of ['protan', 'deutan', 'tritan'] as const) {
+      expect(resolvePalette(m).tower, m).toBe(def.tower);
+    }
   });
 
   it('falls back to the base palette for an unknown mode', () => {
@@ -1172,5 +1193,13 @@ describe('render barrel', () => {
     expect(barrel.deriveHud).toBeTypeOf('function');
     expect(barrel.interpolateCreeps).toBeTypeOf('function');
     expect(barrel.resolvePalette).toBeTypeOf('function');
+    // The tower art kit the Card swatches draw through (visual pass T1/T2, #181).
+    expect(barrel.towerLookFor).toBeTypeOf('function');
+    expect(barrel.artGraphics).toBeTypeOf('function');
+    expect(barrel.paintTowerArt).toBeTypeOf('function');
+    // What the e2e pixel specs sample the art through (`hidpi`, `touch`, `arming`).
+    expect(barrel.roleColour).toBeTypeOf('function');
+    expect(barrel.towerRoleFor).toBeTypeOf('function');
+    expect(barrel.towerArtFit).toBeTypeOf('function');
   });
 });

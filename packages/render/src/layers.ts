@@ -7,23 +7,31 @@
 // goes is still drawn live, split across three `Graphics` so each lands at its place in
 // the stack:
 //
-//   board    the baked board texture — floor, border ring, entrance, exit
-//   shells   live: every support-aura shell, UNDER every tower body (M2-S8's rule, which
-//            used to be "draw every shell before any body" and is now structural)
-//   towers   sprites: committed towers — body, footprint mark, the buffed ✦
-//   pending  sprites: queued builds — the translucent outline and its mark
-//   effects  live: the selection ring/outline/blast spokes, then in-flight tracers
-//   creeps   sprites: every creep silhouette
-//   cues     live: every health pip and status cue, then the build ghost, then sparks
+//   board     the baked board texture — floor, border ring, entrance, exit
+//   scorches  sprites: the fading scorch a spent mine leaves, on the floor (visual pass T4)
+//   shells    live: every support-aura shell, UNDER every tower (M2-S8's rule, which used
+//             to be "draw every shell before any body" and is now structural)
+//   plates    sprites: committed towers' plates, each with its shadow and rim — or, for
+//             the plateless mine, its floor-coloured pad, which keeps shells off its
+//             footprint as a plate does
+//   heads     sprites: committed towers' heads — boosted ones with their glow — over the
+//             plates, a layer of their own so a head can turn without touching its plate
+//   pending   sprites: pending builds — each one translucent picture with its dashed rim
+//   effects   live: the selection ring/outline/blast spokes, then in-flight tracers
+//   creeps    sprites: every creep silhouette
+//   cues      live: every health pip and status cue, then the build ghost, then sparks
 //
 // Creep cues sit ABOVE every silhouette, so a creep's status cue is never hidden under a
-// neighbour's body — the one ordering this layout changed on purpose (creeps used to draw
-// one whole stack at a time). Everything else keeps the order it was recorded in before.
+// neighbour's body — the one ordering V2 changed on purpose (creeps used to draw one whole
+// stack at a time). The visual pass split a tower into a plate and a head and put scorches
+// on the floor under everything a tower draws; the rest keeps the order it had.
 
 export const BOARD_LAYERS = [
   'board',
+  'scorches',
   'shells',
-  'towers',
+  'plates',
+  'heads',
   'pending',
   'effects',
   'creeps',

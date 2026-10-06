@@ -4,58 +4,18 @@
 // same-colour rects fill as one path, so the bake leaves no seams between them).
 
 import { describe, it, expect } from 'vitest';
-import { canvasGraphics, cssColour, type Canvas2DLike } from './canvas-graphics';
+import { canvasGraphics, cssColour } from './canvas-graphics';
+import {
+  fakeContext as sharedContext,
+  stylesAtDraws,
+  type CtxOp as Op,
+} from './test-support/fake-context';
 
-type Op = { op: string; args: unknown[] };
-
-/** A recording `Canvas2DLike`: every method call AND every style write, in order. Style
- *  writes are recorded as `set:<prop>` so a test can see which style a fill or stroke ran
- *  under. Its `arc` rejects a negative radius the way a real 2D context does (the HTML
- *  spec's `IndexSizeError`), so a path that would throw in a browser throws here too. */
-function fakeContext(): Canvas2DLike & { ops: Op[] } {
-  const ops: Op[] = [];
-  const call =
-    (op: string) =>
-    (...args: unknown[]): void => {
-      if (op === 'arc' && (args[2] as number) < 0) {
-        throw new RangeError(`IndexSizeError: arc radius ${String(args[2])} is negative`);
-      }
-      ops.push({ op, args });
-    };
-  const state: Record<string, unknown> = {
-    fillStyle: '#000000',
-    strokeStyle: '#000000',
-    lineWidth: 1,
-    lineCap: 'butt',
-    lineJoin: 'miter',
-  };
-  const ctx = {
-    ops,
-    beginPath: call('beginPath'),
-    closePath: call('closePath'),
-    moveTo: call('moveTo'),
-    lineTo: call('lineTo'),
-    arc: call('arc'),
-    rect: call('rect'),
-    fill: call('fill'),
-    stroke: call('stroke'),
-    fillRect: call('fillRect'),
-    save: call('save'),
-    restore: call('restore'),
-    setTransform: call('setTransform'),
-    clip: call('clip'),
-  } as unknown as Canvas2DLike & { ops: Op[] };
-  for (const prop of Object.keys(state)) {
-    Object.defineProperty(ctx, prop, {
-      get: () => state[prop],
-      set: (v: unknown) => {
-        state[prop] = v;
-        ops.push({ op: `set:${prop}`, args: [v] });
-      },
-    });
-  }
-  return ctx;
-}
+/** A recording context: every method call AND every style write, in order. Style writes are
+ *  recorded as `set:<prop>` so a test can see which style a fill or stroke ran under. Its
+ *  `arc` rejects a negative radius the way a real 2D context does (the HTML spec's
+ *  `IndexSizeError`), so a path that would throw in a browser throws here too. */
+const fakeContext = (): ReturnType<typeof sharedContext> => sharedContext({ recordStyles: true });
 
 const names = (ops: readonly Op[]): string[] => ops.map((o) => o.op);
 const HALF_PI = Math.PI / 2;
@@ -73,6 +33,34 @@ describe('canvasGraphics — Phaser Graphics semantics over a 2D context', () =>
     canvasGraphics(ctx);
     expect(ctx.lineCap).toBe('butt');
     expect(ctx.lineJoin).toBe('miter');
+    // Written, not left to the defaults: a context handed over mid-use may hold others.
+    expect(ctx.ops).toEqual([
+      { op: 'set:lineCap', args: ['butt'] },
+      { op: 'set:lineJoin', args: ['miter'] },
+    ]);
+  });
+
+  it('runs every fill and stroke under the style it was given — written before the draw', () => {
+    // Each draw is given a style no draw before it had, so a style written after its draw,
+    // or never, would leave it under the previous one.
+    const ctx = fakeContext();
+    const g = canvasGraphics(ctx);
+    g.fillStyle(0x112233);
+    g.fillRect(0, 0, 2, 2); // an opaque batch: one fill, when flushed ...
+    g.fillRect(2, 0, 2, 2);
+    g.fillStyle(0x445566, 0.5);
+    g.fillRect(0, 4, 2, 2); // ... which a translucent rect does before its own fillRect
+    g.fillStyle(0x778899);
+    g.fillCircle(5, 5, 2);
+    g.lineStyle(3, 0xaabbcc, 0.75);
+    g.lineBetween(0, 0, 9, 9);
+    g.flush();
+    expect(stylesAtDraws(ctx.ops)).toEqual([
+      { op: 'fill', fillStyle: 'rgba(17, 34, 51, 1)' },
+      { op: 'fillRect', fillStyle: 'rgba(68, 85, 102, 0.5)' },
+      { op: 'fill', fillStyle: 'rgba(119, 136, 153, 1)' },
+      { op: 'stroke', strokeStyle: 'rgba(170, 187, 204, 0.75)', lineWidth: 3 },
+    ]);
   });
 
   it('LATCHES styles: one lineStyle applies to every later stroke, alpha defaulting to 1', () => {
@@ -227,9 +215,12 @@ describe('canvasGraphics — Phaser Graphics semantics over a 2D context', () =>
   });
 
   it('never hands arc() a negative radius — a rect smaller than its 2px inset strokes at radius 0', () => {
-    // The 1px-cell fallback (a board under ~56×48 CSS px, or hidden): a 2×2 footprint is
-    // 2px, so the pending outline's `strokeRoundedRect(x + 2, y + 2, size - 4, size - 4, 6)`
-    // is −2 × −2, and half its shorter side is −1. A real context throws on that.
+    // The adapter stands in for Phaser's `Graphics`, which strokes a degenerate rounded
+    // rect without complaint, so it must too: a real context throws on a negative radius.
+    // Nothing baked strokes one today — the call that could, a Pending build's inset
+    // outline (`strokeRoundedRect(x + 2, y + 2, size - 4, size - 4, 6)`, −2 × −2 on the
+    // 1px-cell fallback's 2px footprint, half its shorter side −1), became tower art in the
+    // visual pass — but any painter handed this surface may.
     const ctx = fakeContext();
     expect(() => canvasGraphics(ctx).strokeRoundedRect(3, 3, -2, -2, 6)).not.toThrow();
     const radii = ctx.ops.filter((o) => o.op === 'arc').map((o) => o.args[2]);

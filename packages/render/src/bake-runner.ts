@@ -38,18 +38,19 @@ import {
   type BakeInputs,
   type BoardBake,
 } from './bake';
+import type { ArtCanvas2DLike, PathFactory } from './art-paint';
 import { boardPaintOps, type BoardCellsGeometry } from './board-cells';
-import type { Canvas2DLike } from './canvas-graphics';
 import { resolvePalette } from './palette';
 
 /** Frames a failed attempt waits before the same inputs are tried again — about a second at
  *  60 Hz. Inputs that differ from the failed attempt's are tried at once. */
 export const BAKE_RETRY_FRAMES = 60;
 
-/** A blank canvas the host made, and its 2D context. */
+/** A blank canvas the host made, and its 2D context — the slice of one the art painter
+ *  uses (`art-paint.ts`), which a browser's `CanvasRenderingContext2D` is. */
 export interface HostCanvas<C> {
   readonly canvas: C;
-  readonly ctx: Canvas2DLike;
+  readonly ctx: ArtCanvas2DLike;
 }
 
 /** A named sub-rectangle of an atlas texture, in texels. */
@@ -94,6 +95,8 @@ export interface BakeHost<C> {
   /** Point the board image and every sprite at `art`'s textures. A throw may leave some
    *  pointed and some not; the runner then shows the previous art again. */
   show(art: BakedArt): void;
+  /** Makes a `Path2D` from an SVG path string, for the tower art — `(d) => new Path2D(d)`. */
+  readonly makePath: PathFactory;
   readonly log: BakeLog;
 }
 
@@ -290,7 +293,7 @@ export function createBakeRunner<C>(geometry: BoardCellsGeometry, host: BakeHost
       stage = 'board paint';
       paintBoard(boardCanvas.ctx, boardPaintOps(geometry, pal), geometry, inputs.cellPx, board);
       stage = 'atlas paint';
-      paintAtlas(atlasCanvas.ctx, atlas, pal);
+      paintAtlas(atlasCanvas.ctx, atlas, pal, host.makePath);
       stage = 'board upload';
       added.push(art.boardKey); // before the call: a throw partway through may leave the key
       host.addTexture(art.boardKey, boardCanvas.canvas, []);

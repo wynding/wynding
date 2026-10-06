@@ -13,8 +13,10 @@ import {
   type TextureFrameRect,
 } from './bake-runner';
 import { layoutAtlas, layoutBoard, type BakeInputs } from './bake';
-import type { Canvas2DLike } from './canvas-graphics';
-import { resolvePalette } from './palette';
+import { pendingFrameKey } from './art-frames';
+import { fakeContext as sharedContext, fakePath } from './test-support/fake-context';
+import { resolvePalette, roleColour } from './palette';
+import { TOWER_ROLES } from './tower-paint';
 import type { ColourMode } from './types';
 
 const GEOMETRY = { cols: 28, rows: 24, entrance: { col: 0, row: 11 }, exit: { col: 27, row: 11 } };
@@ -48,43 +50,11 @@ interface FakeCanvas {
   released: boolean;
 }
 
-/** A 2D context that keeps the `fillStyle`s it is given and, when `throws` is set, throws it
- *  from its first drawing call. Its `arc` rejects a negative radius as a real context does. */
-function fakeContext(fills: string[], throws: Error | null): Canvas2DLike {
-  const op =
-    (name: string) =>
-    (...args: unknown[]) => {
-      if (throws !== null) throw throws;
-      if (name === 'arc' && (args[2] as number) < 0) throw new RangeError('IndexSizeError');
-    };
-  let fillStyle: Canvas2DLike['fillStyle'] = '';
-  return {
-    get fillStyle() {
-      return fillStyle;
-    },
-    set fillStyle(value) {
-      fills.push(String(value));
-      fillStyle = value;
-    },
-    strokeStyle: '',
-    lineWidth: 1,
-    lineCap: 'butt',
-    lineJoin: 'miter',
-    beginPath: op('beginPath'),
-    closePath: op('closePath'),
-    moveTo: op('moveTo'),
-    lineTo: op('lineTo'),
-    arc: op('arc'),
-    rect: op('rect'),
-    fill: op('fill'),
-    stroke: op('stroke'),
-    fillRect: op('fillRect'),
-    save: op('save'),
-    restore: op('restore'),
-    setTransform: op('setTransform'),
-    clip: op('clip'),
-  };
-}
+/** A 2D context — the slice the art painter draws through — that keeps the `fillStyle`s it is
+ *  given and, when `throws` is set, throws it from its first drawing call. Its `arc` and
+ *  `ellipse` reject a negative radius as a real context does. */
+const fakeContext = (fills: string[], throws: Error | null): ReturnType<typeof sharedContext> =>
+  sharedContext({ recordOps: false, fills, throws });
 
 interface LogLine {
   readonly level: 'warn' | 'error' | 'info';
@@ -168,6 +138,7 @@ function fakeHost() {
       events.push(`show ${art.boardKey} ${art.atlasKey}`);
       if ((state.shows.shift() ?? 'ok') === 'throw') throw state.showError;
     },
+    makePath: fakePath,
     log: { warn: log('warn'), error: log('error'), info: log('info') },
   };
   const of = (level: LogLine['level']): LogLine[] => logs.filter((l) => l.level === level);
@@ -222,9 +193,10 @@ describe('createBakeRunner — an attempt', () => {
     expect([h.canvases[1]!.width, h.canvases[1]!.height]).toEqual([atlas.width, atlas.height]);
     expect(h.textures.get('wy-board-1')).toEqual([]);
     expect(h.textures.get('wy-atlas-1')).toHaveLength(atlas.frames.size);
-    expect(h.textures.get('wy-atlas-1')!.find((f) => f.key === 'tower:plain:pending')).toEqual(
+    const pending = pendingFrameKey('basic');
+    expect(h.textures.get('wy-atlas-1')!.find((f) => f.key === pending)).toEqual(
       (({ key, x, y, width, height }) => ({ key, x, y, width, height }))(
-        atlas.frames.get('tower:plain:pending')!,
+        atlas.frames.get(pending)!,
       ),
     );
     expect(h.logs).toEqual([]);
@@ -234,20 +206,34 @@ describe('createBakeRunner — an attempt', () => {
     expect(h.events).toEqual([]);
   });
 
-  it('paints the colour mode’s palette: a protan bake’s towers are protan blue, never the default green', () => {
+  it('paints the colour mode’s palette: a protan bake’s towers wear protan’s role colours, never the default ones', () => {
     const atlasFills = (mode: ColourMode): string[] => {
       const { h, runner } = setup();
       runner.ensure(at(10, 1, mode), MAX_TEX);
       return h.canvases[1]!.fills;
     };
-    const protan = resolvePalette('protan').tower;
-    const standard = resolvePalette('default').tower;
-    expect(protan).not.toBe(standard);
+    // A tower's head wears its ROLE colour (its plate and rim are one slate in every
+    // mode), and the role colours are what each colour mode re-tunes: all six of them.
     const fills = atlasFills('protan');
-    expect(fills.some((f) => f.startsWith(rgbaOf(protan)))).toBe(true);
-    expect(fills.some((f) => f.startsWith(rgbaOf(standard)))).toBe(false);
-    // The control: a default bake does paint the default green, so the check can see it.
-    expect(atlasFills('default').some((f) => f.startsWith(rgbaOf(standard)))).toBe(true);
+    const controlFills = atlasFills('default');
+    for (const role of TOWER_ROLES) {
+      const protan = roleColour(resolvePalette('protan'), role);
+      const standard = roleColour(resolvePalette('default'), role);
+      expect(protan, role).not.toBe(standard);
+      expect(
+        fills.some((f) => f.startsWith(rgbaOf(protan))),
+        role,
+      ).toBe(true);
+      expect(
+        fills.some((f) => f.startsWith(rgbaOf(standard))),
+        role,
+      ).toBe(false);
+      // The control: a default bake does paint the default colour, so the check can see it.
+      expect(
+        controlFills.some((f) => f.startsWith(rgbaOf(standard))),
+        role,
+      ).toBe(true);
+    }
   });
 
   it('shows a rebake’s textures BEFORE it destroys the old ones, then frees the old canvases', () => {

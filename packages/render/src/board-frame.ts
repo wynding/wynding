@@ -1,12 +1,13 @@
 // board-frame.ts — one frame of the board, Phaser-free (V2, #181). Everything the renderer
 // draws per frame is decided here: which live layer each cue goes into, which sprite shows
 // which frame where, and in what order. `scene.ts` supplies the targets — the baked board
-// image, three live `Graphics` and three sprite pools, all as structural interfaces — and
+// image, three live `Graphics` and five sprite pools, all as structural interfaces — and
 // this fills them, so the routing that keeps every aura shell under every tower body (M2-S8)
 // is a unit-tested fact rather than a property of call order in a coverage-excluded file.
 //
-// The layers composite in `layers.ts`'s order: board, shells, towers, pending, effects
-// (selection, tracers), creeps, cues (pips and status cues, then the ghost, then sparks).
+// The layers composite in `layers.ts`'s order: board, scorches, shells, plates, heads,
+// pending, effects (selection, tracers), creeps, cues (pips and status cues, then the ghost,
+// then sparks).
 
 import { MS_PER_TICK } from '@wynding/sim';
 import {
@@ -19,8 +20,15 @@ import {
 import { snapToDevicePx } from './device-px';
 import { interpolateCreeps } from './interpolate';
 import { resolvePalette, type Palette } from './palette';
-import { placeCreeps, placeTowers, type FrameAnchor, type SpritePlacement } from './placement';
+import {
+  placeCreeps,
+  placeScorches,
+  placeTowers,
+  type FrameAnchor,
+  type SpritePlacement,
+} from './placement';
 import type { Projection } from './projection';
+import type { ScorchTracker } from './scorches';
 import type { LiveSpark } from './sparks';
 import { positionTracers, renderTimeOf, tracerPaintOps } from './tracers';
 import type { CreepVM, RenderOverlay, RenderVM } from './types';
@@ -61,15 +69,34 @@ export interface SpriteLayer {
 }
 
 /** A sprite layer's name — the one it is made under, and its depth is read from. */
-export type SpriteLayerName = 'towers' | 'pending' | 'creeps';
+export type SpriteLayerName = 'scorches' | 'plates' | 'heads' | 'pending' | 'creeps';
 
-/** The three sprite layers, each made by `make` under its own name, as `createLiveLayers`. */
-export function createSpriteLayers<S>(make: (layer: SpriteLayerName) => S): {
-  readonly towers: S;
-  readonly pending: S;
-  readonly creeps: S;
-} {
-  return { towers: make('towers'), pending: make('pending'), creeps: make('creeps') };
+/** One `S` per sprite layer. */
+export type SpriteLayers<S> = { readonly [L in SpriteLayerName]: S };
+
+/** The five sprite layers, each made by `make` under its own name, as `createLiveLayers`. */
+export function createSpriteLayers<S>(make: (layer: SpriteLayerName) => S): SpriteLayers<S> {
+  return {
+    scorches: make('scorches'),
+    plates: make('plates'),
+    heads: make('heads'),
+    pending: make('pending'),
+    creeps: make('creeps'),
+  };
+}
+
+/**
+ * `fn` for every sprite in every layer of `layers`, with the frame it shows — what a rebake
+ * repoints at the new atlas. EVERY layer, read off the layers themselves rather than listed
+ * by hand: a sprite a rebake missed would stay on the atlas the bake runner removes right
+ * after, and the first one drawn would throw inside Phaser's WebGL batcher and end the frame
+ * loop.
+ */
+export function forEachLayerSprite<S>(
+  layers: SpriteLayers<{ forEach(fn: (sprite: S, frame: string) => void): void }>,
+  fn: (sprite: S, frame: string) => void,
+): void {
+  for (const layer of Object.values(layers)) layer.forEach(fn);
 }
 
 /** The baked board texture's image. */
@@ -82,7 +109,12 @@ export interface BoardImage {
 export interface BoardTargets {
   readonly board: BoardImage;
   readonly layers: LiveLayers;
-  readonly towers: SpriteLayer;
+  /** Where mines went off, fading — on the floor, under everything a tower draws. */
+  readonly scorches: SpriteLayer;
+  /** What committed towers stand on: each one's plate, or the plateless mine's pad. */
+  readonly plates: SpriteLayer;
+  /** Committed towers' heads — boosted ones with their glow — over the plates. */
+  readonly heads: SpriteLayer;
   readonly pending: SpriteLayer;
   readonly creeps: SpriteLayer;
 }
@@ -98,6 +130,10 @@ export interface BoardFrameInput {
   readonly frames: ReadonlyMap<string, FrameAnchor>;
   /** The sparks still lit this frame (`SparkStore.live`). */
   readonly sparks: readonly LiveSpark[];
+  /** Where mines went off (`scorches.ts`): state the scene keeps across frames and resets
+   *  with the run. The scene feeds it every `draw()` — even one that returns before this
+   *  frame is drawn — so a frame only reads the scorches still fading. */
+  readonly scorches: ScorchTracker;
 }
 
 /** Draw one frame into `t`. */
@@ -105,6 +141,10 @@ export function drawBoardFrame(t: BoardTargets, input: BoardFrameInput): void {
   const { prevVm, curVm, alpha, overlay, projection, frames } = input;
   const pal = resolvePalette(overlay.colourMode); // resolved once per frame, passed down
   const { shells, effects, cues } = t.layers;
+  // ONE render-time derivation per frame, shared by the scorches, the tracers and the
+  // telegraph pulse (CodeRabbit #73): the "one clock" invariant is structural, not calls
+  // that happen to agree.
+  const renderTimeTicks = renderTimeOf(prevVm, curVm, alpha);
   // board — the baked texture at the board's corner, snapped like every sprite.
   t.board.setPosition(
     snapToDevicePx(projection.originX, projection.dpr),
@@ -114,17 +154,18 @@ export function drawBoardFrame(t: BoardTargets, input: BoardFrameInput): void {
   shells.clear();
   effects.clear();
   cues.clear();
-  // shells — under every tower body.
+  // scorches — on the floor, under everything a tower draws. The scene has already fed the
+  // tracker this frame's tracers and impacts (`scene.ts`).
+  t.scorches.sync(placeScorches(input.scorches.live(renderTimeTicks), projection, frames));
+  // shells — under every tower.
   drawAuraShells(shells, pal, curVm, overlay, projection);
-  // towers, pending — atlas sprites.
+  // plates, heads, pending — atlas sprites.
   const towers = placeTowers(curVm, overlay, projection, frames);
-  t.towers.sync(towers.committed);
+  t.plates.sync(towers.plates);
+  t.heads.sync(towers.heads);
   t.pending.sync(towers.pending);
-  // effects — the selection cue, then tracers. ONE render-time derivation per frame, shared
-  // by tracers and the telegraph pulse (CodeRabbit #73): the "one clock" invariant is
-  // structural, not two calls that happen to agree.
+  // effects — the selection cue, then tracers.
   drawSelection(effects, pal, overlay, projection);
-  const renderTimeTicks = renderTimeOf(prevVm, curVm, alpha);
   // Interpolated ONCE and shared: the creep placement below and the tracers' lerp targets
   // are the same points (#32/P6).
   const interpolated = interpolateCreeps(prevVm, curVm, alpha);
@@ -142,14 +183,20 @@ export function drawBoardFrame(t: BoardTargets, input: BoardFrameInput): void {
   drawSparks(cues, pal, input.sparks, overlay.reducedMotion, projection);
 }
 
-/** Hide and clear everything a frame drew (Play again): the next `drawBoardFrame` shows
- *  exactly what it draws. */
-export function resetBoardFrame(t: BoardTargets): void {
+/** Hide and clear everything a frame drew (Play again), and forget the scorches the run
+ *  left: the next `drawBoardFrame` shows exactly what it draws, on a clean floor. */
+export function resetBoardFrame(
+  t: BoardTargets,
+  state: { readonly scorches: Pick<ScorchTracker, 'reset'> },
+): void {
+  state.scorches.reset();
   t.layers.shells.clear();
   t.layers.effects.clear();
   t.layers.cues.clear();
   t.board.setVisible(false);
-  t.towers.hideAll();
+  t.scorches.hideAll();
+  t.plates.hideAll();
+  t.heads.hideAll();
   t.pending.hideAll();
   t.creeps.hideAll();
 }
@@ -217,9 +264,10 @@ export function drawGhost(
     // Gated on "has a blast at all" — the SAME condition the committed selection uses
     // (`board-draw.ts`), so arming a tower and selecting that same tower both show the
     // blast. The ghost's body is an OUTLINE rather than a fill, so its spokes sit
-    // wholly on `floor`; a committed small-blast tower's inner spoke crosses its own
-    // filled body and reads shorter. Same condition, same motif, slightly different
-    // painted result — `board-draw.ts` carries the geometry. They briefly diverged during M2-S9 (selection additionally required the
+    // wholly on `floor`; a committed small-blast tower's spokes start just clear of its
+    // head and cross its plate (3.70:1, gated) and rim before they reach the floor. Same
+    // condition, same motif, slightly different painted result — `board-draw.ts` carries
+    // the geometry. They briefly diverged during M2-S9 (selection additionally required the
     // blast to overreach the range ring, which only the mine does); Rob ruled for
     // consistency, 2026-08-07. Change both sites together or neither.
     if (o.ghost.blastRadiusFp !== null) {

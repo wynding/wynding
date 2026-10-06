@@ -132,8 +132,8 @@ export interface TowerVM {
   readonly id: number;
   readonly col: number;
   readonly row: number;
-  /** Catalog id (M2-S3) — keys the footprint mark distinguishing `slow` from `basic`
-   *  (`tower-paint.ts`); both share `palette.tower` (shape carries the distinction). */
+  /** Catalog id (M2-S3) — keys the tower's look (`towerLookFor`, `tower-paint.ts`): its
+   *  head's silhouette and glyph, and the role colour it is tinted. */
   readonly towerId: string;
   /** This tower is a SUPPORT tower (M2-S8, `beacon`) — it does not attack, and the
    *  scene draws its adjacency shell one cell out from the footprint. A catalog join,
@@ -246,8 +246,8 @@ export interface SelectionVM {
    *  stops there. Drawn whenever it is non-null — the SAME condition
    *  `GhostVM.blastRadiusFp` uses for the preview, so arming a tower and selecting that
    *  same tower both answer "where does my blast land". (Same condition and same motif;
-   *  the painted spoke is slightly shorter on a committed small-blast tower, whose filled
-   *  body the inner segment crosses — `board-draw.ts` carries that geometry.) M2-S9 first shipped a
+   *  on a committed small-blast tower the spokes start just clear of its head and cross its
+   *  plate before the floor — `board-draw.ts` carries that geometry.) M2-S9 first shipped a
    *  narrower gate here (`blastRadiusFp > rangeFp`, which only the mine satisfies) to
    *  leave `splash` untouched; that made arming a `splash` show spokes and selecting it
    *  show none, and Rob ruled for consistency instead (2026-08-07). `splash` and
@@ -296,6 +296,10 @@ export interface SparkPoint {
   readonly x: number;
   readonly y: number;
   readonly radiusFp: number;
+  /** True when the impact is a mine going off: a blast whose shot's origin equals its
+   *  destination (`isDetonation`, `scorches.ts`). Set by the controller from the shot it
+   *  fired, so a detonation whose tracer no frame drew is still known by its landing. */
+  readonly detonation?: boolean;
 }
 
 /** Board-space presentation state handed to `draw()` alongside the two view-models.

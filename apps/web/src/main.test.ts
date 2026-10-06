@@ -35,10 +35,10 @@ vi.mock('./input', async (importOriginal) => {
 // The swatch painter is jsdom-inert by contract (null 2D context — vitest.setup.ts), so a
 // spy is the only observable for `main.ts`'s wiring: painted at boot, repainted ONLY on a
 // real colour-mode change.
-vi.mock('./swatch', () => ({ paintSwatch: vi.fn() }));
+vi.mock('./swatch', () => ({ paintSwatch: vi.fn(), releaseSwatch: vi.fn() }));
 
 import { mount as mountMock } from '@wynding/render/scene';
-import { paintSwatch } from './swatch';
+import { paintSwatch, releaseSwatch } from './swatch';
 import { hexColour } from './hud-icons';
 import { attachInput as attachInputMock } from './input';
 import { createApp, boot, type Scheduler } from './main';
@@ -163,6 +163,24 @@ describe('main — createApp wiring & frame loop', () => {
     expect(root.querySelectorAll('.wy-wordmark')).toHaveLength(1);
     expect(root.querySelectorAll('.wy-board')).toHaveLength(1);
     again.destroy();
+  });
+
+  it("destroy() releases every Card's swatch observer, before the canvases go (#181)", () => {
+    const root = document.createElement('div');
+    document.body.appendChild(root);
+    vi.mocked(releaseSwatch).mockClear();
+    const app = createApp(document, root, {
+      sceneFactory: vi.fn(() => fakeHandle),
+      schedule: manualSchedule().schedule,
+      now: () => 0,
+      seed: 1,
+    });
+    openApps.push(app);
+    const canvases = Array.from(root.querySelectorAll('canvas.wy-card-swatch'));
+    expect(canvases.length).toBeGreaterThan(0);
+    expect(releaseSwatch).not.toHaveBeenCalled();
+    app.destroy();
+    expect(vi.mocked(releaseSwatch).mock.calls.map((c) => c[0])).toEqual(canvases);
   });
 
   it('routes control buttons and reaches a results screen, verify, and play-again', () => {
