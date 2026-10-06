@@ -701,10 +701,6 @@ describe('press guard — QC round 4 (#181 H2)', () => {
 });
 
 describe('press guard — QC round 5 (#181 H2)', () => {
-  const stamped = <E extends Event>(event: E, at: number): E => {
-    Object.defineProperty(event, 'timeStamp', { value: at });
-    return event;
-  };
   const nowIs = (ms: number) =>
     vi.spyOn(document.defaultView!.performance, 'now').mockReturnValue(ms);
 

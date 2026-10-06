@@ -1,4 +1,4 @@
-import { test, expect, type Locator, type Page } from '@playwright/test';
+import { test, expect, type CDPSession, type Locator, type Page } from '@playwright/test';
 import {
   boxOf,
   expectSameBox,
@@ -66,7 +66,7 @@ const at = (b: Box, f: number): number => b.y + b.height * f;
 const isChromium = (page: Page): boolean =>
   page.context().browser()?.browserType().name() === 'chromium';
 
-type Click = { readonly t: number; readonly detail: number };
+type Click = { readonly t: number; readonly detail: number; readonly onPlay: boolean };
 
 /** Start recording the pointer clicks the page receives: their `timeStamp`s and `detail`s (the
  *  system's click count), read in the capture phase at the window, before the panel's guard can
@@ -77,21 +77,34 @@ type Click = { readonly t: number; readonly detail: number };
 async function recordClicks(page: Page): Promise<void> {
   await page.evaluate(() => {
     const w = window as unknown as {
-      __clicks?: { t: number; detail: number }[];
+      __clicks?: { t: number; detail: number; onPlay: boolean }[];
       __downs?: number[];
+      __downsOnPlay?: boolean[];
       __lastClick?: { t: number; target: Element } | null;
     };
     w.__lastClick = null;
     if (w.__clicks !== undefined) {
       w.__clicks.length = 0;
       w.__downs!.length = 0;
+      w.__downsOnPlay!.length = 0;
       return;
     }
-    const clicks: { t: number; detail: number }[] = [];
+    const clicks: { t: number; detail: number; onPlay: boolean }[] = [];
     const downs: number[] = [];
+    const downsOnPlay: boolean[] = [];
+    const onPlay = (e: Event): boolean =>
+      (e.target as Element).closest('.wy-results .wy-primary') !== null;
     w.__clicks = clicks;
     w.__downs = downs;
-    window.addEventListener('mousedown', (e) => downs.push(e.timeStamp), true);
+    w.__downsOnPlay = downsOnPlay;
+    window.addEventListener(
+      'mousedown',
+      (e) => {
+        downs.push(e.timeStamp);
+        downsOnPlay.push(onPlay(e));
+      },
+      true,
+    );
     window.addEventListener(
       'click',
       (e) => {
@@ -104,7 +117,7 @@ async function recordClicks(page: Page): Promise<void> {
           last.target !== target &&
           last.target.closest('label')?.control === target;
         w.__lastClick = { t: e.timeStamp, target };
-        if (!forwarded) clicks.push({ t: e.timeStamp, detail: e.detail });
+        if (!forwarded) clicks.push({ t: e.timeStamp, detail: e.detail, onPlay: onPlay(e) });
       },
       true,
     );
@@ -117,6 +130,10 @@ const recordedClicks = (page: Page): Promise<Click[]> =>
 /** The `timeStamp` of each `mousedown` the page received since `recordClicks`. */
 const recordedDowns = (page: Page): Promise<number[]> =>
   page.evaluate(() => (window as unknown as { __downs: number[] }).__downs);
+
+/** Whether each of those `mousedown`s landed inside Play again. */
+const recordedDownsOnPlay = (page: Page): Promise<boolean[]> =>
+  page.evaluate(() => (window as unknown as { __downsOnPlay: boolean[] }).__downsOnPlay);
 
 /** A press held `hold` ms, then a single press `HELD_GAP` ms after its release (each its own
  *  click, `detail` 1): stamped in Chromium, as `stampedPair` explains. */
@@ -1313,7 +1330,7 @@ for (const hold of [450, 550]) {
   });
 }
 
-test('two single clicks at one spot, the dialog arriving 70–100 ms before the second: the second, aimed at the board, lands on Play again and is held', async ({
+test('two single clicks at one spot, the dialog arriving 0–200 ms before the second: the second, aimed at the board, lands on Play again and is held', async ({
   page,
 }) => {
   const spot = await endingOnBoard(page, { width: 1280, height: 720 }, '&endDelay=570');
@@ -1322,8 +1339,10 @@ test('two single clicks at one spot, the dialog arriving 70–100 ms before the 
   await page.waitForTimeout(560);
   await rawPress(page, spot);
   const downs = await recordedDowns(page);
+  const onPlay = await recordedDownsOnPlay(page);
   const endedAt = await page.evaluate(() => (window as unknown as { __endedAt: number }).__endedAt);
   expect(downs, 'two presses reached the page').toHaveLength(2);
+  expect(onPlay[1], 'the second press landed on Play again').toBe(true);
   expect(downs[1]! - downs[0]!, 'past the window from the first press').toBeGreaterThanOrEqual(
     PRESS_GUARD_WINDOW_MS,
   );
@@ -1349,10 +1368,25 @@ for (const key of ['Enter', 'Space'] as const) {
   }) => {
     await endingOnBoard(page, { width: 1280, height: 720 }, '&endOnKey=1');
     await page.locator('.wy-board').focus();
+    await page.evaluate(() => {
+      const w = window as unknown as { __keyOnPlay: boolean[] };
+      w.__keyOnPlay = [];
+      window.addEventListener(
+        'keydown',
+        (e) =>
+          w.__keyOnPlay.push((e.target as Element).closest('.wy-results .wy-primary') !== null),
+        true,
+      );
+    });
     await page.keyboard.press(key, { delay: 90 });
     await page.waitForTimeout(160);
     await page.keyboard.press(key, { delay: 90 });
     await page.waitForTimeout(300);
+    const keyOnPlay = await page.evaluate(
+      () => (window as unknown as { __keyOnPlay: boolean[] }).__keyOnPlay,
+    );
+    expect(keyOnPlay, 'two keys reached the page').toHaveLength(2);
+    expect(keyOnPlay[1], 'the second key found Play again focused').toBe(true);
     await expect(page.getByRole('dialog')).toBeVisible();
     await expectHeld(page, `${key} twice on the board`);
   });
@@ -1424,6 +1458,7 @@ test.describe('a double-tap on the board as the run ends', () => {
       await page.evaluate(() => matchMedia('(pointer: coarse)').matches),
       'a coarse pointer',
     ).toBe(true);
+    await recordClicks(page);
     const cdp = isChromium(page) ? await page.context().newCDPSession(page) : null;
     const tap = async (hold: number): Promise<void> => {
       if (cdp === null) return page.touchscreen.tap(spot.x, spot.y);
@@ -1436,6 +1471,72 @@ test.describe('a double-tap on the board as the run ends', () => {
     await tap(90);
     await page.waitForTimeout(400);
     await cdp?.detach();
+    const onPlay = (await recordedClicks(page)).filter((c) => c.onPlay);
+    expect(onPlay, 'exactly one pointer click reached Play again').toHaveLength(1);
+    if (isChromium(page)) expect(onPlay[0]!.detail, 'the second tap, counted as a repeat').toBe(2);
     await expectHeld(page, 'the double-tap on the board');
   });
+});
+
+/** A touch on `p` held `hold` ms, by CDP: the only way to hold a touch. */
+async function cdpTap(page: Page, cdp: CDPSession, p: Point, hold: number): Promise<void> {
+  await cdp.send('Input.dispatchTouchEvent', { type: 'touchStart', touchPoints: [p] });
+  await page.waitForTimeout(hold);
+  await cdp.send('Input.dispatchTouchEvent', { type: 'touchEnd', touchPoints: [] });
+}
+
+test.describe('a slow tap, a burst of taps or a long touch on the board as the run ends', () => {
+  test.use({ hasTouch: true, isMobile: true });
+
+  // A tap the dialog arrived during gives the page no `mousedown` and no `click`, so the guard
+  // times the arrival from its release; the system's count (`detail` above 1) holds a repeat for
+  // 2 s. Chromium only: Playwright holds a touch only through CDP.
+  const cases: {
+    name: string;
+    extra?: string;
+    taps: readonly { hold: number; after: number }[];
+  }[] = [
+    ...[450, 550, 800].map((hold) => ({
+      name: `a first tap held ${String(hold)} ms, then a second tap 135 ms after its release`,
+      taps: [
+        { hold, after: HELD_GAP },
+        { hold: 90, after: 400 },
+      ],
+    })),
+    {
+      name: 'a triple-tap burst, 250 ms apart',
+      taps: [
+        { hold: 90, after: 160 },
+        { hold: 90, after: 160 },
+        { hold: 90, after: 400 },
+      ],
+    },
+    {
+      name: 'a touch held 2.3 s with the dialog arriving 2.1 s in, then a second tap 135 ms after its release',
+      extra: '&endDelay=2100',
+      taps: [
+        { hold: 2300, after: HELD_GAP },
+        { hold: 90, after: 400 },
+      ],
+    },
+  ];
+  for (const c of cases) {
+    test(`at 844×390, ${c.name}: the dialog stays open, with no new run and no answer`, async ({
+      page,
+    }) => {
+      test.skip(!isChromium(page), 'a held touch needs CDP');
+      const spot = await endingOnBoard(page, { width: 844, height: 390 }, c.extra ?? '');
+      expect(
+        await page.evaluate(() => matchMedia('(pointer: coarse)').matches),
+        'a coarse pointer',
+      ).toBe(true);
+      const cdp = await page.context().newCDPSession(page);
+      for (const tap of c.taps) {
+        await cdpTap(page, cdp, spot, tap.hold);
+        await page.waitForTimeout(tap.after);
+      }
+      await cdp.detach();
+      await expectHeld(page, c.name);
+    });
+  }
 });
