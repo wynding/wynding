@@ -575,13 +575,21 @@ test.describe('#181 H3: the armed and the short Card, as painted', () => {
 test.describe('#181 H3: only a digit is painted in the corner', () => {
   // The corner was drawn for a digit. A letter ("W") or a function key ("F1") is wider, and on
   // the icon form's tile it lands on the art; every label but a digit is visually hidden, and
-  // stays the tail of the Card's name.
-  for (const [label, size, zoom] of [
-    ['640×560', { width: 640, height: 560 }, 100],
-    ['820×720', { width: 820, height: 720 }, 100],
-    ['360×640', { width: 360, height: 640 }, 200],
+  // stays the tail of the Card's name. A digit is painted there only on a tile wide enough for
+  // it (`ui.css`): DejaVu Sans, CI's Linux font, draws it 0.636em wide, and it painted over the
+  // art at 360×640 at 200% and in the two 57px columns of 486×800 at 100%, where the macOS
+  // system font cleared it by under 0.4px; at 320×568 at 175% it clashed in both. Each size
+  // says whether Cards 4-9 paint their digits, so the rule can neither paint one over the art
+  // nor hide one that fits.
+  for (const [label, size, zoom, digits] of [
+    ['640×560', { width: 640, height: 560 }, 100, 'painted'],
+    ['820×720', { width: 820, height: 720 }, 100, 'painted'],
+    ['360×640', { width: 360, height: 640 }, 175, 'painted'],
+    ['360×640', { width: 360, height: 640 }, 200, 'hidden'],
+    ['320×568', { width: 320, height: 568 }, 175, 'hidden'],
+    ['486×800', { width: 486, height: 800 }, 100, 'hidden'],
   ] as const) {
-    test(`${label} at ${zoom}% text: a letter or function-key label never paints over its Card, and stays in its name`, async ({
+    test(`${label} at ${zoom}% text: a letter or function-key label never paints over its Card, and stays in its name; the digits are ${digits}`, async ({
       page,
     }) => {
       await gotoAt(page, size);
@@ -601,6 +609,15 @@ test.describe('#181 H3: only a digit is painted in the corner', () => {
       await expect(cards.nth(0)).toHaveAccessibleName('Basic Tower Cost: 5 F1');
       await expect(cards.nth(1)).toHaveAccessibleName('Slow Tower Cost: 8 W');
       await expect(cards.nth(2)).toHaveAccessibleName('Splash Tower Cost: 12 M');
+      // Cards 4-9 keep their digits, so a digit that is not painted was hidden by its tile.
+      const hotkeys = page.locator('.wy-card-hotkey');
+      await expect(hotkeys).toHaveText(['F1', 'W', 'M', '4', '5', '6', '7', '8', '9']);
+      const digitsPainted = await hotkeys.evaluateAll((hs) =>
+        hs.slice(3).map((h) => h.getBoundingClientRect().width > 1),
+      );
+      expect(digitsPainted, `Cards 4-9's digits are ${digits}`).toEqual(
+        Array<boolean>(6).fill(digits === 'painted'),
+      );
       expect(await page.evaluate(paintedClashes)).toEqual([]);
     });
   }
