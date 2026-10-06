@@ -87,6 +87,8 @@
 // rounded each side to the layout unit separately, and moved the control's width by 1/64px at
 // 110–130% text.
 
+import { ceil64, px } from './layout-units';
+
 /** The class `ui.css` keys the Standard Dock's scroll form on. */
 export const DOCK_SCROLL_CLASS = 'wy-dock--scroll';
 
@@ -126,14 +128,6 @@ export interface DockReserveTargets {
 export interface DockRow {
   readonly top: number;
   readonly bottom: number;
-}
-
-/** Rounds `v` UP to the layout engine's 1/64px unit — never past it. A bound or reserve
- *  rounded any coarser takes board height the floor was promised; one rounded down leaves a
- *  sliver of cell under the Dock. (The `1e-6` absorbs float noise in a value that is already
- *  a whole number of units, so noise never costs a unit.) Exported for its unit tests. */
-export function ceil64(v: number): number {
-  return Math.ceil(v * 64 - 1e-6) / 64;
 }
 
 /** Remove every property and class this module owns (Compact, and teardown). */
@@ -260,11 +254,6 @@ export function syncDockDial(primary: HTMLElement | undefined): void {
   if (primary.classList.contains(DIAL_ROOM_CLASS) !== fits) {
     primary.classList.toggle(DIAL_ROOM_CLASS, fits);
   }
-}
-
-function px(value: string | undefined): number {
-  const n = parseFloat(value ?? '');
-  return Number.isFinite(n) ? n : 0;
 }
 
 /** The Dock's visible controls grouped into their wrapped rows, top to bottom. A control is in

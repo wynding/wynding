@@ -3358,6 +3358,25 @@ describe('overlay — the wave strip (#181 L1)', () => {
     );
   });
 
+  it("the locale sentinel's glance text is exactly what the glance writes — an unchanged strip is never rebuilt, so a scrolled strip keeps its place", () => {
+    // `previewEntryGlanceText` and `buildEntryGlance` share `glanceParts`; if they drift, the
+    // memo guard sees a mismatch on every HUD refresh and rebuilds the list.
+    const shapes: ReadonlyArray<readonly [string, readonly PreviewEntryVM[], string]> = [
+      ['a single entry with notes', [entry({ armor: 2 })], '×10Creeparmor −2 direct'],
+      ['a single entry without notes', [entry()], '×10Creep'],
+      ['a multi-entry wave', [entry({ count: 8 }), entry({ creepId: 'fast', count: 6 })], '×8'],
+    ];
+    for (const [label, entries, glanceText] of shapes) {
+      const { overlay, shell } = setup();
+      show(overlay, entries);
+      const row = shell.preview.list.firstElementChild!;
+      const glance = row.querySelector('.wy-preview-glance')!;
+      expect(glance.textContent, label).toBe(glanceText);
+      show(overlay, entries);
+      expect(shell.preview.list.firstElementChild, label).toBe(row);
+    }
+  });
+
   it("every icon executes the render package's own silhouette for its creep, with the airborne chevron only on air", () => {
     const { overlay, shell } = setup();
     const ids = Object.keys(ruleset.creepById);

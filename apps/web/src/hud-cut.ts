@@ -25,6 +25,8 @@
 // its `max-height`. Standard owns none of it — its chips are a row with its own cap — so the
 // property is cleared there.
 
+import { ceil64, px } from './layout-units';
+
 /** The custom property the Compact stylesheet spends as the chips column's `max-height`. */
 export const HUD_CUT_PROP = '--wy-hud-cut';
 
@@ -94,14 +96,6 @@ function paintedParts(item: HTMLElement, toContent: (y: number) => number): Pain
     for (const r of range.getClientRects()) add(r);
   }
   return parts;
-}
-
-/** Rounds UP to the 1/64px layout unit, so the last whole item is never clipped by a fraction. */
-const ceil64 = (v: number): number => Math.ceil(v * 64 - 1e-6) / 64;
-
-function px(value: string | undefined): number {
-  const n = parseFloat(value ?? '');
-  return Number.isFinite(n) ? n : 0;
 }
 
 /** Remove the cut (Standard, and teardown). */

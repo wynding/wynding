@@ -4,7 +4,6 @@
 // reach inside the bounded scrollport) is `dock-overlap.spec.ts`'s.
 import { afterEach, describe, it, expect, vi } from 'vitest';
 import {
-  ceil64,
   CELL_FLOOR_TOKEN,
   chooseDockRows,
   clearDockReserve,
@@ -24,6 +23,7 @@ import {
   type DialGeometry,
   type DockReserveTargets,
 } from './dock-reserve';
+import { ceil64 } from './layout-units';
 
 function rect(top: number, height: number): DOMRect {
   return {
@@ -214,14 +214,6 @@ describe('chooseDockRows (#152)', () => {
       shown: 0,
       height: 0,
     });
-  });
-});
-
-describe('ceil64 (#152)', () => {
-  it('rounds UP to the 1/64px layout unit, and no further', () => {
-    expect(ceil64(52.4)).toBe(52.40625);
-    expect(ceil64(51.203125)).toBe(51.203125); // already a whole unit
-    expect(ceil64(52 + 1e-9)).toBe(52); // float noise in a whole unit costs nothing
   });
 });
 
