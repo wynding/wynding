@@ -38,6 +38,7 @@ import {
   type DevicePixelReport,
 } from './device-px';
 import { layerDepth } from './layers';
+import { polygonCircles } from './circle-path';
 import type { RenderVM, RenderOverlay, RenderHandle } from './types';
 
 /** Board size in cells — the scene needs this to build its projection (RenderVM carries
@@ -288,8 +289,12 @@ export function mount(el: HTMLElement, geometry: BoardGeometry): RenderHandle {
   let targets: BoardTargets | null = null;
   game.events.once(Phaser.Core.Events.READY, () => {
     const scene = sceneOf();
-    // Each live layer's depth comes from the name it was made under.
-    const layers = createLiveLayers((layer) => scene.add.graphics().setDepth(layerDepth(layer)));
+    // Each live layer's depth comes from the name it was made under. Its circles are polygons
+    // sized to their radius at the current dpr, not Phaser's fixed 100 sides
+    // (`circle-path.ts`).
+    const layers = createLiveLayers((layer) =>
+      polygonCircles(scene.add.graphics().setDepth(layerDepth(layer)), () => projection.dpr),
+    );
     const board = scene.add
       .image(0, 0, '__DEFAULT')
       .setOrigin(0, 0)
