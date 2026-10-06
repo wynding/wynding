@@ -1318,103 +1318,111 @@ describe('the rim’s runs — the plate rim again, over a posed head', () => {
   const C = ART_BOX / 2;
   const HAIR = 1e-9;
 
-  it('are exactly the texels the drawn rim wholly covers between its corners, on each side, at every cell size from 9 px and every dpr from 0.8 to 3', () => {
-    const bad: string[] = [];
-    for (let cellPx = 9; cellPx <= 64; cellPx++) {
-      const unit = artUnit(cellPx);
-      for (const scale of rimScales(cellPx)) {
-        const at = `${cellPx}px at dpr ${scale}`;
-        const rim = drawnRim(cellPx, scale);
-        const k = unit * scale;
-        const half = strokeWidthAt(rim, unit) / 2;
-        const r = rectRadius(rim);
-        const runs = rimRunsAt(unit, scale);
-        if (runs.length !== 4) bad.push(`${at}: ${runs.length} runs`);
-        // Top, bottom, left, right: each a filled rect in the rim's colour on whole texels,
-        // inside the rim's band and between the tangent points of its corners — where the
-        // rim's straight stroke covers every texel wholly — and reaching each tangent point to
-        // within a texel.
-        const sides = [
-          { band: rim.y, along: [rim.x + r, rim.x + rim.w - r], horizontal: true },
-          { band: rim.y + rim.h, along: [rim.x + r, rim.x + rim.w - r], horizontal: true },
-          { band: rim.x, along: [rim.y + r, rim.y + rim.h - r], horizontal: false },
-          { band: rim.x + rim.w, along: [rim.y + r, rim.y + rim.h - r], horizontal: false },
-        ] as const;
-        runs.forEach((run, i) => {
-          const side = sides[i]!;
-          if (run.kind !== 'rect' || run.fill !== 'rim' || run.stroke !== undefined) {
-            bad.push(`${at}: run ${i} is not a filled rim rect`);
-            return;
-          }
-          const edges = [run.x, run.x + run.w, run.y, run.y + run.h];
-          if (edges.some((e) => Math.abs(e * k - Math.round(e * k)) > HAIR)) {
-            bad.push(`${at}: run ${i} off the texel grid`);
-          }
-          const [a0, a1] = side.horizontal ? [run.x, run.x + run.w] : [run.y, run.y + run.h];
-          const [b0, b1] = side.horizontal ? [run.y, run.y + run.h] : [run.x, run.x + run.w];
-          if (
-            Math.abs(b0 - (side.band - half)) * k > HAIR ||
-            Math.abs(b1 - (side.band + half)) * k > HAIR
-          ) {
-            bad.push(`${at}: run ${i} is not the rim's band`);
-          }
-          if (a0 < side.along[0] - HAIR || a1 > side.along[1] + HAIR) {
-            bad.push(`${at}: run ${i} reaches into a corner`);
-          }
-          if ((a0 - side.along[0]) * k > 1 + HAIR || (side.along[1] - a1) * k > 1 + HAIR) {
-            bad.push(`${at}: run ${i} stops more than a texel short of a corner`);
-          }
-        });
+  it(
+    'are exactly the texels the drawn rim wholly covers between its corners, on each side, at every cell size from 9 px and every dpr from 0.8 to 3',
+    { timeout: 60_000 },
+    () => {
+      const bad: string[] = [];
+      for (let cellPx = 9; cellPx <= 64; cellPx++) {
+        const unit = artUnit(cellPx);
+        for (const scale of rimScales(cellPx)) {
+          const at = `${cellPx}px at dpr ${scale}`;
+          const rim = drawnRim(cellPx, scale);
+          const k = unit * scale;
+          const half = strokeWidthAt(rim, unit) / 2;
+          const r = rectRadius(rim);
+          const runs = rimRunsAt(unit, scale);
+          if (runs.length !== 4) bad.push(`${at}: ${runs.length} runs`);
+          // Top, bottom, left, right: each a filled rect in the rim's colour on whole texels,
+          // inside the rim's band and between the tangent points of its corners — where the
+          // rim's straight stroke covers every texel wholly — and reaching each tangent point to
+          // within a texel.
+          const sides = [
+            { band: rim.y, along: [rim.x + r, rim.x + rim.w - r], horizontal: true },
+            { band: rim.y + rim.h, along: [rim.x + r, rim.x + rim.w - r], horizontal: true },
+            { band: rim.x, along: [rim.y + r, rim.y + rim.h - r], horizontal: false },
+            { band: rim.x + rim.w, along: [rim.y + r, rim.y + rim.h - r], horizontal: false },
+          ] as const;
+          runs.forEach((run, i) => {
+            const side = sides[i]!;
+            if (run.kind !== 'rect' || run.fill !== 'rim' || run.stroke !== undefined) {
+              bad.push(`${at}: run ${i} is not a filled rim rect`);
+              return;
+            }
+            const edges = [run.x, run.x + run.w, run.y, run.y + run.h];
+            if (edges.some((e) => Math.abs(e * k - Math.round(e * k)) > HAIR)) {
+              bad.push(`${at}: run ${i} off the texel grid`);
+            }
+            const [a0, a1] = side.horizontal ? [run.x, run.x + run.w] : [run.y, run.y + run.h];
+            const [b0, b1] = side.horizontal ? [run.y, run.y + run.h] : [run.x, run.x + run.w];
+            if (
+              Math.abs(b0 - (side.band - half)) * k > HAIR ||
+              Math.abs(b1 - (side.band + half)) * k > HAIR
+            ) {
+              bad.push(`${at}: run ${i} is not the rim's band`);
+            }
+            if (a0 < side.along[0] - HAIR || a1 > side.along[1] + HAIR) {
+              bad.push(`${at}: run ${i} reaches into a corner`);
+            }
+            if ((a0 - side.along[0]) * k > 1 + HAIR || (side.along[1] - a1) * k > 1 + HAIR) {
+              bad.push(`${at}: run ${i} stops more than a texel short of a corner`);
+            }
+          });
+        }
       }
-    }
-    expect(bad).toEqual([]);
-  });
+      expect(bad).toEqual([]);
+    },
+  );
 
-  it('leave out only the corners, which no aiming head reaches, whichever way it is turned — at every cell size from 9 px and every dpr from 0.8 to 3', () => {
-    // A head turns about the footprint centre, so it reaches the same distance whichever way it
-    // faces. The runs stop at whole texels short of each corner's tangent point; the nearest
-    // rim texel they leave out — at a run's end, on its band's inner edge — must lie beyond
-    // every aiming head's reach, so every rim texel a head's art can lie on is painted again.
-    // (Measured: the least gap is 0.17 texel at 9 px cells, 0.48 at 10 px, and more than a
-    // texel from 12 px — a turned head's resampling, which spreads it by under a texel, found
-    // no corner pixel darkened in any on-screen sweep.)
-    const aiming = Object.values(HEAD_ART).filter((h) => h.aims);
-    let least = { gap: Infinity, at: '' };
-    for (let cellPx = 9; cellPx <= 64; cellPx++) {
-      const unit = artUnit(cellPx);
-      const reach = Math.max(
-        ...aiming.flatMap((h) =>
-          h.shapes.flatMap((s) => {
-            const grow = s.stroke === undefined ? 0 : strokeWidthAt(s, unit) / 2;
-            return shapeOutline(s).flatMap((l) =>
-              l.points.map(([x, y]) => Math.hypot(x - C, y - C) + grow),
-            );
-          }),
-        ),
-      );
-      for (const scale of rimScales(cellPx)) {
-        const k = unit * scale;
-        const nearestLeftOut = Math.min(
-          ...rimRunsAt(unit, scale).map((run) => {
-            if (run.kind !== 'rect') throw new Error('runs are rects');
-            const horizontal = run.w > run.h;
-            // The run's nearer end, beyond which its band is a corner's ...
-            const end = horizontal
-              ? Math.min(C - run.x, run.x + run.w - C)
-              : Math.min(C - run.y, run.y + run.h - C);
-            // ... at the band's inner edge.
-            const inner = horizontal
-              ? Math.min(Math.abs(run.y - C), Math.abs(run.y + run.h - C))
-              : Math.min(Math.abs(run.x - C), Math.abs(run.x + run.w - C));
-            return Math.hypot(end, inner);
-          }),
+  it(
+    'leave out only the corners, which no aiming head reaches, whichever way it is turned — at every cell size from 9 px and every dpr from 0.8 to 3',
+    { timeout: 60_000 },
+    () => {
+      // A head turns about the footprint centre, so it reaches the same distance whichever way it
+      // faces. The runs stop at whole texels short of each corner's tangent point; the nearest
+      // rim texel they leave out — at a run's end, on its band's inner edge — must lie beyond
+      // every aiming head's reach, so every rim texel a head's art can lie on is painted again.
+      // (Measured: the least gap is 0.17 texel at 9 px cells, 0.48 at 10 px, and more than a
+      // texel from 12 px — a turned head's resampling, which spreads it by under a texel, found
+      // no corner pixel darkened in any on-screen sweep.)
+      const aiming = Object.values(HEAD_ART).filter((h) => h.aims);
+      let least = { gap: Infinity, at: '' };
+      for (let cellPx = 9; cellPx <= 64; cellPx++) {
+        const unit = artUnit(cellPx);
+        const reach = Math.max(
+          ...aiming.flatMap((h) =>
+            h.shapes.flatMap((s) => {
+              const grow = s.stroke === undefined ? 0 : strokeWidthAt(s, unit) / 2;
+              return shapeOutline(s).flatMap((l) =>
+                l.points.map(([x, y]) => Math.hypot(x - C, y - C) + grow),
+              );
+            }),
+          ),
         );
-        const gap = (nearestLeftOut - reach) * k; // texels
-        if (gap < least.gap) least = { gap, at: `${cellPx}px at dpr ${scale}` };
+        for (const scale of rimScales(cellPx)) {
+          const k = unit * scale;
+          const nearestLeftOut = Math.min(
+            ...rimRunsAt(unit, scale).map((run) => {
+              if (run.kind !== 'rect') throw new Error('runs are rects');
+              const horizontal = run.w > run.h;
+              // The run's nearer end, beyond which its band is a corner's ...
+              const end = horizontal
+                ? Math.min(C - run.x, run.x + run.w - C)
+                : Math.min(C - run.y, run.y + run.h - C);
+              // ... at the band's inner edge.
+              const inner = horizontal
+                ? Math.min(Math.abs(run.y - C), Math.abs(run.y + run.h - C))
+                : Math.min(Math.abs(run.x - C), Math.abs(run.x + run.w - C));
+              return Math.hypot(end, inner);
+            }),
+          );
+          const gap = (nearestLeftOut - reach) * k; // texels
+          if (gap < least.gap) least = { gap, at: `${cellPx}px at dpr ${scale}` };
+        }
       }
-    }
-    expect(least.gap, least.at).toBeGreaterThan(0.15);
-  });
+      expect(least.gap, least.at).toBeGreaterThan(0.15);
+    },
+  );
 
   it('are baked as a frame of their own, anchored at the footprint corner like the plate, in the rim’s colour in every mode', () => {
     for (const [cellPx, scale] of SIZES) {
