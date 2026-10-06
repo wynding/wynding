@@ -259,11 +259,13 @@ export function towerArtFit(sizePx: number): { x: number; y: number; footprintPx
  * in past the design's place, where the footprint ends inside a pixel. The glow's colour is
  * gated against the plate, never the rim, and a ring reaching into the rim's texels would
  * blend the footprint's edge itself. So the cue ring is drawn as designed wherever it fits
- * and otherwise shrinks about its centre just enough (only at 9 and 10 px cells, to 0.91 of
- * its radius at the least, where every head still leaves 0.9 of it showing); the fainter
- * halo shrinks too while it stays clear of the cue (at 9 to 15 px cells, at some dprs), and
- * is left out where it cannot (at 9 to 12 px). Each ring may meet the rim's inner edge — a
- * texel's — never cross it.
+ * and otherwise shrinks about its centre just enough (from 9 px cells, at dpr 0.8 to 3: only
+ * at 9 and 10 px cells, to 0.91 of its radius at the least, where every head still leaves
+ * 0.9 of it showing); the fainter halo shrinks too while it stays clear of the cue (at 9 to
+ * 15 px cells, at some dprs), and is left out where it cannot (at 9 to 12 px). Below 9 px
+ * the cue shrinks further: to 0.85 of its radius at 8 px, 0.77 at 7 px and 0.30 at 4 px,
+ * and none is drawn at 3 px or below. Each ring may meet the rim's inner edge — a texel's —
+ * never cross it.
  */
 export function boostArtAt(unit: number, scale: number): readonly ArtShape[] {
   const rim = alignArtToTexels(PLATE_ART, unit, scale, [0, 0], ART_FOOTPRINT).find(
