@@ -378,6 +378,7 @@ export function createResultsPanel(doc: Document, dialog: HTMLElement): ResultsP
       body.scrollTop = 0;
       if (wholeInView(playAgain)) {
         playAgain.focus();
+        guard.holdKeys(playAgain);
       } else {
         // Play again is below the fold (a short window at heavy text zoom), and focusing it
         // would scroll the outcome out of view. The ARIA dialog pattern's answer: focus a static

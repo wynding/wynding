@@ -526,3 +526,140 @@ describe('press guard — the keyboard (#181 H2)', () => {
     expect(h.key(h.a, 'Enter').down.defaultPrevented, 'at 500 ms').toBe(false);
   });
 });
+
+describe('press guard — QC round 4 (#181 H2)', () => {
+  const stamped = <E extends Event>(event: E, at: number): E => {
+    Object.defineProperty(event, 'timeStamp', { value: at });
+    return event;
+  };
+  /** The three events of a press, each at its own time: a held press's click comes at its release,
+   *  and a tap's `mousedown` and `click` both do. */
+  const raw = (
+    el: Element,
+    at: { pointer: number; down: number; click: number },
+    detail = 1,
+    pointerType = 'mouse',
+  ) => {
+    const init = { bubbles: true, cancelable: true, clientX: 100, clientY: 100 };
+    const pointer = stamped(new MouseEvent('pointerdown', { ...init, detail: 0 }), at.pointer);
+    Object.defineProperty(pointer, 'pointerType', { value: pointerType });
+    el.dispatchEvent(pointer);
+    el.dispatchEvent(stamped(new MouseEvent('mousedown', { ...init, detail }), at.down));
+    el.dispatchEvent(stamped(new MouseEvent('click', { ...init, detail }), at.click));
+  };
+  const nowIs = (ms: number) =>
+    vi.spyOn(document.defaultView!.performance, 'now').mockReturnValue(ms);
+
+  it('A: the gesture is timed from a press’s release, so a press held 450–550 ms keeps the whole window', () => {
+    for (const heldFor of [450, 500, 550]) {
+      const h = fixture();
+      raw(h.a, { pointer: 0, down: 0, click: heldFor });
+      h.shift(h.a);
+      h.press(h.b, heldFor + 150);
+      expect(h.pressed, `held ${heldFor} ms, then a press 150 ms after its release`).toEqual(['A']);
+    }
+    const h = fixture();
+    raw(h.a, { pointer: 0, down: 0, click: 550 });
+    h.shift(h.a);
+    h.press(h.b, 550 + PRESS_GUARD_WINDOW_MS);
+    expect(h.pressed, 'the window closes 500 ms after the release').toEqual(['A', 'B']);
+  });
+
+  it('A: a held press does not restart the window', () => {
+    const h = fixture();
+    raw(h.a, { pointer: 0, down: 0, click: 100 });
+    h.shift(h.a);
+    h.press(h.b, 200);
+    h.press(h.b, 600);
+    expect(
+      h.pressed,
+      'the held press at 200 ms restarts nothing: 600 ms is past A’s window',
+    ).toEqual(['A', 'B']);
+  });
+
+  it('B: a tap on the board as the dialog arrives, then a second tap on a panel control, is held', () => {
+    const h = fixture();
+    nowIs(20);
+    const tap = stamped(
+      new MouseEvent('pointerdown', { bubbles: true, clientX: 100, clientY: 100 }),
+      0,
+    );
+    Object.defineProperty(tap, 'pointerType', { value: 'touch' });
+    h.board.dispatchEvent(tap); // no mousedown or click: the dialog arrived over it
+    h.guard.arm();
+    raw(h.b, { pointer: 180, down: 260, click: 260 }, 2, 'touch');
+    expect(h.pressed).toEqual([]);
+  });
+
+  it('B: two single clicks at one spot, the dialog arriving 80 ms before the second, hold the second', () => {
+    const h = fixture();
+    raw(h.board, { pointer: 0, down: 0, click: 90 });
+    nowIs(570);
+    h.guard.arm();
+    raw(h.b, { pointer: 650, down: 650, click: 650 });
+    expect(h.pressed).toEqual([]);
+  });
+
+  it('B: a deliberate press 600 ms after the arrival, a press far from the spot, and one after a stale press all pass', () => {
+    const late = fixture();
+    raw(late.board, { pointer: 0, down: 0, click: 90 });
+    nowIs(100);
+    late.guard.arm();
+    raw(late.b, { pointer: 700, down: 700, click: 700 });
+    expect(late.pressed, '600 ms after the arrival').toEqual(['B']);
+    const far = fixture();
+    raw(far.board, { pointer: 0, down: 0, click: 90 });
+    nowIs(100);
+    far.guard.arm();
+    far.press(far.b, 200, { x: 160, y: 100 });
+    expect(far.pressed, '60px from the spot').toEqual(['B']);
+    const stale = fixture();
+    raw(stale.board, { pointer: 0, down: 0, click: 90 });
+    nowIs(PRESS_GUARD_REPEAT_MS + 100);
+    stale.guard.arm();
+    stale.press(stale.b, PRESS_GUARD_REPEAT_MS + 150);
+    expect(stale.pressed, 'a press over 2 s old is no one’s').toEqual(['B']);
+  });
+
+  it('D: a keyboard activation that moves focus to another panel control gives it a 500 ms key hold', async () => {
+    const h = fixture();
+    const now = nowIs(1000);
+    h.a.addEventListener('click', () => h.b.focus());
+    h.a.focus();
+    h.clickOnly(h.a, 1000); // Enter on A: focus moves to B
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    now.mockReturnValue(1499);
+    const enter = h.key(h.b, 'Enter');
+    expect(enter.down.defaultPrevented, 'Enter on B, 499 ms on').toBe(true);
+    expect(enter.up.defaultPrevented).toBe(true);
+    now.mockReturnValue(1500);
+    expect(h.key(h.b, 'Enter').down.defaultPrevented, 'at 500 ms').toBe(false);
+  });
+
+  it('D: the hold covers a radio, which takes Space, and not a keyboard activation that moves focus nowhere', async () => {
+    const h = fixture();
+    const now = nowIs(1000);
+    h.a.addEventListener('click', () => h.radio.focus());
+    h.a.focus();
+    h.clickOnly(h.a, 1000);
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    now.mockReturnValue(1100);
+    expect(h.key(h.radio, ' ').down.defaultPrevented, 'Space on the radio').toBe(true);
+    const still = fixture();
+    nowIs(2000);
+    still.b.focus();
+    still.clickOnly(still.b, 2000); // focus stays on B
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(still.key(still.b, 'Enter').down.defaultPrevented, 'focus stayed: no hold').toBe(false);
+    const outside = fixture();
+    nowIs(3000);
+    outside.a.addEventListener('click', () => outside.outside.focus());
+    outside.a.focus();
+    outside.clickOnly(outside.a, 3000);
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(
+      outside.key(outside.outside, 'Enter', false).down.defaultPrevented,
+      'focus left the panel: not the panel’s to hold',
+    ).toBe(false);
+  });
+});

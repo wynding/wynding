@@ -2577,6 +2577,24 @@ describe('overlay — accessibility semantics', () => {
     expect(shell.root.hasAttribute('inert')).toBe(false); // restored on close
   });
 
+  it('the dialog’s own first focus holds Play again’s Enter and Space for a moment: a double press on the board as the run ends starts no run (#181 H2)', () => {
+    const { overlay } = setup();
+    const now = vi.spyOn(document.defaultView!.performance, 'now').mockReturnValue(7000);
+    overlay.showResults(hud({ won: true }), runStats());
+    const playAgain = overlay.resultsEl.querySelector<HTMLButtonElement>('.wy-primary')!;
+    expect(document.activeElement).toBe(playAgain);
+    const press = (key: string): KeyboardEvent => {
+      const event = new KeyboardEvent('keydown', { key, bubbles: true, cancelable: true });
+      playAgain.dispatchEvent(event);
+      return event;
+    };
+    now.mockReturnValue(7499);
+    expect(press('Enter').defaultPrevented, 'Enter, 499 ms after the dialog took focus').toBe(true);
+    expect(press(' ').defaultPrevented, 'Space').toBe(true);
+    now.mockReturnValue(7500);
+    expect(press('Enter').defaultPrevented, 'at 500 ms Play again takes its key').toBe(false);
+  });
+
   it('opens on the HEADING where Play again is not wholly in view at the top of the panel (#181 H2)', () => {
     // A short window at heavy text zoom puts Play again below the panel's fold, where focusing
     // it would scroll the outcome out of view: the ARIA dialog pattern focuses a static element

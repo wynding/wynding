@@ -6,7 +6,8 @@
 // scroll position and carries everything above down under the pointer), when opening the survey
 // brings its first question into view, and when the dialog itself arrives under a pointer that was
 // pressing the board. A double-click's second press, a second tap or a quick repeat then lands on
-// Play again (a new run), a survey answer or a toggle.
+// Play again (a new run), a survey answer or a toggle. A double Enter or Space does the same
+// through focus, which moves to another control between the two presses.
 //
 // The guard holds a pointer press only when the layout really moved under a pointer that stayed
 // put. A press is held when ALL of these hold:
@@ -24,9 +25,23 @@
 // A held press is held at `mousedown`, so it never moves focus, and its click is swallowed in the
 // capture phase (`preventDefault` and `stopImmediatePropagation`): no handler runs and no default
 // action, so a label forwards nothing to its radio and a radio does not check. The click takes its
-// `mousedown`'s verdict, so a press stays held to its release however long it is pressed. Presses
-// are recorded across the whole document, so a press on the board just before the dialog opens is
-// the one the dialog's arrival is measured against.
+// `mousedown`'s verdict, so a press stays held to its release however long it is pressed.
+//
+// Four behaviours carry the rest:
+//   - Timed from the release. A press's effect lands at its click, so the gesture is measured
+//     from there: a press held down a long time keeps the whole window after its release.
+//   - The dialog's arrival. Presses are recorded across the whole document (`pointerdown`, since
+//     a tap's `mousedown` and `click` come only at its release, and none come where the dialog
+//     arrived over the board meanwhile). `arm` notes the arrival, and the spot of a press under 2 s
+//     old; a press on a panel control within the window of the arrival, inside the slop of that
+//     spot, is held: it was begun before the dialog was there.
+//   - Keys at the first focus. `holdKeys(el)` gives `el` no Enter or Space for 500 ms: Play again
+//     at the dialog's first focus (a second Enter or Space on the board as the run ends), and after
+//     an accepted Send.
+//   - Keys after a keyboard activation. One (`detail` 0) that moves focus to another panel control
+//     gives that control the same hold (Space twice on Give feedback would check the first rating;
+//     Enter twice on Not now would reopen the survey). The hold covers any control, a radio
+//     included, and is checked before the auto-repeat rule.
 //
 // What always passes: a keyboard activation (its click has `detail` 0, as a script's `click()`
 // does), a repeat on the same control (a double-click on Run data opens and closes it), and a
@@ -37,10 +52,8 @@
 // engine dispatches it from (jsdom's comes from (0, 0)); a press on a control's own content (Run
 // data's text) is simply that control's press.
 //
-// The keyboard: an auto-repeated Enter or Space on a panel button activates nothing (the key's own
-// press and release still do, once), and a control that focus has just been moved to takes no
-// Enter or Space for 500 ms (`holdKeys`: Play again after an accepted Send, where a second Enter
-// meant for Send would otherwise start a new run).
+// An auto-repeated Enter or Space on a panel button activates nothing (the key's own press and
+// release still do, once).
 
 /** The double-click window: a press this soon after the last one belongs to its gesture. */
 export const PRESS_GUARD_WINDOW_MS = 500;
@@ -141,6 +154,15 @@ export function guardPresses(root: HTMLElement): PressGuard {
   /** A label press that passed: its label forwards a click to this control next. */
   let forwardTo: Element | null = null;
   let keyHold: { readonly el: Element; readonly until: number } | null = null;
+  /** The last pointer to go down anywhere in the document, from its `pointerdown`: a tap's
+   *  `mousedown` and `click` come only at its release, and none come where the dialog arrived
+   *  over the board meanwhile. */
+  let lastDown: { readonly x: number; readonly y: number; readonly at: number } | null = null;
+  /** When the dialog last arrived, and the pointer press it arrived after. */
+  let arrival: {
+    readonly at: number;
+    readonly from: { readonly x: number; readonly y: number };
+  } | null = null;
   /** A held key press, whose release is held too. */
   let heldKey: string | null = null;
 
@@ -149,14 +171,24 @@ export function guardPresses(root: HTMLElement): PressGuard {
     const target = event.target as Element | null;
     if (target === null || typeof target.closest !== 'function') return false;
     const control = controlOf(target);
+    const slop =
+      type === 'touch' || coarse?.matches === true
+        ? PRESS_GUARD_TOUCH_SLOP_PX
+        : PRESS_GUARD_SLOP_PX;
+    // The dialog has just arrived under a pointer that was pressing: a press at that spot this
+    // soon after it was begun before the dialog was there.
+    if (
+      arrival !== null &&
+      root.contains(control) &&
+      event.timeStamp - arrival.at < PRESS_GUARD_WINDOW_MS &&
+      Math.hypot(event.clientX - arrival.from.x, event.clientY - arrival.from.y) <= slop
+    ) {
+      return true;
+    }
     if (last !== null && control !== last.control && root.contains(control)) {
       const gap = event.timeStamp - last.at;
       const inGesture =
         gap < PRESS_GUARD_WINDOW_MS || (event.detail > 1 && gap < PRESS_GUARD_REPEAT_MS);
-      const slop =
-        type === 'touch' || coarse?.matches === true
-          ? PRESS_GUARD_TOUCH_SLOP_PX
-          : PRESS_GUARD_SLOP_PX;
       const near = Math.hypot(event.clientX - last.x, event.clientY - last.y) <= slop;
       if (
         inGesture &&
@@ -180,7 +212,9 @@ export function guardPresses(root: HTMLElement): PressGuard {
   }
 
   const onPointerDown = (event: Event): void => {
-    pointerType = (event as PointerEvent).pointerType ?? '';
+    const e = event as PointerEvent;
+    pointerType = e.pointerType ?? '';
+    lastDown = { x: e.clientX, y: e.clientY, at: e.timeStamp };
   };
 
   const onMouseDown = (event: MouseEvent): void => {
@@ -203,7 +237,20 @@ export function guardPresses(root: HTMLElement): PressGuard {
       if (event.target === to) return;
     }
     // A keyboard activation (or a script's click) is never a misplaced pointer.
-    if (event.detail === 0) return;
+    if (event.detail === 0) {
+      // But where it moves focus to another control in the panel (Not now back to Give feedback,
+      // Give feedback to the first question), a second press of the same key, meant for the
+      // control it was on, would land on the one focus was moved to: that control takes no Enter
+      // or Space for a moment, as Play again does after an accepted Send.
+      const from = doc.activeElement;
+      view?.setTimeout(() => {
+        const to = doc.activeElement;
+        if (to !== null && to !== from && root.contains(to)) {
+          keyHold = { el: to, until: (view?.performance.now() ?? 0) + PRESS_GUARD_KEY_HOLD_MS };
+        }
+      }, 0);
+      return;
+    }
     const down = pending;
     pending = null;
     // The click of a press whose `mousedown` was judged takes its verdict. Its target is that
@@ -223,6 +270,9 @@ export function guardPresses(root: HTMLElement): PressGuard {
       event.stopImmediatePropagation();
       return;
     }
+    // The gesture runs from the press's RELEASE: its click is when what it does moves the
+    // layout, so a press held down a long time keeps the whole window after it.
+    if (ofDown && last !== null) last = { ...last, at: event.timeStamp };
     const control = controlOf(event.target);
     if (control !== null && target !== null && control !== target && !control.contains(target)) {
       forwardTo = control;
@@ -231,6 +281,17 @@ export function guardPresses(root: HTMLElement): PressGuard {
 
   const onKeyDown = (event: KeyboardEvent): void => {
     if (event.key !== 'Enter' && event.key !== ' ') return;
+    // A control focus has just been moved to, button or not (a radio takes Space).
+    if (
+      keyHold !== null &&
+      event.target === keyHold.el &&
+      (view?.performance.now() ?? 0) < keyHold.until
+    ) {
+      heldKey = event.key;
+      event.preventDefault();
+      event.stopImmediatePropagation();
+      return;
+    }
     const button = (event.target as Element | null)?.closest?.('button') ?? null;
     // Listening on `root`, this hears only keys pressed inside the panel.
     if (button === null) return;
@@ -263,7 +324,14 @@ export function guardPresses(root: HTMLElement): PressGuard {
   root.addEventListener('keydown', onKeyDown, true);
   root.addEventListener('keyup', onKeyUp, true);
   return {
-    arm: (): void => void arrivals++,
+    arm: (): void => {
+      arrivals++;
+      const now = view?.performance.now() ?? 0;
+      arrival =
+        lastDown !== null && now - lastDown.at < PRESS_GUARD_REPEAT_MS
+          ? { at: now, from: lastDown }
+          : null;
+    },
     holdKeys: (el: Element): void => {
       keyHold = { el, until: (view?.performance.now() ?? 0) + PRESS_GUARD_KEY_HOLD_MS };
     },

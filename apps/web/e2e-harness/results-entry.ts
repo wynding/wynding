@@ -28,6 +28,8 @@
 // to switch to the keyboard while a Send is in flight. `&endOnPress=1` stops the run one tick
 // short of its end and plays that tick on the page's first press, so the dialog opens on the next
 // frame under a pointer that was pressing the board: what the press guard's arming is for.
+// With it, `&endDelay=<ms>` plays that tick that long after the press, and `&endOnKey=1` plays it
+// on the first keydown instead.
 
 import { createApp } from '../src/main';
 import { createController } from '../src/controller';
@@ -101,13 +103,22 @@ function endingOnPress(seed: number): Controller {
   if (controller.isTerminal()) throw new Error('results harness: the run ended a tick early');
   // Until the press, time stands still: the app's frame loop advances nothing.
   let pressed = false;
+  // `&endDelay=<ms>` plays that last tick that long after the first press, as a run whose end
+  // comes a moment after the press that was aimed at the board; `&endOnKey=1` ends on the first
+  // keydown instead of the first pointerdown. `__endedAt` is when the tick was played.
+  const endDelay = Number(params.get('endDelay') ?? '0');
+  const finish = (): void => {
+    pressed = true;
+    (window as unknown as { __endedAt?: number }).__endedAt = performance.now();
+    // Bounded: a run that will not end must fail the test, not freeze the page.
+    for (let i = 0; i < 100 && !controller.isTerminal(); i++) controller.advance(MS_PER_TICK);
+    if (!controller.isTerminal()) throw new Error('results harness: the run did not end');
+  };
   window.addEventListener(
-    'pointerdown',
+    params.get('endOnKey') === '1' ? 'keydown' : 'pointerdown',
     () => {
-      pressed = true;
-      // Bounded: a run that will not end must fail the test, not freeze the page.
-      for (let i = 0; i < 100 && !controller.isTerminal(); i++) controller.advance(MS_PER_TICK);
-      if (!controller.isTerminal()) throw new Error('results harness: the run did not end');
+      if (endDelay > 0) setTimeout(finish, endDelay);
+      else finish();
     },
     { capture: true, once: true },
   );
