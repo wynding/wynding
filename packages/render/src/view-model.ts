@@ -14,6 +14,7 @@ import {
   type SimState,
   type PreviewState,
   type CompiledRuleset,
+  type CompiledCreep,
 } from '@wynding/sim';
 import type {
   RenderVM,
@@ -21,10 +22,32 @@ import type {
   HudPreview,
   PreviewEntryVM,
   CreepVM,
+  CreepLookVM,
   TowerVM,
   CreepStatusCounts,
 } from './types';
 import { clamp01 } from './num';
+
+/** Whether a creep of catalog definition `def` flies — a catalog join, NOT sim state. An
+ *  absent definition (a forged or unresolved `creepId`) walks: the same totality rail the
+ *  view model's other catalog joins take. */
+function domainOf(def: CompiledCreep | undefined): CreepVM['domain'] {
+  return def?.domain ?? 'ground';
+}
+
+/** Whether a creep of catalog definition `def` carries the boss role (M2-S10) — a catalog
+ *  join, NOT sim state; `false` for an absent definition. */
+function bossOf(def: CompiledCreep | undefined): boolean {
+  return def?.role === 'boss';
+}
+
+/** The look of a creep of catalog id `creepId` (`CreepLookVM`), from the catalog alone, by the
+ *  same joins `deriveViewModel` gives every creep it draws. For a creep no view model drew: one
+ *  a step spawned and killed inside itself, whose kill still bursts (visual pass C1, #181). */
+export function creepLook(ruleset: CompiledRuleset, creepId: string): CreepLookVM {
+  const def = ruleset.creepById[creepId];
+  return { creepId, domain: domainOf(def), boss: bossOf(def) };
+}
 
 /** The sim's own "slowed right now" rule (`slowMulFp !== 0`, M2-S3), as ONE definition
  *  read by both consumers of it in this module — the per-creep telegraph flag
@@ -89,8 +112,8 @@ export function deriveViewModel(state: SimState, ruleset: CompiledRuleset): Rend
       // Catalog join, like `warded`'s below — NOT sim state. `def` is already resolved
       // above; a forged/unresolved `creepId` (absent `def`) falls back to `'ground'`,
       // the same totality rail `warded`'s `?? 0`-style fallback and `hpFrac`'s
-      // denominator already take.
-      domain: def?.domain ?? 'ground',
+      // denominator already take. `creepLook` gives a creep no view model drew the same.
+      domain: domainOf(def),
       x: p.x,
       y: p.y,
       hpFrac,
@@ -103,9 +126,9 @@ export function deriveViewModel(state: SimState, ruleset: CompiledRuleset): Rend
       // adjacent HP join's own posture.
       warded: (def?.immunities.length ?? 0) > 0,
       // Catalog join, like `warded` above — NOT sim state (M2-S10). `def` is already
-      // resolved above; the optional chain keeps an absent definition falling back to
-      // `false`, the same totality rail `warded`/`domain` already take.
-      boss: def?.role === 'boss',
+      // resolved above; an absent definition falls back to `false`, the same totality
+      // rail `warded`/`domain` already take.
+      boss: bossOf(def),
     });
   }
 

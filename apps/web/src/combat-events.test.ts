@@ -1,12 +1,22 @@
 // combat-events.test.ts — what one sim step did that the board shows as combat feedback (#181
-// C1/C2), read from data the controller already holds: which vanished creeps were kills and
-// which leaks (the ids the step reports as leaked), each kill's look, position and
-// bounty; which flyer a targeted impact struck; and which shots in flight lost their tower.
+// C1/C2), as the step reports it: its kills (`StepEvents.killed`), each where the board last drew
+// it, with its look and the bounty credited; its leaks (`StepEvents.leaked`); which flyer a
+// targeted impact struck, by the creep its point names; and which shots in flight lost their tower.
 
 import { describe, it, expect } from 'vitest';
-import type { CreepVM, KillVM, RenderVM, SparkPoint, TowerVM, TracerVM } from '@wynding/render';
-import type { SimState } from '@wynding/sim';
-import { dueTargets, markFlyerSparks, noteTowerless, stepOutcome } from './combat-events';
+import type { CreepVM, KillVM, RenderVM, TowerVM, TracerVM } from '@wynding/render';
+import { compileRuleset } from '@wynding/sim';
+import { getBundledRuleset, defaultBoardId } from '@wynding/content';
+import {
+  markFlyerSparks,
+  noteTowerless,
+  stepOutcome,
+  type StepImpactPoint,
+  type StepKill,
+} from './combat-events';
+
+const bundle = getBundledRuleset();
+const ruleset = compileRuleset(bundle, defaultBoardId(bundle));
 
 const FP = 256;
 /** The exit cell's centre in these steps, in fixed-point units. */
@@ -44,17 +54,26 @@ const tower = (id: number, towerId: string, col: number, row: number): TowerVM =
   targetId: 0,
 });
 
-/** Every creep pays its id in bounty. */
-const bountyIsId = (id: number): number => id;
+/** A kill as the step reports it: by default a `normal` killed one budget east of where the
+ *  view model drew it, paying 1. */
+const killed = (id: number, opts: Partial<StepKill> = {}): StepKill => ({
+  id,
+  creepId: 'normal',
+  x: 5 * FP + 26,
+  y: 5 * FP,
+  bounty: 1,
+  ...opts,
+});
 
-describe('stepOutcome — the kills and leaks of one step', () => {
-  it('a creep the step removed that the step did not name as leaked is a kill: its look, where it stood as the step began, and its bounty', () => {
+describe('stepOutcome — the kills and leaks of one step, as it reports them', () => {
+  it('a creep the step reports killed, drawn before it, bursts where it was drawn, in the look it was drawn with, paying the bounty the step credited', () => {
     const before = vm([
       creep(1),
       creep(2, { creepId: 'armored-flyer', domain: 'air', boss: true, x: 7 * FP, y: 3 * FP }),
     ]);
-    const after = vm([creep(1)]);
-    expect(stepOutcome(before, after, [], bountyIsId)).toEqual({
+    expect(
+      stepOutcome(before, [killed(2, { creepId: 'armored-flyer', x: 7 * FP + 26 })], [], ruleset),
+    ).toEqual({
       kills: [
         {
           id: 2,
@@ -63,14 +82,14 @@ describe('stepOutcome — the kills and leaks of one step', () => {
           creepId: 'armored-flyer',
           domain: 'air',
           boss: true,
-          bounty: 2,
+          bounty: 1,
         },
       ] satisfies KillVM[],
       leaks: 0,
     });
   });
 
-  it('takes the ids the step reports as exact: the vanished creeps it names are the leaks, the rest the kills, in view-model order', () => {
+  it('takes the step’s own lists as exact: the creeps it names killed are the kills, in its order, and the ids it names leaked the leaks — where a creep stood decides nothing', () => {
     const before = vm([
       creep(1, { x: 2 * FP, y: 2 * FP }),
       creep(2, { x: EXIT_AT.x - 10, y: EXIT_AT.y }),
@@ -78,14 +97,13 @@ describe('stepOutcome — the kills and leaks of one step', () => {
       creep(4, { x: EXIT_AT.x - 40, y: EXIT_AT.y + 3 }),
       creep(5), // survives
     ]);
-    const after = vm([creep(5)]);
     // The far creep leaks and the ones beside the exit die: position does not decide it.
-    const one = stepOutcome(before, after, [1], bountyIsId);
+    const one = stepOutcome(before, [killed(2), killed(3), killed(4)], [1], ruleset);
     expect(one.leaks).toBe(1);
     expect(one.kills.map((k) => k.id)).toEqual([2, 3, 4]);
-    const two = stepOutcome(before, after, [4, 1], bountyIsId);
+    const two = stepOutcome(before, [killed(3), killed(2)], [4, 1], ruleset);
     expect(two.leaks).toBe(2);
-    expect(two.kills.map((k) => k.id)).toEqual([2, 3]);
+    expect(two.kills.map((k) => k.id)).toEqual([3, 2]);
   });
 
   it('calls the creep the step named the leak, not the one that began nearer the exit: a faster creep leaks while a slower one beside the exit is killed', () => {
@@ -93,7 +111,7 @@ describe('stepOutcome — the kills and leaks of one step', () => {
       creep(1, { x: EXIT_AT.x - 3 * FP, y: EXIT_AT.y }), // fast: began farther out, reaches the exit
       creep(2, { x: EXIT_AT.x - 20, y: EXIT_AT.y }), // slow: began at the door, killed
     ]);
-    const out = stepOutcome(before, vm([]), [1], bountyIsId);
+    const out = stepOutcome(before, [killed(2, { bounty: 2 })], [1], ruleset);
     expect(out.leaks).toBe(1);
     expect(out.kills).toEqual([
       {
@@ -108,79 +126,69 @@ describe('stepOutcome — the kills and leaks of one step', () => {
     ]);
   });
 
-  it('counts every leak the step names even when no creep it knows vanished — and reports no kill', () => {
-    expect(stepOutcome(vm([]), vm([]), [7, 8], bountyIsId)).toEqual({ kills: [], leaks: 2 });
-    expect(stepOutcome(vm([creep(1)]), vm([creep(1)]), [9], bountyIsId)).toEqual({
-      kills: [],
-      leaks: 1,
-    });
-    // More leaks named than creeps vanished: every one of them leaked.
-    expect(stepOutcome(vm([creep(1)]), vm([]), [1, 8, 9], bountyIsId)).toEqual({
-      kills: [],
-      leaks: 3,
-    });
+  it('counts every leak the step names whatever the view models hold — and reports no kill it does not name', () => {
+    expect(stepOutcome(vm([]), [], [7, 8], ruleset)).toEqual({ kills: [], leaks: 2 });
+    expect(stepOutcome(vm([creep(1)]), [], [9], ruleset)).toEqual({ kills: [], leaks: 1 });
+    // A creep the view model drew and the step did not name is no kill, whatever became of it.
+    expect(stepOutcome(vm([creep(1)]), [], [1, 8, 9], ruleset)).toEqual({ kills: [], leaks: 3 });
   });
 
-  it('finds the same vanished creeps whether or not the view models list them in rising id order', () => {
-    // As the sim lists them: rising ids, a spawn (7) appended after the survivors.
-    const before = vm([1, 2, 3, 4, 5, 6].map((id) => creep(id, { x: id * FP })));
-    const after = vm([creep(2, { x: 2 * FP }), creep(5, { x: 5 * FP }), creep(7)]);
-    expect(stepOutcome(before, after, [], bountyIsId).kills.map((k) => k.id)).toEqual([1, 3, 4, 6]);
-    // Out of order — a forged state's — the same creeps vanished, reported in `before`'s order.
-    const shuffled = (v: RenderVM): RenderVM => vm([...v.creeps].reverse());
-    expect(
-      stepOutcome(shuffled(before), shuffled(after), [], bountyIsId).kills.map((k) => k.id),
-    ).toEqual([6, 4, 3, 1]);
-    // Nothing vanished, with and without a spawn: no kill.
-    expect(stepOutcome(before, before, [], bountyIsId).kills).toEqual([]);
-    expect(stepOutcome(before, vm([...before.creeps, creep(9)]), [], bountyIsId).kills).toEqual([]);
-  });
-
-  it('credits a kill the bounty its creep’s column held — and 0 for a value the sweep would not credit', () => {
-    const before = vm([creep(1), creep(2), creep(3), creep(4)]);
-    const bounty = (id: number): number => [0, 7, -2, 1.5, NaN][id] as number;
-    expect(stepOutcome(before, vm([]), [], bounty).kills.map((k) => k.bounty)).toEqual([
-      7, 0, 0, 0,
-    ]);
+  it('a kill the view model before the step never drew — a creep the step spawned and killed — shows where the step left it, in the look its catalog id gives', () => {
+    const at = { x: FP / 2 + 26, y: 11 * FP + FP / 2 }; // one budget past the entrance's centre
+    const before = vm([creep(1)]);
+    const out = stepOutcome(
+      before,
+      [
+        killed(7, { creepId: 'flying', ...at, bounty: 2 }),
+        killed(8, { creepId: 'boss', ...at, bounty: 25 }),
+        killed(9, { creepId: 'nonexistent', ...at, bounty: 0 }),
+      ],
+      [],
+      ruleset,
+    );
+    expect(out.kills).toEqual([
+      { id: 7, ...at, creepId: 'flying', domain: 'air', boss: false, bounty: 2 },
+      { id: 8, ...at, creepId: 'boss', domain: 'ground', boss: true, bounty: 25 },
+      // An id the catalog does not hold takes the view model's own fallback look.
+      { id: 9, ...at, creepId: 'nonexistent', domain: 'ground', boss: false, bounty: 0 },
+    ] satisfies KillVM[]);
   });
 });
 
-describe('markFlyerSparks — which flyer a targeted impact struck', () => {
+describe('markFlyerSparks — which flyer a targeted impact struck, by the creep its point names', () => {
   const flyer = creep(1, { creepId: 'flying', domain: 'air', x: 800, y: 900 });
   const walker = creep(2, { x: 300, y: 400 });
-  const spark = (x: number, y: number, radiusFp = 0): SparkPoint => ({ x, y, radiusFp });
+  const spark = (x: number, y: number, targetId?: number): StepImpactPoint =>
+    targetId === undefined ? { x, y, radiusFp: 0 } : { x, y, radiusFp: 0, targetId };
+  const blast = (x: number, y: number): StepImpactPoint => ({ x, y, radiusFp: 512 });
 
-  it('marks an impact at a surviving flyer’s point with its look; one at a creep on the ground passes through', () => {
-    const out = markFlyerSparks(
-      [spark(800, 900), spark(300, 400)],
-      vm([flyer, walker]),
-      [],
-      new Set([1, 2]),
-    );
+  it('marks an impact on a surviving flyer with its look; one on a creep on the ground passes through', () => {
+    const out = markFlyerSparks([spark(800, 900, 1), spark(300, 400, 2)], vm([flyer, walker]), []);
     expect(out).toEqual([
-      { x: 800, y: 900, radiusFp: 0, flyer: { creepId: 'flying', boss: false } },
-      { x: 300, y: 400, radiusFp: 0 },
+      { x: 800, y: 900, radiusFp: 0, targetId: 1, flyer: { creepId: 'flying', boss: false } },
+      { x: 300, y: 400, radiusFp: 0, targetId: 2 },
     ]);
   });
 
-  it('takes an impact that matches no survivor for the kill nearest it — marked only if that one flew', () => {
+  it('marks an impact on a creep the step killed by that kill’s look — only if it flew — wherever its point lies', () => {
     const kills: KillVM[] = [
       { id: 3, x: 1000, y: 1000, creepId: 'armored-flyer', domain: 'air', boss: false, bounty: 1 },
       { id: 4, x: 100, y: 100, creepId: 'normal', domain: 'ground', boss: false, bounty: 1 },
     ];
-    const out = markFlyerSparks([spark(990, 1012), spark(120, 90)], vm([]), kills, new Set([3, 4]));
+    // Each point lies beside the OTHER kill: the name decides, not the distance.
+    const out = markFlyerSparks([spark(110, 90, 3), spark(990, 1012, 4)], vm([]), kills);
     expect(out[0]!.flyer).toEqual({ creepId: 'armored-flyer', boss: false });
     expect(out[1]!.flyer).toBeUndefined();
-    // With nothing to match, it passes through.
-    expect(markFlyerSparks([spark(5, 5)], vm([]), [], new Set([1]))).toEqual([spark(5, 5)]);
+    // An impact naming a creep neither standing nor killed passes through.
+    expect(markFlyerSparks([spark(5, 5, 9)], vm([flyer]), kills)).toEqual([spark(5, 5, 9)]);
   });
 
-  it('passes every impact through, in a list of its own, when no flyer stands or fell', () => {
-    const points = [spark(300, 400), spark(5, 5), spark(800, 900, 512)];
+  it('passes every impact through, the same objects in a list of its own, when no flyer stands or fell', () => {
+    const points = [spark(300, 400, 2), spark(5, 5, 4), blast(800, 900)];
     const kills: KillVM[] = [
       { id: 4, x: 5, y: 5, creepId: 'normal', domain: 'ground', boss: false, bounty: 1 },
     ];
-    const out = markFlyerSparks(points, vm([walker]), kills, new Set([2, 4]));
+    const out = markFlyerSparks(points, vm([walker]), kills);
     expect(out).not.toBe(points);
     expect(out).toHaveLength(points.length);
     out.forEach((p, i) => expect(p).toBe(points[i]));
@@ -189,9 +197,8 @@ describe('markFlyerSparks — which flyer a targeted impact struck', () => {
   it('marks only the creep an impact names when a ground creep and a flyer share a point', () => {
     const grounded = creep(2, { x: 800, y: 900 });
     const flying = creep(1, { creepId: 'flying', domain: 'air', x: 800, y: 900 });
-    const points = [spark(800, 900)];
     // The impact named the ground creep: the flyer beside it is no hit.
-    expect(markFlyerSparks(points, vm([flying, grounded]), [], new Set([2]))[0]!.flyer).toBe(
+    expect(markFlyerSparks([spark(800, 900, 2)], vm([flying, grounded]), [])[0]!.flyer).toBe(
       undefined,
     );
     // It named the flyer: marked, whichever order the two are listed in.
@@ -199,30 +206,31 @@ describe('markFlyerSparks — which flyer a targeted impact struck', () => {
       [flying, grounded],
       [grounded, flying],
     ]) {
-      expect(markFlyerSparks(points, vm(order), [], new Set([1]))[0]!.flyer).toEqual({
+      expect(markFlyerSparks([spark(800, 900, 1)], vm(order), [])[0]!.flyer).toEqual({
         creepId: 'flying',
         boss: false,
       });
     }
-    // A kill shares the point with a survivor the same way: the struck one decides.
+    // A kill shares the point with a survivor the same way: the named one decides.
     const fell: KillVM[] = [
       { id: 6, x: 800, y: 900, creepId: 'flying', domain: 'air', boss: false, bounty: 1 },
     ];
-    expect(markFlyerSparks(points, vm([]), fell, new Set([7]))[0]!.flyer).toBe(undefined);
-    expect(markFlyerSparks(points, vm([]), fell, new Set([6]))[0]!.flyer).toBeDefined();
+    expect(markFlyerSparks([spark(800, 900, 2)], vm([grounded]), fell)[0]!.flyer).toBe(undefined);
+    expect(markFlyerSparks([spark(800, 900, 6)], vm([grounded]), fell)[0]!.flyer).toEqual({
+      creepId: 'flying',
+      boss: false,
+    });
   });
 
-  it('never marks a blast’s landing, even at a flyer’s point, and hands back a list of its own', () => {
-    const points = [spark(800, 900, 512)];
-    const out = markFlyerSparks(points, vm([flyer]), [], new Set([1]));
+  it('never marks a blast’s landing, which names no creep, even at a flyer’s point, and hands back a list of its own', () => {
+    const points = [blast(800, 900)];
+    const out = markFlyerSparks(points, vm([flyer]), []);
     expect(out).toEqual(points);
     expect(out).not.toBe(points);
     // Beside a targeted impact on the same flyer: only the targeted one is marked.
-    expect(
-      markFlyerSparks([spark(800, 900, 512), spark(800, 900)], vm([flyer]), [], new Set([1])),
-    ).toEqual([
-      spark(800, 900, 512),
-      { ...spark(800, 900), flyer: { creepId: 'flying', boss: false } },
+    expect(markFlyerSparks([blast(800, 900), spark(800, 900, 1)], vm([flyer]), [])).toEqual([
+      blast(800, 900),
+      { ...spark(800, 900, 1), flyer: { creepId: 'flying', boss: false } },
     ]);
   });
 });
@@ -281,74 +289,16 @@ describe('noteTowerless — the shots in flight whose tower the step took away',
 });
 
 describe('stepOutcome / markFlyerSparks — what the attribution tests above could not tell apart', () => {
-  it('a targeted impact at a surviving flyer’s point is that flyer’s, whatever else the step killed', () => {
+  it('a targeted impact on a surviving flyer is that flyer’s, whatever else the step killed', () => {
     const flyer = creep(1, { creepId: 'flying', domain: 'air', x: 800, y: 900 });
     const kills: KillVM[] = [
       { id: 4, x: 100, y: 100, creepId: 'normal', domain: 'ground', boss: false, bounty: 1 },
     ];
     const [out] = markFlyerSparks(
-      [{ x: 800, y: 900, radiusFp: 0 }],
+      [{ x: 800, y: 900, radiusFp: 0, targetId: 1 }],
       vm([flyer]),
       kills,
-      new Set([1, 4]),
     );
     expect(out!.flyer).toEqual({ creepId: 'flying', boss: false });
-  });
-
-  it('tells apart two creeps whose coordinates sum alike: an impact on the walker is no flyer’s', () => {
-    const walker = creep(5, { x: 900, y: 800 });
-    const flyer = creep(1, { creepId: 'flying', domain: 'air', x: 800, y: 900 });
-    // Both struck, each at its own point, so both are looked up by point and only the points'
-    // keys tell them apart. (With the walker alone struck, the flyer is never looked up, and
-    // keys that collide could not show.)
-    const [onWalker, onFlyer] = markFlyerSparks(
-      [
-        { x: 900, y: 800, radiusFp: 0 },
-        { x: 800, y: 900, radiusFp: 0 },
-      ],
-      vm([walker, flyer]),
-      [],
-      new Set([5, 1]),
-    );
-    expect(onWalker!.flyer).toBeUndefined();
-    expect(onFlyer!.flyer).toEqual({ creepId: 'flying', boss: false });
-  });
-});
-
-describe('dueTargets — the creeps the next step strikes (C2)', () => {
-  type Impact = SimState['impacts'][number];
-  const effects = [{ kind: 'direct', amount: 1 }] as const;
-  const targeted = (targetId: number, impactTick: number): Impact => ({
-    kind: 'targeted',
-    impactTick,
-    targetId,
-    sourceId: 90,
-    domain: 'both',
-    effects: [...effects],
-  });
-  const blast = (impactTick: number): Impact => ({
-    kind: 'blast',
-    impactTick,
-    x: 512,
-    y: 512,
-    radiusFp: 384,
-    sourceId: 91,
-    domain: 'ground',
-    effects: [...effects],
-  });
-
-  it('names the target of each targeted impact due by the tick, one overdue too — none still in flight, and no blast', () => {
-    const impacts = [
-      targeted(1, 9),
-      targeted(2, 10),
-      targeted(3, 11),
-      targeted(4, 12),
-      targeted(2, 13),
-      blast(10),
-    ];
-    expect(dueTargets({ tick: 10, impacts })).toEqual(new Set([1, 2]));
-    expect(dueTargets({ tick: 11, impacts })).toEqual(new Set([1, 2, 3]));
-    expect(dueTargets({ tick: 8, impacts })).toEqual(new Set());
-    expect(dueTargets({ tick: 10, impacts: [] })).toEqual(new Set());
   });
 });

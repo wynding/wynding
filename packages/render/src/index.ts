@@ -9,7 +9,9 @@
 
 export { createProjection } from './projection';
 export type { BoardLayout, Projection } from './projection';
-export { deriveViewModel, deriveHud } from './view-model';
+// `creepLook`: a creep's look from its catalog id alone, by the view model's own joins — for a
+// kill the board never drew (`apps/web`'s `combat-events.ts`, #181 C1).
+export { deriveViewModel, deriveHud, creepLook } from './view-model';
 export { interpolateCreeps } from './interpolate';
 export { resolvePalette, roleColour, COLOUR_MODES } from './palette';
 export type { Palette } from './palette';

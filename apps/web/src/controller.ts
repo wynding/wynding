@@ -47,7 +47,7 @@ import {
   type SparkPoint,
   type TracerVM,
 } from '@wynding/render';
-import { dueTargets, markFlyerSparks, noteTowerless, stepOutcome } from './combat-events';
+import { markFlyerSparks, noteTowerless, stepOutcome } from './combat-events';
 import { validate, currentRulesetHash, MAX_INPUTS_PER_TICK, type Replay } from '@wynding/replay';
 import { getBundledRuleset, defaultBoardId, type Ruleset } from '@wynding/content';
 
@@ -222,9 +222,9 @@ export interface Controller {
   drainSparks(): SparkPoint[];
   /** The creeps killed and the leaks counted since the last call, then cleared (visual pass
    *  C1, #181). Accumulated per sim tick, like the sparks, so a catch-up frame still shows
-   *  every kill and every leak. Derived from the view models either side of each step and the
-   *  ids the step reports as leaked (`StepEvents.leaked`, `combat-events.ts`), never from new
-   *  sim state. */
+   *  every kill and every leak. As each step reports them (`StepEvents.killed` and `leaked`,
+   *  `combat-events.ts`), never from new sim state: each kill where the board last drew it,
+   *  or, for a creep the step spawned and killed inside itself, where the step left it. */
   drainFeedback(): StepFeedback;
   /** Derived HUD fields for the DOM overlay. */
   hud(): HudVM;
@@ -732,15 +732,17 @@ export function createController(
     // this is a tripwire for a future story that widens a DoT duration, not a live
     // concern. `impactPoints`/`fired` stay as they were; the counter is a scalar and
     // costs an increment only on the drop path.
-    const events: StepEvents = { impactPoints: [], fired: [], dotDropped: 0, leaked: [] };
-    // Combat feedback (visual pass C1/C2, #181) is read from either side of the step
-    // (`combat-events.ts`), and `step` changes `state` in place: so note first the things
-    // it reads from the state as it stands — the creeps its due targeted impacts name (to tell
-    // which creep each impact point is), and the bounty column the kill sweep credits each kill
-    // from. (Which creeps leaked comes from the step itself: `events.leaked`.)
-    const struck = dueTargets(state);
-    const bountyIds = state.creeps.id.slice();
-    const bounties = state.creeps.bounty.slice();
+    // Combat feedback (visual pass C1/C2, #181) asks the step what it did rather than working it
+    // out from the states either side (`combat-events.ts`): the creeps it killed (`killed`) and
+    // leaked (`leaked`), output-only events no hash or replay ever sees, and the creep each
+    // targeted impact struck, which its impact point names (`targetId`).
+    const events: StepEvents = {
+      impactPoints: [],
+      fired: [],
+      dotDropped: 0,
+      leaked: [],
+      killed: [],
+    };
     hooks?.begin('step');
     state = step(state, ruleset, inputs, events);
     hooks?.end('step');
@@ -774,14 +776,12 @@ export function createController(
     hooks?.begin('derive');
     curVm = deriveViewModel(state, ruleset);
     hooks?.end('derive');
-    // What the step removed: its kills, where they stood as it began, and its leaks.
-    const outcome = stepOutcome(before, curVm, events.leaked ?? [], (id) => {
-      const i = bountyIds.indexOf(id);
-      return i < 0 ? 0 : (bounties[i] as number);
-    });
+    // What the step removed, as it reports it: its kills, each where the board last drew it (a
+    // creep it spawned and killed inside itself, never drawn, where it left it), and its leaks.
+    const outcome = stepOutcome(before, events.killed ?? [], events.leaked ?? [], ruleset);
     for (const kill of outcome.kills) pendingKills.push(kill);
     pendingLeaks += outcome.leaks;
-    for (const pt of markFlyerSparks(events.impactPoints, curVm, outcome.kills, struck)) {
+    for (const pt of markFlyerSparks(events.impactPoints, curVm, outcome.kills)) {
       // A blast landing at a detonation tracer's origin (still listed: `frame()` prunes it,
       // and a catch-up frame may never have drawn it) is that mine going off — mark it so
       // the scorch survives the tracer being pruned unseen (`SparkPoint.detonation`).

@@ -9,8 +9,8 @@
 // tracker's rule, `tower-fire.ts`), and on the first frame whose render time reaches the shot's
 // impact tick the creep it was aimed at flashes, if it is still drawn. One it killed is not
 // drawn by then — the step that landed the shot has removed it — and its burst shows instead. A
-// KILL and a LEAK come from the controller (`RenderOverlay.kills` and `leaks`), which reads them
-// off the view models either side of each step and the ids the step reports as leaked.
+// KILL and a LEAK come from the controller (`RenderOverlay.kills` and `leaks`), which takes them
+// from each step's own report of the creeps it killed and leaked.
 //
 // THE CLOCK is the wall clock the impact sparks fade on (`sparks.ts`), not render time: the
 // frame's durations are wall-clock ones, and the rate bounds below are what a viewer sees in a

@@ -324,14 +324,17 @@ export interface SparkPoint {
   readonly detonation?: boolean;
   /** Set on a targeted impact that struck a FLYER: that creep's look, so its spark is drawn on
    *  the flyer's body, lifted above the true point the sim reports (visual pass C2, #181). The
-   *  controller finds the creep the impact struck by that point. Absent on every other spark. */
+   *  controller knows the creep by the id the sim names on the impact's point. Absent on every
+   *  other spark. */
   readonly flyer?: Pick<CreepVM, 'creepId' | 'boss'>;
 }
 
-/** A creep killed since the last frame (visual pass C1, #181): where it was when the tick that
- *  killed it began — fixed-point sim units, the point it was last drawn at — its look, and the
- *  bounty its kill paid. Derived by the controller from the view models either side of each
- *  step, never from new sim state; drawn as a burst in its family's hue and a "+N" pop. */
+/** A creep killed since the last frame (visual pass C1, #181): its look, the bounty its kill
+ *  paid, and where its burst shows, in fixed-point sim units — where the board last drew it, as
+ *  the tick that killed it began, or, for a creep that tick spawned and killed before the board
+ *  could draw it, where that tick left it. The step reports each kill (`StepEvents.killed`); the
+ *  controller passes it on, and nothing here is new sim state. Drawn as a burst in its family's
+ *  hue and a "+N" pop. */
 export interface KillVM extends CreepLookVM {
   readonly id: number;
   readonly x: number;
