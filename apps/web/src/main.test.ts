@@ -180,7 +180,28 @@ describe('main — createApp wiring & frame loop', () => {
     expect(canvases.length).toBeGreaterThan(0);
     expect(releaseSwatch).not.toHaveBeenCalled();
     app.destroy();
-    expect(vi.mocked(releaseSwatch).mock.calls.map((c) => c[0])).toEqual(canvases);
+    // Every Card's, in order. The one other canvas is the Panel's art, the overlay's to release
+    // (the next test) — a no-op here, where the Panel never opened.
+    const released = vi.mocked(releaseSwatch).mock.calls.map((c) => c[0]);
+    expect(released.filter((c) => !c.classList.contains('wy-panel-art'))).toEqual(canvases);
+  });
+
+  it('destroy() releases the docked Panel’s art too, once, while it is still in the document (#181 H3)', () => {
+    const h = homeApp();
+    h.root.querySelector<HTMLButtonElement>('.wy-card')!.click(); // armed: the Panel opens on
+    h.frame(); // the next HUD refresh, its art painted — and so, in a browser, watched
+    const art = h.root.querySelector<HTMLCanvasElement>('.wy-panel .wy-panel-art')!;
+    expect(vi.mocked(paintSwatch).mock.calls.some(([c]) => c === art)).toBe(true);
+    const connected: boolean[] = [];
+    vi.mocked(releaseSwatch).mockImplementation((c) => {
+      if (c === art) connected.push(c.isConnected);
+    });
+    try {
+      h.app.destroy();
+    } finally {
+      vi.mocked(releaseSwatch).mockReset();
+    }
+    expect(connected).toEqual([true]);
   });
 
   it('routes control buttons and reaches a results screen, verify, and play-again', () => {
@@ -1673,6 +1694,40 @@ describe('main — the colour-mode repaint wiring (playtest round, #181)', () =>
     protan.dispatchEvent(new Event('change'));
     expect(vi.mocked(paintSwatch)).toHaveBeenCalledTimes(cardCount * 2);
     expect(vi.mocked(paintSwatch).mock.calls.at(-1)?.[2]).toBe('protan');
+    h.app.destroy();
+  });
+
+  // #181 (H3): the docked Panel's art is the one canvas painted outside the Cards. It follows
+  // a mode change while the Panel is open, and a Panel opened after a change is born in it.
+  it('repaints the open Panel’s art on a colour-mode change, and paints a later Panel in the new mode (#181 H3)', () => {
+    vi.mocked(paintSwatch).mockClear();
+    const h = homeApp();
+    const setMode = (mode: string): void => {
+      const radio = h.root.querySelector<HTMLInputElement>(
+        `.wy-settings input[name="wy-colour-mode"][value="${mode}"]`,
+      )!;
+      radio.checked = true;
+      radio.dispatchEvent(new Event('change'));
+    };
+    const lastPaint = (): unknown[] => vi.mocked(paintSwatch).mock.calls.at(-1)!;
+    const basic = h.root.querySelector<HTMLButtonElement>('.wy-card')!;
+    basic.click(); // armed: the Panel opens on the next HUD refresh, its art painted
+    h.frame();
+    const art = h.root.querySelector<HTMLCanvasElement>('.wy-panel .wy-panel-art')!;
+    expect(lastPaint()[0]).toBe(art);
+    expect(lastPaint().slice(1)).toEqual(['basic', 'default']);
+    setMode('protan');
+    expect(lastPaint()[0], 'the open Panel’s art, repainted').toBe(art);
+    expect(lastPaint().slice(1)).toEqual(['basic', 'protan']);
+    // Closed while the mode changes again, then reopened: painted in the mode now in force.
+    basic.click(); // the armed Card's own press disarms
+    h.frame();
+    expect(h.root.querySelector<HTMLElement>('.wy-panel')!.hidden).toBe(true);
+    setMode('tritan');
+    basic.click();
+    h.frame();
+    expect(lastPaint()[0]).toBe(art);
+    expect(lastPaint().slice(1)).toEqual(['basic', 'tritan']);
     h.app.destroy();
   });
 

@@ -23,6 +23,8 @@ export const EN = {
   "app.home": "Wynding — home",
   "app.title": "Wynding",
   "board.aria": "Game board. Arm a tower from the tower rail or its hotkey, then place it: with a mouse, click a cell; by touch, press to show the offset ghost, drag to adjust, then release; or with the keyboard, move the cursor with {move} and press {confirm}. Press {sell} to sell the selected tower.",
+  "card.need": "need {need}",
+  "card.unaffordable": "Not enough Bounty: {need} more needed.",
   "controls.callWave": "Call wave",
   "controls.callWave.earlyBonus": "Calling now pays an early-call bonus",
   "controls.callWave.pending": "Launching…",
@@ -111,9 +113,9 @@ export const EN = {
   "panel.dotBuffed": "Poison: {damage} damage every {cadence}s for {duration}s (boosted)",
   "panel.fireRate": "Fire rate: {rate}/s",
   "panel.glance.blastRadius": "Blast {tiles} tiles",
-  "panel.glance.cost": "{bounty}{cost}",
-  "panel.glance.costDamage": "{bounty}{cost} · {damage} dmg",
-  "panel.glance.costDamageBuffed": "{bounty}{cost} · {damage} dmg ↑",
+  "panel.glance.cost": "{cost}",
+  "panel.glance.costDamage": "{cost} · {damage} dmg",
+  "panel.glance.costDamageBuffed": "{cost} · {damage} dmg ↑",
   "panel.glance.dot": "Poison {damage}/{cadence}s for {duration}s",
   "panel.glance.dotBuffed": "Poison {damage}/{cadence}s for {duration}s ↑",
   "panel.glance.rangeRate": "{tiles} tiles · {rate}/s",
@@ -123,7 +125,20 @@ export const EN = {
   "panel.glance.support": "+{percent}% dmg, shared edge",
   "panel.glance.targets": "Hits {targets}",
   "panel.glance.triggerRange": "Trigger {tiles} tiles",
+  "panel.hint.armed": "Choose a cell to build · Esc to cancel",
+  "panel.label.blastRadius": "Blast radius",
+  "panel.label.cost": "Cost",
+  "panel.label.damage": "Damage",
+  "panel.label.fireRate": "Fire rate",
+  "panel.label.poison": "Poison",
+  "panel.label.range": "Range",
+  "panel.label.slow": "Slow",
+  "panel.label.stun": "Stun",
+  "panel.label.support": "Support",
+  "panel.label.triggerRange": "Trigger range",
   "panel.range": "Range: {tiles} tiles",
+  "panel.role": "Role: {role}",
+  "panel.roleLine": "{role} · {targets}",
   "panel.sell": "Sell (refund {refund})",
   "panel.singleUse": "Destroyed when it fires",
   "panel.slow": "Slow: {percent}% for {duration}s",
@@ -133,6 +148,13 @@ export const EN = {
   "panel.triggerRange": "Trigger range: {tiles} tiles",
   "panel.upgrade": "Max level",
   "panel.upgrade.desc": "This tower has no further upgrades in this build.",
+  "panel.value.boosted": "{value} (boosted)",
+  "panel.value.dot": "{damage} every {cadence}s for {duration}s",
+  "panel.value.rate": "{rate}/s",
+  "panel.value.slow": "{percent}% for {duration}s",
+  "panel.value.stun": "{chance}% for {duration}s",
+  "panel.value.support": "+{percent}% damage to towers sharing a full edge",
+  "panel.value.tiles": "{tiles} tiles",
   "playtrace.copied": "Run data copied to the clipboard.",
   "playtrace.failed": "Could not export the run data.",
   "playtrace.saved": "Run data saved as {filename}.",
@@ -182,18 +204,33 @@ export const EN = {
   "survey.text": "Anything else?",
   "survey.tryAgain": "Try again",
   "tower.antiair.name": "Anti-Air Tower",
+  "tower.antiair.short": "Anti-Air",
   "tower.basic.name": "Basic Tower",
+  "tower.basic.short": "Basic",
   "tower.beacon.name": "Beacon",
+  "tower.beacon.short": "Beacon",
   "tower.frost-splash.name": "Frost Splash Tower",
+  "tower.frost-splash.short": "Frost Splash",
   "tower.mine.name": "Mine",
+  "tower.mine.short": "Mine",
+  "tower.role.air": "Anti-air",
+  "tower.role.burst": "Burst",
+  "tower.role.control": "Control",
+  "tower.role.damage": "Damage",
+  "tower.role.poison": "Poison",
+  "tower.role.support": "Support",
   "tower.slow.name": "Slow Tower",
+  "tower.slow.short": "Slow",
   "tower.splash.name": "Splash Tower",
+  "tower.splash.short": "Splash",
   "tower.stun.name": "Stun Tower",
+  "tower.stun.short": "Stun",
   "tower.targets.air": "Air",
   "tower.targets.both": "Ground + Air",
   "tower.targets.ground": "Ground",
   "tower.unknown.name": "Unknown tower ({id})",
   "tower.venom.name": "Venom Tower",
+  "tower.venom.short": "Venom",
   "verify.fail": "Verification failed: {reason}",
   "verify.mismatch": "Verification mismatch: the replay re-simulated to a different outcome.",
   "verify.ok": "Verified: replay re-simulated to the same outcome.",
@@ -223,6 +260,8 @@ export interface MessageParams {
   "app.home": Record<never, never>;
   "app.title": Record<never, never>;
   "board.aria": { "move": string | number; "confirm": string | number; "sell": string | number };
+  "card.need": { "need": string | number };
+  "card.unaffordable": { "need": string | number };
   "controls.callWave": Record<never, never>;
   "controls.callWave.earlyBonus": Record<never, never>;
   "controls.callWave.pending": Record<never, never>;
@@ -311,9 +350,9 @@ export interface MessageParams {
   "panel.dotBuffed": { "damage": string | number; "cadence": string | number; "duration": string | number };
   "panel.fireRate": { "rate": string | number };
   "panel.glance.blastRadius": { "tiles": string | number };
-  "panel.glance.cost": { "bounty": string | number; "cost": string | number };
-  "panel.glance.costDamage": { "bounty": string | number; "cost": string | number; "damage": string | number };
-  "panel.glance.costDamageBuffed": { "bounty": string | number; "cost": string | number; "damage": string | number };
+  "panel.glance.cost": { "cost": string | number };
+  "panel.glance.costDamage": { "cost": string | number; "damage": string | number };
+  "panel.glance.costDamageBuffed": { "cost": string | number; "damage": string | number };
   "panel.glance.dot": { "damage": string | number; "cadence": string | number; "duration": string | number };
   "panel.glance.dotBuffed": { "damage": string | number; "cadence": string | number; "duration": string | number };
   "panel.glance.rangeRate": { "tiles": string | number; "rate": string | number };
@@ -323,7 +362,20 @@ export interface MessageParams {
   "panel.glance.support": { "percent": string | number };
   "panel.glance.targets": { "targets": string | number };
   "panel.glance.triggerRange": { "tiles": string | number };
+  "panel.hint.armed": Record<never, never>;
+  "panel.label.blastRadius": Record<never, never>;
+  "panel.label.cost": Record<never, never>;
+  "panel.label.damage": Record<never, never>;
+  "panel.label.fireRate": Record<never, never>;
+  "panel.label.poison": Record<never, never>;
+  "panel.label.range": Record<never, never>;
+  "panel.label.slow": Record<never, never>;
+  "panel.label.stun": Record<never, never>;
+  "panel.label.support": Record<never, never>;
+  "panel.label.triggerRange": Record<never, never>;
   "panel.range": { "tiles": string | number };
+  "panel.role": { "role": string | number };
+  "panel.roleLine": { "role": string | number; "targets": string | number };
   "panel.sell": { "refund": string | number };
   "panel.singleUse": Record<never, never>;
   "panel.slow": { "percent": string | number; "duration": string | number };
@@ -333,6 +385,13 @@ export interface MessageParams {
   "panel.triggerRange": { "tiles": string | number };
   "panel.upgrade": Record<never, never>;
   "panel.upgrade.desc": Record<never, never>;
+  "panel.value.boosted": { "value": string | number };
+  "panel.value.dot": { "damage": string | number; "cadence": string | number; "duration": string | number };
+  "panel.value.rate": { "rate": string | number };
+  "panel.value.slow": { "percent": string | number; "duration": string | number };
+  "panel.value.stun": { "chance": string | number; "duration": string | number };
+  "panel.value.support": { "percent": string | number };
+  "panel.value.tiles": { "tiles": string | number };
   "playtrace.copied": Record<never, never>;
   "playtrace.failed": Record<never, never>;
   "playtrace.saved": { "filename": string | number };
@@ -382,18 +441,33 @@ export interface MessageParams {
   "survey.text": Record<never, never>;
   "survey.tryAgain": Record<never, never>;
   "tower.antiair.name": Record<never, never>;
+  "tower.antiair.short": Record<never, never>;
   "tower.basic.name": Record<never, never>;
+  "tower.basic.short": Record<never, never>;
   "tower.beacon.name": Record<never, never>;
+  "tower.beacon.short": Record<never, never>;
   "tower.frost-splash.name": Record<never, never>;
+  "tower.frost-splash.short": Record<never, never>;
   "tower.mine.name": Record<never, never>;
+  "tower.mine.short": Record<never, never>;
+  "tower.role.air": Record<never, never>;
+  "tower.role.burst": Record<never, never>;
+  "tower.role.control": Record<never, never>;
+  "tower.role.damage": Record<never, never>;
+  "tower.role.poison": Record<never, never>;
+  "tower.role.support": Record<never, never>;
   "tower.slow.name": Record<never, never>;
+  "tower.slow.short": Record<never, never>;
   "tower.splash.name": Record<never, never>;
+  "tower.splash.short": Record<never, never>;
   "tower.stun.name": Record<never, never>;
+  "tower.stun.short": Record<never, never>;
   "tower.targets.air": Record<never, never>;
   "tower.targets.both": Record<never, never>;
   "tower.targets.ground": Record<never, never>;
   "tower.unknown.name": { "id": string | number };
   "tower.venom.name": Record<never, never>;
+  "tower.venom.short": Record<never, never>;
   "verify.fail": { "reason": string | number };
   "verify.mismatch": Record<never, never>;
   "verify.ok": Record<never, never>;

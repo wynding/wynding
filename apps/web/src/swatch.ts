@@ -26,24 +26,37 @@ import {
   type PathFactory,
 } from '@wynding/render';
 
-/** The swatch's logical (CSS px) size — mirrored by `.wy-card-swatch`'s width/height in
- *  ui.css. The whole tower, its plate's shadow included, is fitted inside it at one scale
- *  for every tower (`towerArtFit`), as the board draws every tower at one scale. */
+/** The tile's size (CSS px) BEFORE it is laid out — a canvas in a hidden Panel, say — until
+ *  the observer reports its box. Once laid out, the tile is whatever box `ui.css` gives it
+ *  (#181: 56px on a full Card, 34px on an icon-form one, 40px in the Panel's head), and the
+ *  art is fitted to that box. The whole tower, its plate's shadow included, is fitted inside
+ *  the tile at one scale for every tower (`towerArtFit`), as the board draws every tower at
+ *  one scale. */
 export const SWATCH_SIZE_PX = 36;
 
 /** The browser's own `Path2D`, for the art's SVG path strings. */
 const browserPath: PathFactory = (d) => new Path2D(d);
 
 /** What a swatch was last painted as, and the browser's last count of the device pixels it
- *  is drawn into — kept so a change in that count can repaint it. */
+ *  is drawn into — kept so a change in that count can repaint it. `fittedPx` is the tile size
+ *  the art was last fitted to, so a new box repaints even where its count of device pixels
+ *  happens to match the old one's. */
 interface Swatch {
   towerId: string;
   mode: ColourMode;
   makePath: PathFactory;
   devicePixels: DevicePixelReport | null;
+  fittedPx: number;
   /** The box observer (null where the view has no `ResizeObserver`), kept so
    *  `releaseSwatch` can disconnect it. */
   observer: ResizeObserver | null;
+}
+
+/** The backing store a tile needs and the size (CSS px) its art is fitted to. */
+interface TileLayout {
+  readonly width: number;
+  readonly height: number;
+  readonly fitPx: number;
 }
 const swatches = new WeakMap<HTMLCanvasElement, Swatch>();
 
@@ -71,35 +84,49 @@ export function paintSwatch(
   const ctx = canvas.getContext('2d');
   if (ctx === null) return; // stubbed jsdom / lost context — the Card's text carries everything
   const known = swatches.get(canvas);
-  const swatch = known ?? { towerId, mode, makePath, devicePixels: null, observer: null };
+  const swatch = known ?? {
+    towerId,
+    mode,
+    makePath,
+    devicePixels: null,
+    fittedPx: 0,
+    observer: null,
+  };
   Object.assign(swatch, { towerId, mode, makePath });
   if (known === undefined) {
     swatches.set(canvas, swatch);
     swatch.observer = watch(canvas, swatch);
   }
-  paint(canvas, ctx, swatch, storeFor(canvas, swatch));
+  paint(canvas, ctx, swatch, layoutFor(canvas, swatch));
 }
 
 /** Stop watching `canvas` and forget it: disconnects its observer (which would otherwise keep
  *  the canvas, its backing store and the callback alive after the app's nodes are removed) and
  *  drops its record, so a later `paintSwatch` on the same canvas registers and observes it
- *  afresh. `createApp().destroy()` calls it for every Card, so a destroy/recreate in one
- *  session leaks nothing. A no-op for a canvas never painted. */
+ *  afresh. `createApp().destroy()` calls it for every Card, and `overlay.destroy()` for the
+ *  Panel's art, so a destroy/recreate in one session leaks nothing. A no-op for a canvas
+ *  never painted. */
 export function releaseSwatch(canvas: HTMLCanvasElement): void {
   swatches.get(canvas)?.observer?.disconnect();
   swatches.delete(canvas);
 }
 
-/** The backing store `canvas` needs: the device pixels its box is drawn into — or, before it
- *  is laid out (no box yet), its size × dpr, until the observer reports its box. */
-function storeFor(canvas: HTMLCanvasElement, swatch: Swatch): { width: number; height: number } {
+/** The backing store `canvas` needs — the device pixels its box is drawn into — and the size
+ *  its art is fitted to, the box's own. Before it is laid out (no box yet), both come from
+ *  `SWATCH_SIZE_PX`, until the observer reports its box. */
+function layoutFor(canvas: HTMLCanvasElement, swatch: Swatch): TileLayout {
   const dpr = dprOf(canvas);
   const box = canvas.getBoundingClientRect();
   if (box.width <= 0 || box.height <= 0) {
     const side = Math.max(1, Math.round(SWATCH_SIZE_PX * dpr));
-    return { width: side, height: side };
+    return { width: side, height: side, fitPx: SWATCH_SIZE_PX };
   }
-  return backingStoreSize(box, dpr, dpr, swatch.devicePixels);
+  // The tile is square in `ui.css`; the shorter side keeps the whole tower inside a box that
+  // briefly is not (mid-resize).
+  return {
+    ...backingStoreSize(box, dpr, dpr, swatch.devicePixels),
+    fitPx: Math.min(box.width, box.height),
+  };
 }
 
 /** Repaint the tile whenever the browser reports a new box for it — or, where it reports no
@@ -114,10 +141,16 @@ function watch(canvas: HTMLCanvasElement, swatch: Swatch): ResizeObserver | null
     const entry = entries[entries.length - 1];
     if (entry === undefined) return;
     if (exact) swatch.devicePixels = devicePixelReport(entry, dprOf(canvas));
-    const store = storeFor(canvas, swatch);
-    if (store.width === canvas.width && store.height === canvas.height) return; // still right
+    const layout = layoutFor(canvas, swatch);
+    if (
+      layout.width === canvas.width &&
+      layout.height === canvas.height &&
+      layout.fitPx === swatch.fittedPx
+    ) {
+      return; // still right
+    }
     const ctx = canvas.getContext('2d');
-    if (ctx !== null) paint(canvas, ctx, swatch, store);
+    if (ctx !== null) paint(canvas, ctx, swatch, layout);
   });
   observer.observe(canvas, exact ? { box: 'device-pixel-content-box' } : {});
   return observer;
@@ -127,21 +160,22 @@ function paint(
   canvas: HTMLCanvasElement,
   ctx: CanvasRenderingContext2D,
   swatch: Swatch,
-  store: { width: number; height: number },
+  layout: TileLayout,
 ): void {
   const dpr = dprOf(canvas);
-  canvas.width = store.width;
-  canvas.height = store.height;
+  canvas.width = layout.width;
+  canvas.height = layout.height;
+  swatch.fittedPx = layout.fitPx;
   ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
   // The surface in CSS px: the store, which the browser's snap can make a little under or
   // over the tile's own size.
-  const surface = { width: store.width / dpr, height: store.height / dpr };
+  const surface = { width: layout.width / dpr, height: layout.height / dpr };
   const pal = resolvePalette(swatch.mode);
   const g = artGraphics(ctx, swatch.makePath);
   // Ground, then the tower — plate and head, the board's own art at tile scale.
   g.fillStyle(pal.floor, 1);
   g.fillRect(0, 0, surface.width, surface.height);
-  const fit = towerArtFit(SWATCH_SIZE_PX);
+  const fit = towerArtFit(layout.fitPx);
   // On this canvas's own pixel grid, so the plate's rim is crisp, as on the board — and kept
   // on the store, which the fitted footprint reaches past at its top and left.
   paintTowerArt(g, pal, towerLookFor(swatch.towerId), fit.x, fit.y, fit.footprintPx, dpr, surface);

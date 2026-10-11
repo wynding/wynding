@@ -72,11 +72,11 @@
   /* The armed Card's border (#69). The same hue as the focus ring TODAY, but deliberately
      its own token: `--wy-focus` means "keyboard focus is here" (the destructive-button
      comment far below leans on exactly that reading), while this means "this Card is
-     armed" — independent states that must stay re-colourable apart. No contrast PAIRING of
-     its own in `ui-contrast.test.ts`: the armed border is a redundant cue over the Card's
-     accent-fill + on-accent text flip, which is what carries the state (and is gated). Its
-     EXISTENCE is in `REQUIRED_TOKENS` there, so deleting it cannot silently fall back to
-     `currentColor`. */
+     armed" — independent states that must stay re-colourable apart. Since #181 (H3) it
+     CARRIES the armed state: the style frame's armed tile is a gold frame over a lifted
+     fill, where the old one flipped the whole Card to the accent fill. So it is now paired in
+     `ui-contrast.test.ts` (non-text, 3:1) against the Rail and the armed fill it frames, as
+     well as being a required token. */
   --wy-armed: #ffd166;
   --wy-on-accent: #04121f;
   --wy-board-bg: #12141c;
@@ -125,6 +125,17 @@
   /* The gem's and star's outline and the gem's facets — ink ON the icon, gated against the
      fills it outlines. */
   --wy-icon-ink: #0b0e14;
+  /* The Rail's Cards (#181 H3/L2): the style frame's tiles — a fill a step above the Rail, a
+     quiet edge, and the armed tile a step above that. Every pair is gated in
+     `ui-contrast.test.ts`: the text drawn on each fill (`fg`, `fg-dim`, `need`) at 4.5:1, and
+     the edge against the Rail at ADR 0003's 3:1 component-boundary bar — which is why the edge
+     is brighter than the frame's own (1.6:1 there). The armed tile's border is `--wy-armed`. */
+  --wy-card: #1b2c47;
+  --wy-card-armed: #20355a;
+  --wy-card-edge: #5f7797;
+  /* A Card's "need N" and its cost while the Bounty is short of it — the frame's red. Text, so
+     gated at 4.5:1 on both Card fills and on the page `bg` (the icon form's pill). */
+  --wy-need: #ff8a8a;
   /* Compact status-column width (contract §2). vw-capped so 200% text zoom cannot starve
      the board: at 200% `4rem` would be 128px, but `10vw` holds it to ~66px on a 658px-wide
      phone. Content that no longer fits scrolls inside `.wy-hud` (the ADR 0003 doctrine)
@@ -1366,7 +1377,7 @@ a.wy-home:focus-visible {
      produces the same widths.
 
      Containment DOES make this element a containing block for absolutely-positioned
-     descendants, and this file goes on to add two of them — the condensed form's sr-only
+     descendants, and this file goes on to add two of them — the sr-only
      `.wy-stats-full` sentences, and the Upgrade description. Both are re-anchored to
      `.wy-panel-scroll` (see its `position: relative` below) rather than left to resolve
      against the Rail, so neither adds scroll extent here; an earlier draft that left them
@@ -1405,9 +1416,10 @@ a.wy-home:focus-visible {
      Rail's top edge on every Shift+Tab stop that scrolled.
      Standard reserves the ring band alone: its Rail sits below `.wy-status`, whose own
      `padding-top` already pays the top inset. The Compact fork adds the inset to this same
-     token (#153). The trailing 1px is rounding: Cards are fractional-pixel tall (58.4 / 76.4px)
-     while the browser parks `scrollTop` on a whole pixel, and the exact band alone left rings
-     0.2-0.4px short (measured in the Compact fork, where the reserve first shipped). */
+     token (#153). The trailing 1px is rounding: Cards were fractional-pixel tall when it was
+     measured (58.4 / 76.4px, before #181) while the browser parks `scrollTop` on a whole
+     pixel, and the exact band alone left rings 0.2-0.4px short (measured in the Compact
+     fork, where the reserve first shipped). */
   --wy-rail-ring-reserve: calc(var(--wy-card-ring-w) + var(--wy-card-ring-offset) + 1px);
   scroll-padding-top: var(--wy-rail-ring-reserve);
   /* The Rail's two VERTICAL paddings are named, because the pinned Panel's focus reserve
@@ -1428,31 +1440,45 @@ a.wy-home:focus-visible {
   user-select: none; /* Shell chrome (PLAN.md P3) */
 }
 
-/* --- Card: the single M1 tower, in the Rail (PLAN.md P2) --- */
+/* --- Cards: one per buildable tower, in the Rail (PLAN.md P2; redrawn by #181 H3/L2) ---
+   The Cards sit in their own grid box, `.wy-cards`, the Rail's first child, so the Rail itself
+   stays the one flex column every rule below is written against: its scroll fade cancels its
+   own extent there (`.wy-rail::after`), the Panel docks under the grid, and the grid alone
+   decides one column or two.
+
+   TWO FORMS, on the chips' dual-form contract: the Card's accessible name is the same in
+   both — the full name, the full cost message and the hotkey, the parts `.wy-card-name` and
+   `.wy-card-cost` keep visually hidden — and only what is painted forks.
+     · FULL (the default, every Standard Rail wider than the narrow arm): the style frame's
+       card — the tower art at 56px, the short name, the gem and the cost, and the hotkey in
+       the corner.
+     · ICON (the two narrow arms at the foot of the Panel section: a Rail content box of
+       160px or less, and the Compact fork): the frame's phone card — the art and the cost
+       only, two to a row where a 3.5rem tile allows it (56px at 100% text, 112px at 200%), so
+       all nine fit a 658×320 Rail at rest. The name and the stats move to the Panel the arm
+       opens. */
+
+.wy-cards {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 0.5rem;
+}
 
 .wy-card {
-  /* [swatch][name+cost column][hotkey] since the playtest round — the stacked three-row
-     form outgrew the Rail once the catalog reached nine. */
+  /* The containing block for the parts drawn out of flow: the visually hidden name and cost,
+     the hotkey in its corner, and the icon form's "need N". */
+  position: relative;
   display: flex;
   align-items: center;
-  gap: 0.5rem;
+  gap: 0.625rem;
   width: 100%;
   min-height: 44px;
-  /* Never a flex-squash victim (#69): an explicit `min-height` (the 44px tap floor above)
-     REPLACES the flex auto-minimum, so with the default `flex-shrink: 1` the Cards
-     squashed toward 44px whenever the Rail over-filled — which the nine-Card catalog
-     already does on its own at Standard's default height, before any Panel opens — and
-     the hotkey badge rendered outside its Card's border box. The Rail is a scrollport
-     (`overflow-y: auto`) — it absorbs overflow by scrolling, never by squashing its
-     children. Pinned by `arming.spec.ts`, whose pre-arm baseline catches the no-Panel
-     case. */
-  flex-shrink: 0;
-  padding: 0.5rem 0.75rem;
+  padding: 6px 8px;
   font-size: 1rem;
   color: var(--wy-fg);
-  background: var(--wy-surface);
-  border: 2px solid var(--wy-accent);
-  border-radius: 6px;
+  background: var(--wy-card);
+  border: 1px solid var(--wy-card-edge);
+  border-radius: 9px;
   cursor: pointer;
   text-align: left;
   /* A Card-origin drag must not be stolen by browser scroll/gesture handling
@@ -1465,56 +1491,175 @@ a.wy-home:focus-visible {
   outline-offset: var(--wy-card-ring-offset);
 }
 
+/* Armed: the style frame's gold frame over a lifted fill. The border stays 1px and the rest
+   of the frame is an inset ring, so arming moves no part of the Card by a pixel — the Card
+   under the pointer stays exactly where the press landed (`rail-cards.spec.ts` and
+   `arming.spec.ts` pin the frame). The ring's width
+   is a non-colour cue on top of the gold: 1px of quiet edge at rest, 3px of frame armed. */
 .wy-card[aria-pressed='true'] {
   border-color: var(--wy-armed);
-  background: var(--wy-accent);
-  color: var(--wy-on-accent);
+  box-shadow: inset 0 0 0 2px var(--wy-armed);
+  background: var(--wy-card-armed);
 }
 
-.wy-card-name {
-  font-weight: 700;
+@media (forced-colors: active) {
+  /* Forced colours mark the armed Card with a 3px double border instead (the forced-colours
+     block below): its extra 2px comes out of the padding, and out of the corner hotkey's
+     offsets below, so nothing inside moves. */
+  .wy-card[aria-pressed='true'] {
+    padding: 4px 6px;
+  }
+
+  /* The corner hotkey is placed from the padding edge, which the border moves in by 2px: its
+     offsets give the 2px back too. */
+  .wy-card[aria-pressed='true'] .wy-card-hotkey {
+    top: 2px;
+    right: 6px;
+  }
 }
 
-/* The name+cost column beside the swatch (playtest round) — a text-free wrapper, so the
-   Card button's accessible name (its subtree text) is unchanged; `min-width: 0` lets a
-   long name wrap inside the two-column Rail's narrower Cards instead of overflowing. */
+/* The full name and the full cost message: the head of the Card's accessible name, never
+   painted (the short `.wy-card-label` and the gem and number are). Restates `.wy-sr-only`'s
+   rules rather than composing that class, which is an IDENTITY elsewhere (see
+   `.wy-stats-full`). Out of flow, so each is its own block to the accessible-name
+   computation and the name reads with its spaces: "Basic Tower Cost: 5 1". */
+.wy-card-name,
+.wy-card-cost {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+  border: 0;
+}
+
+/* The label and cost column beside the art — text-free itself, so the Card button's
+   accessible name (its subtree text) is unchanged; `min-width: 0` lets a long name wrap
+   inside a narrow Card instead of overflowing it. */
 .wy-card-text {
   display: flex;
   flex-direction: column;
-  gap: 0.15rem;
+  gap: 2px;
   min-width: 0;
 }
 
-/* The footprint-glyph tile — painted by `swatch.ts`; sized HERE and in `SWATCH_SIZE_PX`
-   (the canvas backing store), one number in each world. Fixed px, not rem, deliberately:
-   the tile is a board miniature, and board cells don't scale with text zoom either. */
+/* The painted short name. Its right margin keeps it clear of the hotkey in the corner, and
+   only a short label is painted there: the two-column Rail falls back to one column once
+   its Cards are too narrow for a name and a digit at the current text size (the container
+   query in the two-column block), and a label of more than two characters is visually
+   hidden on every Card (the `--long` modifier; any non-digit label is also hidden on the
+   icon form, the `--wide` modifier, and so is a digit on an icon-form tile too narrow for
+   it). */
+.wy-card-label {
+  margin-right: 0.75rem;
+  font-size: 0.875rem;
+  font-weight: 700;
+  line-height: 1.2;
+}
+
+/* The painted cost: the HUD's gem, the number, and "need N" while the Bounty is short —
+   wrapping to its own line where the Card is too narrow for all three. */
+.wy-card-cost-glance {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  column-gap: 4px;
+  font-size: 0.875rem;
+  font-weight: 700;
+  line-height: 1.2;
+  font-variant-numeric: tabular-nums;
+}
+
+.wy-card-cost-glance .wy-icon {
+  width: 0.9em;
+  height: 0.9em;
+}
+
+.wy-card-need {
+  display: none;
+  font-size: 0.75rem;
+  font-weight: 400;
+  color: var(--wy-need);
+}
+
+/* The tower art — painted by `swatch.ts`, which fits the art to whatever box this rule gives
+   the canvas (and repaints when that box changes). Fixed px, not rem, deliberately: the tile
+   is a board miniature, and board cells don't scale with text zoom either. */
 .wy-card-swatch {
   flex: none;
-  width: 36px;
-  height: 36px;
-  border-radius: 4px;
+  width: 56px;
+  height: 56px;
+  border-radius: 6px;
 }
 
+/* The hotkey, in the corner the frame draws it in. */
 .wy-card-hotkey {
-  font-size: 0.85em;
-  opacity: 0.85;
-  margin-left: auto;
-  align-self: flex-start;
+  position: absolute;
+  top: 4px;
+  right: 8px;
+  font-size: 0.75rem;
+  line-height: 1.2;
+  color: var(--wy-fg-dim);
 }
 
-/* --- Panel: unified tower details, opens below the Card (PLAN.md P2) --- */
+/* A label of more than two characters — a rebound key's word ("BracketLeft", "ArrowDown") or
+   "Unbound" — would paint over the name, the art or "need N" in the corner. It is visually
+   hidden exactly as the Compact fork hides the hotkey, and stays the tail of the Card's
+   accessible name. `overlay.ts` toggles the class with the label. The body restates the
+   Compact fork's hotkey rule, for the reason `.wy-card-name` restates `.wy-sr-only`. */
+.wy-card-hotkey--long {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+  border: 0;
+}
+
+/* CAN'T AFFORD (#181 H3): the Bounty is below the cost. The Card stays a live button — arming
+   it still shows the tower's stats, and placement already refuses a build the Bounty cannot
+   pay for — so nothing here dims the control itself: the art fades, the name steps down to the
+   dim ink, the cost turns the need colour and "need N" appears. Text dims by TOKEN, never
+   opacity, so the rendered-contrast checks measure what is painted. The shortfall is also the
+   Card's accessible description (`aria-describedby`, `overlay.ts`). */
+.wy-card--short .wy-card-swatch {
+  opacity: 0.4;
+}
+
+.wy-card--short .wy-card-label {
+  color: var(--wy-fg-dim);
+}
+
+.wy-card--short .wy-card-cost-value {
+  color: var(--wy-need);
+}
+
+.wy-card--short .wy-card-cost-glance .wy-icon {
+  opacity: 0.5;
+}
+
+.wy-card--short .wy-card-need {
+  display: block;
+}
+
+/* --- Panel: unified tower details, docked below the Cards (PLAN.md P2; #181 H3) --- */
 
 .wy-panel[hidden] {
   display: none;
 }
 
 .wy-panel {
-  /* Same rule as `.wy-card` (#69): Rail children scroll into reach, they never shrink. */
-  flex-shrink: 0;
   padding: 0.5rem 0.75rem;
-  background: var(--wy-surface);
+  /* The style frame's docked Panel is a well, a step below the Rail it sits in. */
+  background: var(--wy-bg);
   border: 1px solid #33465f;
-  border-radius: 6px;
+  border-radius: 8px;
   /* M2-S12a P3: `--wy-panel-cap` feeds BOTH this element's `max-height` and the Rail's
      focus reserve, so the cap has to mean the same thing to both. Content-box sizing would
      let this Panel's padding + border render ~26px TALLER than the number the reserve
@@ -1522,16 +1667,121 @@ a.wy-home:focus-visible {
   box-sizing: border-box;
 }
 
-/* The glance block is DISPLAY-ONLY presentation and defaults to absent, so a Rail wide
-   enough to render the full sentences never pays for it.
+/* THE PANEL'S THREE STAT FORMS (#130's dual-form contract, widened by #181 H3). The full ICU
+   sentences (`.wy-stats-full`) are the Panel's accessible text at EVERY width, and since H3
+   they are painted at none: what a sighted player reads is the style frame's label-value rows
+   (`.wy-stats-rows`) on a wide Rail, or the condensed glance (`.wy-stats-glance`) on a narrow
+   one. Both painted blocks carry `aria-hidden` permanently in the DOM, so a screen reader
+   never sees them and never has to be told which reading to believe.
 
-   DECLARED BEFORE the container query that turns it on, and that ordering is load-bearing:
-   `.wy-stats-glance` and `.wy-stats-glance` inside `@container` have the SAME specificity
-   (0,1,0) — a container query adds none — so source order is the only tie-break. Declared
-   after, this rule wins everywhere and the condensed form never appears; worse, the full
-   block has already gone sr-only by then, so the Panel renders no stat rows at all. */
+   The glance is DISPLAY-ONLY presentation and defaults to absent, and the rows default to
+   present. Both defaults are DECLARED BEFORE the container query that swaps them, and that
+   ordering is load-bearing: a rule here and the same selector inside `@container` have the
+   SAME specificity (0,1,0) — a container query adds none — so source order is the only
+   tie-break. Declared after, these defaults win everywhere and the narrow Rail shows the rows
+   it has no room for, and no glance.
+
+   The full block RESTATES `.wy-sr-only`'s rules rather than composing that class on (the
+   `.wy-preview-full` precedent, #101): `.wy-sr-only` is used as an IDENTITY by the
+   `querySelector('.wy-sr-only')` that resolves the HUD live region, and composing it here
+   would make that selector resolve to a stat block instead. */
+.wy-stats-full {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+  border: 0;
+}
+
 .wy-stats-glance {
   display: none;
+}
+
+.wy-stats-rows {
+  display: block;
+  margin-top: 0.5rem;
+}
+
+/* The docked Panel's head (#181 H3): the tower's art beside its name and role line, as the
+   style frame draws it. The art is the Shell's one Panel canvas (`shell.ts`), painted by
+   `swatch.ts` to whatever box this gives it. */
+.wy-panel-head {
+  display: flex;
+  align-items: center;
+  gap: 0.625rem;
+}
+
+.wy-panel-art {
+  flex: none;
+  width: 40px;
+  height: 40px;
+  border-radius: 6px;
+}
+
+.wy-panel-titles {
+  min-width: 0;
+}
+
+.wy-panel .wy-panel-name {
+  margin: 0;
+  font-size: 1rem;
+  font-weight: 800;
+  line-height: 1.25;
+}
+
+/* The role and what it targets ("Poison · Ground"). Presentation, like the rows: the role is
+   the first of the full sentences ("Role: Poison"), and the targets are one of them too. */
+.wy-panel .wy-panel-role {
+  margin: 0;
+  font-size: 0.75rem;
+  color: var(--wy-fg-dim);
+}
+
+/* One label-value row: the label in the dim ink, the value at the far edge. A row with no
+   label (the burst tower's single-use note) is the value alone, left-aligned. */
+.wy-panel .wy-stat {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 0.75rem;
+  margin: 0;
+  padding: 3px 0;
+  font-size: 0.8125rem;
+}
+
+.wy-stat-label {
+  color: var(--wy-fg-dim);
+}
+
+.wy-stat-value {
+  min-width: 0;
+  font-weight: 600;
+  text-align: right;
+}
+
+.wy-stat--note .wy-stat-value {
+  font-weight: 400;
+  text-align: left;
+}
+
+/* The build hint while armed — real text, the one place the Panel says how a build happens
+   and how to back out of one. */
+.wy-panel .wy-panel-hint {
+  margin: 0.5rem 0 0;
+  font-size: 0.75rem;
+  color: var(--wy-fg-dim);
+}
+
+/* The glance's cost row leads with the HUD's gem (`overlay.ts`), in the line's own size. */
+.wy-stats-glance .wy-icon {
+  width: 0.9em;
+  height: 0.9em;
+  margin-right: 2px;
+  vertical-align: -0.1em;
 }
 
 /* --- The pinned Panel (M2-S12a P3) --------------------------------------------------
@@ -1637,11 +1887,106 @@ a.wy-home:focus-visible {
      declined to weigh there. This threshold therefore still answers WRAPPING only, and the
      pin stays exactly where the measured curve put it.
 
-     Like `.wy-preview-full` (#101), this RESTATES `.wy-sr-only`'s rules rather than
-     composing that class on: `.wy-sr-only` is used as an IDENTITY by the
-     `querySelector('.wy-sr-only')` that resolves the HUD live region, and composing it
-     here would make that selector resolve to a stat block instead. */
-  .wy-stats-full {
+     Since #181 (H3) the full sentences are visually hidden at every width (see the three
+     stat forms above), so what condenses is the PAINTED form: the label-value rows give way
+     to the glance, and the docked head sheds its art and its role line — the Card the player
+     just pressed shows the art, and the glance says what the tower targets. Every Rail this
+     query matches pins an open Panel, so the pinned shed below (`.wy-rail-panel-pinned`) is
+     the one that sets those rules; this query keeps only the icon-form arms. */
+
+  /* --- The ICON-FORM Cards (#181 L2), first arm ----------------------------------------
+     The style frame's phone card — the art over the gem and the cost — in as many columns as
+     a 3.5rem tile allows: two in a 128px Rail, which is what lets all nine Cards fit a
+     658×320 Rail at rest (five rows of 56px and four 6px gaps fill its 304px content box
+     exactly), and one in the 85px Rail of a 360px-wide portrait window, where two would fall
+     under the 44px tap floor. A tile never asks for more than the Rail has (`min(…, 100%)`):
+     at 200% text that portrait Rail is narrower than 3.5rem, and the bare minimum gave it a
+     sideways scroll range. The name is already visually hidden in every form; a digit
+     hotkey stays in its corner here on a tile with room for it beside the art (the foot of
+     this arm says which; the Compact arm hides it, per L2). Repeated in the Compact fork for
+     the reason the pin's body is. */
+  .wy-cards {
+    grid-template-columns: repeat(auto-fill, minmax(min(3.5rem, 100%), 1fr));
+    gap: 6px;
+  }
+
+  .wy-card {
+    flex-direction: column;
+    justify-content: center;
+    gap: 2px;
+    padding: 3px 2px;
+    border-radius: 8px;
+  }
+
+  @media (forced-colors: active) {
+    /* The armed border is 3px here (see the forced-colours block): its 2px comes out of the
+       padding, as it does in the full form. */
+    .wy-card[aria-pressed='true'] {
+      padding: 1px 0;
+    }
+
+    .wy-card[aria-pressed='true'] .wy-card-hotkey {
+      top: 0;
+      right: 2px;
+    }
+
+    .wy-card[aria-pressed='true'] .wy-card-need {
+      top: 12px;
+      max-width: 100%;
+    }
+  }
+
+  .wy-card-swatch {
+    width: 34px;
+    height: 34px;
+    border-radius: 5px;
+  }
+
+  .wy-card-text {
+    align-items: center;
+  }
+
+  .wy-card-label {
+    display: none;
+  }
+
+  .wy-card-cost-glance {
+    justify-content: center;
+    font-size: 0.75rem;
+    line-height: 1;
+  }
+
+  /* "need N" has no line to itself on a tile this small: it rides over the faded art, on a
+     chip of the page colour it is gated against. One line wherever it fits, and wrapped
+     inside the tile where heavy text makes it wider than the tile (`max-content`, capped —
+     the border box, padding and all, or the padding alone ran 1px past each edge): never
+     past the tile's edge, where it would give the Rail a sideways scroll. */
+  .wy-card-need {
+    position: absolute;
+    top: 14px;
+    left: 50%;
+    box-sizing: border-box;
+    width: max-content;
+    max-width: calc(100% - 4px);
+    padding: 1px 4px;
+    font-size: 0.6875rem;
+    line-height: 1.2;
+    text-align: center;
+    background: var(--wy-bg);
+    border-radius: 6px;
+    transform: translateX(-50%);
+  }
+
+  .wy-card-hotkey {
+    top: 2px;
+    right: 4px;
+    font-size: 0.6875rem;
+  }
+
+  /* The icon form's corner fits a digit beside the 34px art on a wide enough tile (below) and
+     nothing wider on any: a letter or a function key ("W", "F1") is visually hidden here, as a
+     longer label is on every Card. */
+  .wy-card-hotkey--wide {
     position: absolute;
     width: 1px;
     height: 1px;
@@ -1653,20 +1998,46 @@ a.wy-home:focus-visible {
     border: 0;
   }
 
-  .wy-stats-glance {
-    display: block;
-    /* The `.wy-hud` Compact precedent. Measured at a 128px content box: at 1rem the
-       densest glance set (`frost-splash`) renders 173px and `slow` 169px against a 180px
-       bound — under it, but with no room for a longer translation. At 0.875rem the same
-       sets render 134px and 130px. */
-    font-size: 0.875rem;
+  /* A digit shows in that corner only on a tile wide enough for it. The art is centred and the
+     corner's right edge sits 2px inside the content box (`right: 4px` from the padding edge,
+     less the 2px padding), so a digit `d` wide clears the art by `content width / 2 − 19px − d`.
+     Budgeting a digit of 0.65em of the 0.6875rem corner (0.447rem; measured: 0.636em in DejaVu
+     Sans, CI's Linux font, and the macOS system font's widest 0.557em in Chromium and 0.649em in
+     WebKit) and 1px of clearance hides it at a content box of `40px + 0.9rem` or less: a tile of
+     60.4px or less at 100% text, 74.8px at 200%. So 640×560 and 390×844 paint it at every text
+     size, 360×640 to 175% and 320×568 to 125%, each digit 1.3px or more clear of the art
+     (Chromium and WebKit, both fonts); 360×640 at 200%, 320×568 from 150% and the two 56-60px
+     columns of a 480-510px-wide portrait window at 100% hide it, where DejaVu Sans painted it
+     over the art or less than 1.5px from it. The Card is an inline-size container on this arm
+     only, so the query reads the tile itself, whatever the column count or the text size made
+     it; the containment moves no part of the Card (measured). The body restates the `--wide`
+     rule's. */
+  .wy-card {
+    container: wy-card / inline-size;
+  }
+
+  @container wy-card (max-width: calc(40px + 0.9rem)) {
+    .wy-card-hotkey {
+      position: absolute;
+      width: 1px;
+      height: 1px;
+      padding: 0;
+      margin: -1px;
+      overflow: hidden;
+      clip-path: inset(50%);
+      white-space: nowrap;
+      border: 0;
+    }
   }
 }
 
 /* --- The Rail's scroll affordance (M2-S12a P4) ---------------------------------------
-   Five of nine Cards sit below the fold at 658x320 with a 0px scrollbar gutter, and
-   nothing on screen says so. A fade at the scrollport's bottom edge, shown only while
-   content actually remains below — `overlay.ts` owns the boolean and toggles the class.
+   Wherever the Rail's content outruns it, Cards sit below the fold with a 0px scrollbar
+   gutter, and nothing on screen says so. At 658x320 that was five of nine Cards at rest;
+   since the phone rail (#181 L2) it is the Cards under an armed, pinned Panel, a phone at
+   200% text or under a top inset, and a 360px-wide portrait window. A fade at the
+   scrollport's bottom edge, shown only while content actually remains below — `overlay.ts`
+   owns the boolean and toggles the class.
 
    DECORATIVE ONLY, and the a11y audit says so rather than claiming it as a fix: the
    hidden Cards are native buttons already in the tab order, and focusing one scrolls it
@@ -1720,10 +2091,10 @@ a.wy-home:focus-visible {
 
    The trailing `1px` is the same whole-pixel rounding allowance the Rail's
    `scroll-padding-top` carries (inside `--wy-rail-ring-reserve`), and measured the same way:
-   Cards are 58.4 / 76.4px tall, the browser parks `scrollTop` on the NEAREST whole pixel,
-   and an exact reserve left the second Card 0.2px inside the fade band at 658×320 (it
-   needed 27.2px of scroll and got 27). The old over-cover had silently absorbed that; an
-   exact one cannot.
+   the Cards were then 58.4 / 76.4px tall, the browser parks `scrollTop` on the NEAREST
+   whole pixel, and an exact reserve left the second Card 0.2px inside the fade band at
+   658×320 (it needed 27.2px of scroll and got 27). The old over-cover had silently
+   absorbed that; an exact one cannot.
 
    `var(--wy-safe-bottom)` reaches this through `--wy-rail-padding-bottom`, because it is part
    of the padding that term mirrors (see `.wy-rail` above). */
@@ -1734,21 +2105,43 @@ a.wy-home:focus-visible {
   );
 }
 
-/* The scrollport is the containing block for its own visually-hidden boxes: the condensed
-   form's `.wy-stats-full` sentences and the Upgrade description are both `position:
+/* A pinned Panel is always the condensed one, and this shed is the only one: every Rail the
+   160px container query matches pins an open Panel. The condensed form once followed the
+   Rail's WIDTH alone, but the Compact fork pins the Panel at every text size, and above 125%
+   text a Compact Rail's content box can pass 160px (658×320 from 126% to 151%; 740×360 and
+   wider through 200%): the wide form's head art, role line and rows then crowd the armed
+   tower's name until it is cut off (measured at 658×320 at 150%, and 740×360 at 200%). So the
+   shed keys on the pin itself, `overlay.ts`'s class. At 100% nothing changes: every pinned
+   Rail there is already within 160px. */
+.wy-rail-panel-pinned .wy-panel-art,
+.wy-rail-panel-pinned .wy-panel-role,
+.wy-rail-panel-pinned .wy-panel-hint,
+.wy-rail-panel-pinned .wy-stats-rows {
+  display: none;
+}
+
+.wy-rail-panel-pinned .wy-stats-glance {
+  display: block;
+  font-size: 0.875rem;
+}
+
+/* The scrollport is the containing block for its own visually-hidden boxes: the
+   `.wy-stats-full` sentences and the Upgrade description are both `position:
    absolute`, and this is what keeps them resolving against THIS box rather than escaping to
    whatever positioned ancestor lies further up.
 
    HONEST STATUS: mutation-tested against the live build (forcing `position: static`), this
-   currently changes nothing measurable — Rail overflow, scrollport overflow and the tab stop
-   are identical at 658×320 armed, 658×320 selected and 1000×720 selected. An earlier comment
-   here claimed it prevented "55px of empty scroll extent"; that no longer reproduces, and the
-   claim is removed rather than left to be trusted. It is inert because `.wy-stats-full` only
-   becomes absolute inside the container query that ALSO makes `.wy-panel` sticky, so a
-   containing block already exists wherever the escape was possible.
+   changes nothing measurable. Before #181 that held because `.wy-stats-full` only became
+   absolute inside the container query that ALSO makes `.wy-panel` sticky. Since #181 (H3) the
+   full sentences are absolute at EVERY width, including the unpinned Panel, and it STILL holds
+   — measured with the mutation at 1000×720, 1080×810 and 1440×900, armed and selected: the
+   hidden 1px box anchors elsewhere (it moves by the Rail's scroll offset), but the Rail's
+   scroll extent, the scrollport's overflow and its tab stop are identical. An earlier comment
+   here claimed it prevented "55px of empty scroll extent"; that does not reproduce, and the
+   claim stays removed rather than left to be trusted.
 
-   Kept deliberately: that is a coupling between two rules in different blocks, not a
-   guarantee, and this line is what stops it being load-bearing. `relative` with no `z-index`
+   Kept deliberately: the hidden blocks are anchored to their own scrollport by this line,
+   not by whatever positioned box happens to lie further up. `relative` with no `z-index`
    forms no stacking context, so paint order is untouched. */
 .wy-panel-scroll {
   position: relative;
@@ -1948,6 +2341,30 @@ a.wy-home:focus-visible {
   .wy-dial-track {
     fill: ButtonFace;
     fill-opacity: 1;
+  }
+
+  /* The gem on a Card (#181 H3) is drawn on a BUTTON, whose forced face is `ButtonFace` with
+     `ButtonText` on it — not the page's `Canvas`/`CanvasText`, which a theme may set apart. */
+  .wy-card .wy-icon .wy-icon-body {
+    fill: ButtonText;
+    stroke: ButtonText;
+  }
+
+  .wy-card .wy-icon .wy-icon-facets {
+    stroke: ButtonFace;
+  }
+
+  /* The armed Card. Forced colours repaint its gold border in the button ink every Card
+     has, and drop the inset ring (a box shadow) outright, so armed and resting would look
+     alike. The system's own selection colour marks it instead, and the mark is the BORDER
+     itself: 3px and double, against a resting Card's 1px solid. A ring drawn as an outline
+     would be replaced by a focused Card's focus ring, leaving a focused armed Card looking
+     like a focused resting one; a border is not. The 2px the border gains is taken back from
+     the padding (beside the armed rule, and in the two icon-form arms, which restate it) and
+     from the offsets of the two parts placed from the padding edge, the corner hotkey and the
+     icon form's "need N", so arming still moves nothing inside the Card. */
+  .wy-card[aria-pressed='true'] {
+    border: 3px double Highlight;
   }
 }
 
@@ -2642,47 +3059,33 @@ a.wy-home:focus-visible {
     --wy-rail-w: min(23rem, 27vw);
   }
 
-  .wy-rail {
-    display: grid;
-    grid-template-columns: 1fr 1fr;
-    align-content: start;
-    /* `auto` rows COMPRESS toward min-content when the open Panel pushes the total past
-       the Rail's height — grid's own version of the #69 flex squash, measured: card 9's
-       row 112px → 81px with 8px of clipped text the moment the Panel opened.
-       `max-content` rows never compress; overflow scrolls instead, exactly the Rail's
-       scrollport contract. */
-    grid-auto-rows: max-content;
+  /* Since #181 the Cards' own box is the grid (`.wy-cards`), so the Rail stays a flex
+     column here as everywhere: the Panel docks full-width under the grid with no spanning
+     rule — its rows and buttons need the line length two half-width columns would deny them
+     — and the scroll fade's flex cancellation holds unchanged. (When the Rail itself was the
+     grid, the fade had to be rebuilt in grid terms, and a grid track's clamp at zero left its
+     row gap behind as 0.5rem of scroll extent. A flex line absorbs the negative outer size,
+     so that cost is gone.) The rows never compress: the grid's `min-height: auto` is its
+     content height, so an over-full Rail scrolls rather than squashing the Cards. */
+  .wy-cards {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 
-  /* The Panel reads full-width under the Card grid — the stat rows and action buttons
-     need the line length two half-width columns would deny them. */
-  .wy-panel {
-    grid-column: 1 / -1;
-  }
-
-  /* The scroll fade's cancellation is a FLEX construction (`flex-basis` supplies the box,
-     the negative margin removes it again), and none of that applies to a grid item — so the
-     same box has to be rebuilt here in grid terms: an explicit height, spanning both
-     columns, cancelled against the ROW gap rather than the flex gap.
-
-     An earlier draft simply switched this off, on the premise that the two-column Rail is
-     the one shape that never overflows. That is true at 100% and false at the 200% text
-     zoom this file commits to: measured at 1440x900 the Rail overflows by 184px, at
-     1366x768 by 316px. `syncRailAffordances()` set `wy-rail-has-more` and the has-more rule
-     resolved opacity to 1 — the box simply was not generated, so a sighted pointer user saw
-     Cards below a 0px-gutter fold with no cue at all, which is the exact defect the
-     affordance exists for.
-
-     COST, stated rather than implied: unlike the flex construction this one is NOT free. A
-     flex line absorbs a negative outer size, so there the box and its gap both cancel; a
-     grid track clamps at zero, so the row gap survives and this adds exactly 0.5rem of
-     scroll extent. That matters only if it could become the reason the fade is shown, so
-     that is what the e2e asserts: `wy-rail-has-more` is false at every two-column height at
-     100% zoom (measured 501-900px), and true only where the Rail genuinely overflows. */
-  .wy-rail::after {
-    grid-column: 1 / -1;
-    height: var(--wy-rail-fade-h);
-    margin-top: calc(-1 * var(--wy-rail-fade-h) - 0.5rem);
+  /* Two columns are for text at its default size. A Card's name sits beside a 56px art and
+     under a corner hotkey, so as the text grows the short name meets the digit and then runs
+     past the Card's edge (measured at 125–200% text on 1280×720 and 1440×900). Once the Rail
+     is too narrow for two Cards at the current text size, it falls back to one column. The
+     threshold mixes px and rem on purpose, so text zoom moves it. It is an empirical line, set
+     safely above the measured collision line, not derived: that line is about 147px + 8.9rem
+     (147px + 9.9rem in DejaVu Sans), because the Cards' paddings and borders are px and only
+     the art gap, the label margin, the grid gap and the short names scale with the text. The
+     line used here is 8-24px above it at 100% text and 50-82px above it at 200%. 112px is two
+     56px arts, and 12.6rem stands in for the rest. `minmax(0, …)` stays: a bare `1fr` gave the
+     Rail a few px of sideways range. */
+  @container wy-rail (max-width: calc(112px + 12.6rem)) {
+    .wy-cards {
+      grid-template-columns: minmax(0, 1fr);
+    }
   }
 }
 
@@ -2933,8 +3336,10 @@ a.wy-home:focus-visible {
 
      `--wy-rail-padding-top` (spent by the base rule's `padding-top`, and read by the pinned
      focus reserve) places the Cards AT REST: byte-identical to the base 0.5rem at zero
-     inset. Measured cost at 658×320: the at-rest fully-visible Cards drop 4 → 3 once the
-     inset reaches ~19px, and the scroll extent grows by exactly the inset (358 → 382px at 24).
+     inset. Measured cost at 658×320, where the phone rail's nine Cards fill the Rail exactly
+     (#181 L2): a 24px inset puts the last one below the fold (9 → 8 fully visible) and grows
+     the scroll extent by exactly the inset (0 → 24px). At 640×360 the same inset costs
+     nothing.
 
      `scroll-padding-top` places a Card that FOCUS scrolls to. Padding does not do that: focus
      scrolling aligns to the scroll snapport, which is the padding box inset by
@@ -2944,17 +3349,20 @@ a.wy-home:focus-visible {
      text size, and unarmed at 200%. Armed, that depends on the pinned Panel's focus reserve
      (`.wy-rail-panel-pinned`) leaving a snapport taller than a Card plus this band: it
      reserves exactly what the Panel covers, which at 658×320 and a 24px inset leaves 89px
-     for a 76.4px Card. (It once reserved 24px more than that, leaving 66px; the browser then
-     centred the Card and its ring sat under the bar.) Armed at 200% is the pre-existing S12a
-     geometry — a ~189px Card against ~121px of room — and nothing is claimed there.
+     for a 56px Card (76.4px before #181). (It once reserved 24px more than that, leaving
+     66px; the browser then centred the Card and its ring sat under the bar.) Armed at 200%
+     it holds too with no inset, since the phone rail's Card is 68px there (#181 L2; it was
+     ~189px against ~121px of room, the S12a geometry nothing could be claimed for). With a
+     24px inset at 200% a parked Card ends 0.4px inside the Panel's fade band, and nothing is
+     claimed there.
      THE ONE ZERO-INSET CHANGE, accepted by the owner: the reserve is then the ring band
      alone, which ends today's ~0.4px clip of the ring's top leg on a Card parked flush with
      the Rail's top edge. That band is `--wy-rail-ring-reserve`, which the base rule now
      spends on its own for Standard (#172); this fork adds the inset to it.
-     The trailing `1px` (inside that token) is rounding, and measured: the Cards' edges fall
-     on fractional pixels (they are 58.4 / 76.4px tall) while the browser parks `scrollTop` on
-     a whole pixel, so the exact band alone left rings 0.2–0.4px short (ring tops at −0.4 /
-     23.8px).
+     The trailing `1px` (inside that token) is rounding, and measured: the Cards' edges fell
+     on fractional pixels (they were 58.4 / 76.4px tall before #181) while the browser parks
+     `scrollTop` on a whole pixel, so the exact band alone left rings 0.2–0.4px short (ring
+     tops at −0.4 / 23.8px).
      The bottom edge needs no mirror: the fade reserve (`scroll-padding-bottom`, above) already
      clears the ring there — measured, not assumed (`insets.spec.ts`). */
   .wy-rail {
@@ -2970,9 +3378,12 @@ a.wy-home:focus-visible {
      Rail and shows the player zero pixels. Short viewport, wide Rail: pinning is keyed to
      the Panel not fitting, and on Compact it never does.
 
-     The condensed form is deliberately NOT repeated here. Condensing answers WRAPPING,
-     which is a width phenomenon and correctly keyed to width alone; at a 220px content box
-     nothing wraps and there is nothing to condense. This arm answers VISIBILITY. */
+     The condensed form is NOT repeated here: it follows the pin itself
+     (`.wy-rail-panel-pinned`, beside the focus reserve). An earlier draft left a 220px
+     content box on the wide form, on the reasoning that condensing answers WRAPPING alone;
+     but the wide form's head art, role line and rows clip the armed name there at heavy
+     text (150% on 658×320, 200% on 740×360), so a pinned Panel is condensed at any width.
+     This arm answers VISIBILITY. */
   .wy-panel {
     position: sticky;
     bottom: 0;
@@ -3007,18 +3418,88 @@ a.wy-home:focus-visible {
     background: linear-gradient(to top, var(--wy-surface), transparent);
   }
 
-  /* Hotkey badge is COMPACT-gated, not pointer-gated (decision 1): touch laptops keep the
-     keyboard guidance — space, not capability, is the constraint here. */
-  .wy-card-hotkey {
+  /* --- The ICON-FORM Cards (#181 L2), the Compact arm --------------------------------
+     The phone rail: the art and the cost, two to a row, so all nine Cards fit a 658×320 Rail
+     at rest — where the Cards used to drop their art and show about four of nine. The body
+     repeats the narrow-Rail arm's (beside the pinned Panel's container query), for the reason
+     the pin's own body is repeated above: `@container` and `@media` cannot be OR-ed. Kept in
+     this arm at every text size, so a phone keeps the phone rail at 200% too, scrolling where
+     the bigger cost line no longer fits. */
+  .wy-cards {
+    grid-template-columns: repeat(auto-fill, minmax(min(3.5rem, 100%), 1fr));
+    gap: 6px;
+  }
+
+  .wy-card {
+    flex-direction: column;
+    justify-content: center;
+    gap: 2px;
+    padding: 3px 2px;
+    border-radius: 8px;
+  }
+
+  @media (forced-colors: active) {
+    .wy-card[aria-pressed='true'] {
+      padding: 1px 0;
+    }
+
+    .wy-card[aria-pressed='true'] .wy-card-need {
+      top: 12px;
+      max-width: 100%;
+    }
+  }
+
+  .wy-card-swatch {
+    width: 34px;
+    height: 34px;
+    border-radius: 5px;
+  }
+
+  .wy-card-text {
+    align-items: center;
+  }
+
+  .wy-card-label {
     display: none;
   }
 
-  /* The swatch is COMPACT-gated for the same reason as the hotkey badge (space, not
-     capability): the Compact Rail is ~144px wide, and a 36px tile would force every name
-     to wrap harder inside the space the board contract protects. The glyph still exists
-     where it teaches — on the board itself. */
-  .wy-card-swatch {
-    display: none;
+  .wy-card-cost-glance {
+    justify-content: center;
+    font-size: 0.75rem;
+    line-height: 1;
+  }
+
+  .wy-card-need {
+    position: absolute;
+    top: 14px;
+    left: 50%;
+    box-sizing: border-box;
+    width: max-content;
+    max-width: calc(100% - 4px);
+    padding: 1px 4px;
+    font-size: 0.6875rem;
+    line-height: 1.2;
+    text-align: center;
+    background: var(--wy-bg);
+    border-radius: 6px;
+    transform: translateX(-50%);
+  }
+
+  /* The hotkey is COMPACT-gated, not pointer-gated (decision 1): touch laptops keep the
+     keyboard guidance — space, not capability, is the constraint here. Since #181 (L2) it is
+     visually hidden rather than removed, so it stays the tail of the Card's accessible name
+     in this arm as in every other ("Basic Tower Cost: 5 1"). Restates `.wy-sr-only`'s rules
+     for the reason `.wy-card-name` does. */
+  .wy-card-hotkey {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    padding: 0;
+    margin: -1px;
+    overflow: hidden;
+    clip-path: inset(50%);
+    white-space: nowrap;
+    border: 0;
   }
 
   /* --- The results panel, Compact (#181 H2) ---

@@ -161,23 +161,31 @@ test.describe('arming via hotkey — Standard layout', () => {
     // in ink. Read on the BASIC card (index 0, damage) and the SLOW card (index 1, control):
     // each wears its own role colour and not the other's — witnessing that the per-tower
     // look dispatch ran, not one shared picture — and slow's head shows its ringed glyph:
-    // within 4.5 CSS px of the head's centre (the ring's 3.4 px radius, well inside the
-    // star's notches at ~6 px) a dark ring pixel sits between control-coloured head on
-    // opposite sides of it.
+    // within 4.5 CSS px of the head's centre on a 36px tile (the ring's 3.4 px radius, well
+    // inside the star's notches at ~6 px — all three scaled with the tile, which #181 drew
+    // larger) a dark ring pixel sits between control-coloured head on opposite sides of it.
     const pal = resolvePalette('default');
     const rgb = (hex: number): [number, number, number] => [
       (hex >> 16) & 0xff,
       (hex >> 8) & 0xff,
       hex & 0xff,
     ];
-    const tileFit = towerArtFit(36); // the tile's fit (`swatch.ts`, SWATCH_SIZE_PX)
+    // The tile's fit is its LAID-OUT box (#181: `swatch.ts` fits the art to whatever size
+    // `ui.css` gives the canvas — 56px on a full Card), read here rather than assumed, so the
+    // head's centre below is where the art actually put it.
+    const tilePx = await page
+      .locator('.wy-card-swatch')
+      .first()
+      .evaluate((c) => c.getBoundingClientRect().width);
+    expect(tilePx, 'the full-form Card shows its art at the frame’s 56px').toBe(56);
+    const tileFit = towerArtFit(tilePx);
     const headCentre = {
       x: tileFit.x + tileFit.footprintPx / 2,
       y: tileFit.y + tileFit.footprintPx / 2,
     };
     const read = (index: number) =>
       page.evaluate(
-        ({ index, damage, control, centre }) => {
+        ({ index, damage, control, centre, tilePx }) => {
           const canvas = document.querySelectorAll('.wy-card-swatch')[index] as HTMLCanvasElement;
           const ctx = canvas.getContext('2d');
           if (ctx === null) return null;
@@ -194,11 +202,12 @@ test.describe('arming via hotkey — Standard layout', () => {
             if (near(i, damage)) damagePx++;
             if (near(i, control)) controlPx++;
           }
-          const s = w / 36; // device px per CSS px
+          const s = w / tilePx; // device px per CSS px
+          const grow = tilePx / 36; // the art's scale against the 36px tile the radii fit
           const cx = centre.x * s;
           const cy = centre.y * s;
-          const radius = 4.5 * s;
-          const reach = Math.ceil(3 * s);
+          const radius = 4.5 * grow * s;
+          const reach = Math.ceil(3 * grow * s);
           const head = (x: number, y: number): boolean =>
             x >= 0 && y >= 0 && x < w && y < h && near(at(x, y), control);
           const run = (x: number, y: number, dx: number, dy: number): boolean => {
@@ -224,6 +233,7 @@ test.describe('arming via hotkey — Standard layout', () => {
           damage: rgb(pal.roleDamage),
           control: rgb(pal.roleControl),
           centre: headCentre,
+          tilePx,
         },
       );
     const basicTile = await read(0);

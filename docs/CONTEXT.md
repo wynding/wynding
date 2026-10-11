@@ -36,6 +36,16 @@ slow, stun, DoT, support, burst. A tower is a data-defined bundle of effect
 primitives, not a fixed archetype.
 _Avoid_: ability, power, spell.
 
+**Tower role**:
+What a tower does for the maze, in one word: named for players at the top of its
+**Panel**, and shown on the board as the colour of its head. Every tower has exactly
+one — **damage** (direct or area damage and nothing else), **control** (slows or stuns),
+**poison** (damage over time), **anti-air** (strikes flying creeps), **support**
+(strengthens neighbouring towers through its **aura** instead of attacking) or **burst**
+(one discharge, then the tower is gone). A role is presentation over the tower's effect
+primitives, never a mechanic of its own: nothing in the sim reads it.
+_Avoid_: tower class, specialty.
+
 **Status effect**:
 An applied, timed instance of an effect primitive on a creep — a slow, stun, or
 DoT record with a duration. Slow and stun never stack: the strongest magnitude

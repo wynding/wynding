@@ -255,6 +255,9 @@ type Walk = {
   zoom: 100 | 200;
   inset: number;
   direction: 'Tab' | 'Shift+Tab';
+  /** The Rail's column count, asserted with its overflow as the walk's premise, so a walk
+   *  meant for a two-column Rail can never quietly walk one column. */
+  columns?: number;
 };
 
 /** THE WALK. Entered from the keyboard (the arming hotkey, or nothing) so `:focus-visible`
@@ -284,12 +287,23 @@ type Walk = {
  *  would hold this bound to a 1px margin instead of an 8-23px one. */
 async function walkRail(
   page: Page,
-  { view, armed, pinned = false, zoom, inset, direction }: Walk,
+  { view, armed, pinned = false, zoom, inset, direction, columns }: Walk,
 ): Promise<void> {
   await gotoAt(page, view);
   // compact.spec.ts's text-zoom posture: the root font doubles, so every rem does.
   if (zoom === 200) await page.addStyleTag({ content: ':root{font-size:200%}' });
   await inject(page, { top: `${inset}px` });
+  if (columns !== undefined) {
+    const premise = await page.evaluate(() => {
+      const rail = document.querySelector('.wy-rail') as HTMLElement;
+      const lefts = [...document.querySelectorAll('.wy-card')].map((c) =>
+        Math.round(c.getBoundingClientRect().left),
+      );
+      return { columns: new Set(lefts).size, overflow: rail.scrollHeight - rail.clientHeight };
+    });
+    expect(premise.columns, `the premise: a ${columns}-column Rail`).toBe(columns);
+    expect(premise.overflow, 'the premise: the Rail overflows').toBeGreaterThan(0);
+  }
   const cards = page.locator('.wy-card');
   const n = await cards.count();
   expect(n, 'the shipped catalog renders nine Cards').toBe(CARD_COUNT);
@@ -389,7 +403,7 @@ test.describe('safe-area seam — the Compact Rail pays the top inset (#153)', (
     expect(await firstCardTop()).toBeGreaterThanOrEqual(TOP);
   });
 
-  test('the restated S12a commitment at rest: 4 of 9 Cards at zero inset, every Card scroll-reachable at a nonzero one', async ({
+  test('the restated S12a commitment at rest: all 9 Cards at zero inset (#181 L2), every Card scroll-reachable at a nonzero one', async ({
     page,
   }) => {
     await gotoAt(page, PHONE);
@@ -406,7 +420,11 @@ test.describe('safe-area seam — the Compact Rail pays the top inset (#153)', (
             .length,
         };
       });
-    expect((await atRest()).fullyVisible, 'zero inset: the at-rest count is unchanged').toBe(4);
+    // Was 4 of 9 before the phone rail (#181 L2): the icon-form Cards, two to a row, fill
+    // the Rail's 304px content box exactly, so every one is on screen with no scrolling.
+    expect((await atRest()).fullyVisible, 'zero inset: every Card is on screen at rest').toBe(
+      CARD_COUNT,
+    );
 
     await inject(page, { top: `${TOP}px` });
     const n = (await atRest()).total;
@@ -438,12 +456,23 @@ test.describe('safe-area seam — the Compact Rail pays the top inset (#153)', (
   // It is now exactly what the Panel covers (ui.css `.wy-rail-panel-pinned`).
   //
   // With no tower armed the guarantee also holds at DOUBLED text zoom. Armed at doubled zoom
-  // nothing is claimed: Cards are ~189px tall against ~121px of room above the Panel — the
-  // pre-existing S12a geometry.
+  // it holds too since #181 (L2) with no inset, where it was the S12a geometry nothing could
+  // be claimed for — a ~189px Card against ~121px of room above the Panel: the phone rail's
+  // Card is 68px there. With a 24px inset nothing is claimed: the room between the bar and
+  // the Panel's fade band is then a little under a Card (measured: a parked Card's bottom at
+  // 98.0px against the band's top at 97.6px).
+  //
+  // The unarmed walk at default text size and NO inset moved to doubled zoom with #181 (L2):
+  // its premise is a Rail that scrolls, and at 658×320 the phone rail no longer does — all nine
+  // Cards sit on screen at rest, which the #153 at-rest test above asserts outright. A walk there
+  // could only fail its own guards (no fade ever painted, no scrolled stop), so it is walked
+  // where the Rail still scrolls with the Panel closed. At a 24px inset the Rail scrolls by the
+  // inset at default size, so that walk stays where it was.
   const WALKS: { armed: boolean; zoom: 100 | 200; insets: readonly number[] }[] = [
-    { armed: false, zoom: 100, insets: [0, TOP] },
+    { armed: false, zoom: 100, insets: [TOP] },
     { armed: true, zoom: 100, insets: [0, TOP] },
-    { armed: false, zoom: 200, insets: [TOP] },
+    { armed: false, zoom: 200, insets: [0, TOP] },
+    { armed: true, zoom: 200, insets: [0] },
   ];
   for (const { armed, zoom, insets } of WALKS) {
     for (const inset of insets) {
@@ -468,7 +497,13 @@ test.describe('the Standard Rail parks a focused Card with its ring inside the s
   //
   // Walked at the issue's 640x560 and at 360x640 (Standard by height, with the narrow Rail
   // that PINS an armed Panel), at 1000x720 (a wide Rail, whose armed Panel stays in flow) and
-  // at 1440x900 (the two-column Rail, which overflows only at doubled text zoom).
+  // on the wide Rail of a short desktop window, which overflows only at doubled text zoom — and
+  // since #181's shorter Cards only low in its band (doubled text fits at 1440x900), so it is
+  // walked at 1440x560. That Rail is ONE column by then: the two-column grid falls back to one
+  // at heavy text (ui.css), so what this walk exercises is the single column's scroll. A
+  // two-column Rail still overflows at rest on a wide, short window at heavy text (measured:
+  // 16-149px from 1920 to 2560 wide, 501-600 tall, at 175-200%), so the two-column walk runs at
+  // 2560x560 at 200% (56px), with its two columns asserted.
   //
   // Standard's Rail pays NO top inset of its own: it sits below `.wy-status`, which already
   // does. Two checks hold that. The 24px walks bound each ring from below by the larger of
@@ -476,10 +511,13 @@ test.describe('the Standard Rail parks a focused Card with its ring inside the s
   // through the walk's parked-Card bound, which a reserve paying the inset again fails. The
   // at-rest test below catches the same inset leaking into the Rail's padding instead.
   //
-  // Armed at doubled text zoom with the Panel pinned nothing is claimed, as in Compact: at
-  // 640x560 Cards are 189-226px tall against ~160px of room above the Panel.
+  // Armed at doubled text zoom with the Panel pinned it holds too since #181 (L2), at both
+  // insets (the status row pays the inset here, so the Rail keeps its height): at 640x560 the
+  // narrow Rail's icon-form Cards are 68px there, where they were 189-226px against ~160px
+  // of room above the Panel and nothing could be claimed.
   const STANDARD_TALL = { width: 360, height: 640 }; // portrait phone, Standard by height
-  const TWO_COLUMN = { width: 1440, height: 900 };
+  const WIDE_SHORT = { width: 1440, height: 560 };
+  const TWO_COLUMN_SHORT = { width: 2560, height: 560 };
   // The unarmed 100% walk needs a Rail that SCROLLS far enough for a Shift+Tab stop to park a
   // Card at its top bound — or the top-reserve assertion checks only Infinity. At 1000×720 it
   // did while #101's reserved hud row held the status row at 248px; since #181's one-line
@@ -494,18 +532,28 @@ test.describe('the Standard Rail parks a focused Card with its ring inside the s
     pinned: boolean;
     zoom: 100 | 200;
     insets: readonly number[];
+    columns?: number;
   }[] = [
-    { view: TABLET, armed: false, pinned: false, zoom: 100, insets: [0, TOP] },
+    // 640x560 unarmed at default text size is no longer walked (#181 L2): its 144px Rail now
+    // carries the icon-form Cards two to a row, which fit with room to spare, so there is no
+    // scroll for a walk to exercise — compact.spec.ts's at-rest test asserts all nine on
+    // screen there instead. Its two walks moved where the Rail still scrolls unarmed: the
+    // same Rail at doubled zoom, and the wide Rail at 1000x524 for the 24px inset at default
+    // size. Not the narrow portrait Rail: with that inset it scrolls 120px at 360x640, and no
+    // Shift+Tab stop there parks a Card at its top bound (the closest scrolled stop measured
+    // 7px below it), so the walk's parked-Card bound cannot be met whatever the reserve.
     { view: TABLET, armed: true, pinned: true, zoom: 100, insets: [0, TOP] },
-    { view: TABLET, armed: false, pinned: false, zoom: 200, insets: [0] },
+    { view: TABLET, armed: true, pinned: true, zoom: 200, insets: [0, TOP] },
+    { view: TABLET, armed: false, pinned: false, zoom: 200, insets: [0, TOP] },
     { view: STANDARD_TALL, armed: false, pinned: false, zoom: 100, insets: [0] },
     { view: STANDARD_TALL, armed: true, pinned: true, zoom: 100, insets: [0] },
-    { view: STANDARD_SHORT, armed: false, pinned: false, zoom: 100, insets: [0] },
+    { view: STANDARD_SHORT, armed: false, pinned: false, zoom: 100, insets: [0, TOP] },
     { view: STANDARD, armed: true, pinned: false, zoom: 100, insets: [0] },
     { view: STANDARD, armed: false, pinned: false, zoom: 200, insets: [0] },
-    { view: TWO_COLUMN, armed: false, pinned: false, zoom: 200, insets: [0] },
+    { view: WIDE_SHORT, armed: false, pinned: false, zoom: 200, insets: [0] },
+    { view: TWO_COLUMN_SHORT, armed: false, pinned: false, zoom: 200, insets: [0], columns: 2 },
   ];
-  for (const { view, armed, pinned, zoom, insets } of WALKS) {
+  for (const { view, armed, pinned, zoom, insets, columns } of WALKS) {
     for (const inset of insets) {
       for (const direction of ['Tab', 'Shift+Tab'] as const) {
         const state = armed ? (pinned ? 'armed, Panel pinned' : 'armed, Panel in flow') : 'unarmed';
@@ -513,7 +561,7 @@ test.describe('the Standard Rail parks a focused Card with its ring inside the s
         test(`${view.width}x${view.height} ${state}, ${zoom}% text, ${inset}px top inset, ${direction}: every focused Card AND its ring stay inside the Rail's scrollport${extra}`, async ({
           page,
         }) => {
-          await walkRail(page, { view, armed, pinned, zoom, inset, direction });
+          await walkRail(page, { view, armed, pinned, zoom, inset, direction, columns });
         });
       }
     }
