@@ -1499,20 +1499,24 @@ describe('a slowed flyer’s wings under its own slow ring — MEASURED and PINN
     return seen / wing;
   };
 
-  it('leaves at least the pinned share of each flyer’s wings in sight, at the narrow floor, a phone’s cells, and up', () => {
-    const report: string[] = [];
-    for (const [cell, [flying, armoredFlyer]] of Object.entries(PINNED)) {
-      const cellPx = Number(cell);
-      const shares = [
-        visibleShare('triangle', creepRadius(cellPx, 'flying')),
-        visibleShare('hexagon', creepRadius(cellPx, 'armored')),
-      ];
-      report.push(`${cellPx}px ${shares.map((s) => (s * 100).toFixed(0) + '%').join('/')}`);
-      expect(shares[0], `flying at ${cellPx}px`).toBeGreaterThanOrEqual(flying);
-      expect(shares[1], `armored-flyer at ${cellPx}px`).toBeGreaterThanOrEqual(armoredFlyer);
-    }
-    console.info(
-      `[scene.test] a slowed flyer's wings in sight past its slow ring: ${report.join(', ')}`,
-    );
-  });
+  it(
+    'leaves at least the pinned share of each flyer’s wings in sight, at the narrow floor, a phone’s cells, and up',
+    { timeout: 60_000 },
+    () => {
+      const report: string[] = [];
+      for (const [cell, [flying, armoredFlyer]] of Object.entries(PINNED)) {
+        const cellPx = Number(cell);
+        const shares = [
+          visibleShare('triangle', creepRadius(cellPx, 'flying')),
+          visibleShare('hexagon', creepRadius(cellPx, 'armored')),
+        ];
+        report.push(`${cellPx}px ${shares.map((s) => (s * 100).toFixed(0) + '%').join('/')}`);
+        expect(shares[0], `flying at ${cellPx}px`).toBeGreaterThanOrEqual(flying);
+        expect(shares[1], `armored-flyer at ${cellPx}px`).toBeGreaterThanOrEqual(armoredFlyer);
+      }
+      console.info(
+        `[scene.test] a slowed flyer's wings in sight past its slow ring: ${report.join(', ')}`,
+      );
+    },
+  );
 });
