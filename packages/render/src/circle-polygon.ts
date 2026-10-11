@@ -1,5 +1,6 @@
-// circle-polygon.ts — a small circle drawn as a regular polygon (visual pass T3, #181; R5 reuses
-// it for tracers, sparks and pips). Phaser-free: anything with `fillPoints` and `strokePoints`
+// circle-polygon.ts — a small circle drawn as a regular polygon (visual pass T3, #181; R4's
+// `circle-path.ts` already draws the live layers' circles as polygons, and R5 decides whether to
+// unify the two side-count rules). Phaser-free: anything with `fillPoints` and `strokePoints`
 // draws one — a live layer's Phaser `Graphics`, or the tests' recording layer.
 //
 // WHY: Phaser's WebGL Graphics draws every arc as 101 points, whatever its radius

@@ -314,8 +314,9 @@ export function drawFireFeedback(
  * content gate lives in `tracers.test.ts` against the plan itself. Each tracer lerps toward
  * its target creep's interpolated point (`drawnAt`, by creep id — the frame's one map of
  * them), and its dot is snapped to a whole device pixel the way the creep sprites are
- * (`placement.ts`), so a tracer that has arrived sits EXACTLY on the centre its target creep
- * is drawn at, not up to half a device pixel off it.
+ * (`placement.ts`), so a tracer that has arrived sits EXACTLY on the creep's true centre
+ * (a flyer's body is drawn above that point, its shadow on it), not up to half a device pixel
+ * off it.
  */
 export function drawTracers(
   g: GraphicsLike,

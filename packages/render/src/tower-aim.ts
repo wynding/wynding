@@ -88,8 +88,9 @@ export interface AimShot {
 export interface AimFrame {
   /** The towers the sim holds this frame (`curVm.towers`). */
   readonly towers: readonly TowerVM[];
-  /** Where each creep is drawn this frame, by entity id, in fixed-point sim units — the
-   *  interpolated points (`interpolateCreeps`), the map the tracers converge on. */
+  /** Where each creep truly is this frame, by entity id, in fixed-point sim units — the
+   *  interpolated points (`interpolateCreeps`), the map the tracers converge on. A flyer's body
+   *  is drawn above its point; its shadow sits on it. */
   readonly creeps: ReadonlyMap<number, { readonly x: number; readonly y: number }>;
   /** Render time, in fractional ticks (`renderTimeOf`). */
   readonly renderTick: number;

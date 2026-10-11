@@ -1379,13 +1379,15 @@ which are cleared and redrawn every frame: tracers, impact sparks, HP pips, rang
 rest. Every circle among them is a hundred and one points whatever its size, so a tracer's dot a few
 pixels across costs Phaser what a range ring does. Drawing those circles as `circle-polygon.ts`
 polygons, as T3's flash and rings now are, is the largest saving left in reach. Visual pass items C1
-and C2 (combat feedback and shots) take it up for tracers, sparks and pips.
+and C2 (combat feedback and shots) take it up for tracers, sparks and pips. _Updated by R4:_ R4's `circle-path.ts` now draws every live
+`strokeCircle` and `fillCircle` as a polygon (see R4's paragraph earlier in this ADR).
 
 **Outside T3: the frame keys.** The single largest cost in the board frame's JavaScript, in every
 scene and with T3 on or off, is `anchorOf` in `placement.ts`, at about a fifth of it: every frame
 builds each creep's and each head's atlas frame key as a new string and looks it up in the frame
 map, so every lookup hashes a fresh string. It predates T3 (R1 and R2), and is left for a later
-pass; the creep frame keys change with the creep art (R4) anyway.
+pass; the creep frame keys change with the creep art (R4) anyway. _Updated by R4:_ R4 now builds tower and creep frame keys once
+(`towerFrameKeys`, `creepFrameKeys`, `CREEP_TABLES`).
 
 **The rim repaint (`rims`, after the turned-rim fix).** A turned or knocked-back head on a plated
 tower darkened the plate's rim at fractional device scales, so the sprite layer `rims` repaints the
