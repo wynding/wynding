@@ -17,6 +17,7 @@
 // TURNED toward its target (visual pass T3): it turns about its footprint centre, and a turned
 // sprite's texels fall between pixels whatever its position (`placeHead`).
 
+import { FP_ONE } from '@wynding/engine';
 import { visibleTowers, type CreepCueInput } from './board-draw';
 import {
   creepFrameKeys,
@@ -33,7 +34,7 @@ import type { CreepFamily } from './creep-paint';
 import { snapToDevicePx } from './device-px';
 import type { Projection } from './projection';
 import { creepColour, type Palette } from './palette';
-import type { CreepVM, RenderOverlay, RenderVM, TowerVM } from './types';
+import type { CreepLookVM, CreepVM, RenderOverlay, RenderVM, TowerVM } from './types';
 
 /** One sprite: the atlas frame it shows, where it goes (world CSS px), and its opacity — 1
  *  unless it says otherwise. `x`/`y` place the sprite's ORIGIN: its top-left corner, unless
@@ -73,7 +74,8 @@ export interface HeadPose {
  *  head that does not aim, and every head under Reduce motion. */
 export const HEAD_AT_REST: HeadPose = { angle: 0, recoilPx: 0 };
 
-function anchorOf(frames: ReadonlyMap<string, FrameAnchor>, key: string): FrameAnchor {
+/** The atlas frame `key`'s anchor: a miss is a broken atlas, never a quiet gap. */
+export function anchorOf(frames: ReadonlyMap<string, FrameAnchor>, key: string): FrameAnchor {
   const frame = frames.get(key);
   // Every key placement can produce — `groundFrameKey`, `headFrameKey`, `pendingFrameKey`,
   // the scorch, `creepFrameKeys` — is baked (`art-frames.ts`), for any id at all: a miss is a
@@ -211,8 +213,11 @@ export function placeScorches(
   });
 }
 
-/** One creep's BODY: its sprite, plus everything its live cues need. */
-export interface CreepPlacement extends SpritePlacement, CreepCueInput {}
+/** One creep's BODY: its sprite, plus everything its live cues need, and the creep's entity id
+ *  — what the frame keys where it is drawn by (`creepAimPoints`). */
+export interface CreepPlacement extends SpritePlacement, CreepCueInput {
+  readonly id: number;
+}
 
 /** Every creep sprite this frame. */
 export interface CreepPlacements {
@@ -221,12 +226,16 @@ export interface CreepPlacements {
   /** Each creep's body, with what its cues need — the creeps layer: every creep on the
    *  ground, then every creep in the air. */
   readonly bodies: readonly CreepPlacement[];
+  /** Each flashing creep's hit flash (C1) — the flashes layer, over every body: its body's
+   *  silhouette in white, on its body to the texel, at the flash's opacity. */
+  readonly flashes: readonly SpritePlacement[];
 }
 
-/** What `placeCreeps` reads of a creep: its interpolated position and the state its
- *  frames and cues are keyed on. */
+/** What `placeCreeps` reads of a creep: its entity id, its interpolated position and the state
+ *  its frames and cues are keyed on. */
 export type CreepPlacementInput = Pick<
   CreepVM,
+  | 'id'
   | 'x'
   | 'y'
   | 'hpFrac'
@@ -239,13 +248,15 @@ export type CreepPlacementInput = Pick<
   | 'boss'
 >;
 
-/** What placement needs of one creep look in one atlas: its two frames and their anchors,
- *  and its family. */
+/** What placement needs of one creep look in one atlas: its frames and their anchors, and its
+ *  family. */
 interface CreepLookPlacement {
   readonly body: string;
   readonly bodyAnchor: FrameAnchor;
   readonly shadow: string;
   readonly shadowAnchor: FrameAnchor;
+  readonly flash: string;
+  readonly flashAnchor: FrameAnchor;
   readonly family: CreepFamily;
 }
 
@@ -279,12 +290,113 @@ function creepLookPlacement(
     bodyAnchor: anchorOf(frames, keys.body),
     shadow: keys.shadow,
     shadowAnchor: anchorOf(frames, keys.shadow),
+    flash: keys.flash,
+    flashAnchor: anchorOf(frames, keys.flash),
     family: keys.look.family,
   });
 }
 
 /** The canvas's top edge, world CSS px: no flyer's body is drawn above it. */
 const CANVAS_TOP = 0;
+
+/** Where a creep of `look` standing at fixed-point `(x, y)` is drawn: its true position
+ *  snapped to a whole device pixel (`sx`, `sy`) — where its sprites are anchored — how far its
+ *  body is stepped down to stay on the canvas (`down`), and its body's radius. */
+interface DrawnBody {
+  readonly sx: number;
+  readonly sy: number;
+  readonly down: number;
+  readonly r: number;
+}
+
+function drawnBody(
+  x: number,
+  y: number,
+  look: CreepLookPlacement,
+  airborne: boolean,
+  projection: Projection,
+): DrawnBody {
+  const dpr = projection.dpr;
+  const p = projection.fpToPixel(x, y);
+  const sx = snapToDevicePx(p.x, dpr);
+  const sy = snapToDevicePx(p.y, dpr);
+  const top = sy - look.bodyAnchor.anchorY;
+  // Whole device pixels (the body stays on the texel grid); the epsilon keeps a float's
+  // error on an exact edge from costing a pixel.
+  const down = airborne && top < CANVAS_TOP ? Math.ceil((CANVAS_TOP - top) * dpr - 1e-6) / dpr : 0;
+  return { sx, sy, down, r: creepRadius(projection.cellPx, look.family) };
+}
+
+/**
+ * The centre of the body a creep of `look` standing at fixed-point `(x, y)` is drawn with,
+ * world CSS px — exactly the centre `placeCreeps` gives its body (`CreepPlacement.cx/cy`): its
+ * true position snapped to a whole device pixel, and for a flyer lifted (and stepped down at the
+ * canvas top) as its body is. Where an effect that belongs to a creep no longer drawn lands — a
+ * kill's burst, a flyer's spark (visual pass C1/C2, #181).
+ */
+export function creepBodyCentre(
+  x: number,
+  y: number,
+  look: CreepLookVM,
+  projection: Projection,
+  frames: ReadonlyMap<string, FrameAnchor>,
+): { x: number; y: number } {
+  const airborne = look.domain === 'air';
+  const placed = creepLookPlacement(frames, look.creepId, look.boss, airborne);
+  const b = drawnBody(x, y, placed, airborne, projection);
+  return { x: b.sx, y: b.sy - creepLiftPx(b.r, airborne) + b.down };
+}
+
+/** A creep's drawn point as `creepAimPoints` keeps it from frame to frame: the point, in sim
+ *  units, and the call that last wrote it. */
+export interface KeptAimPoint {
+  x: number;
+  y: number;
+  call: number;
+}
+
+/** How many times `creepAimPoints` has run: each call stamps the points it writes. */
+let aimPointCalls = 0;
+
+/**
+ * Where each creep in `bodies` is drawn, by entity id, in fixed-point sim units: its body's
+ * centre (`CreepPlacement.cx/cy`) taken back through the projection. What the heads aim at and
+ * the shots land on (visual pass C2, #181) — so for a flyer its lifted body, where the player
+ * sees it, not the true point under it — in the units the trackers and `positionTracers` work
+ * in. A ground creep's is its true point snapped to a whole device pixel, where its body is.
+ *
+ * Written into `into` — a new map unless the caller keeps one across frames, as the board frame
+ * does: each body's point is rewritten in place, and a creep no longer drawn loses its entry, so
+ * the map holds exactly this frame's points and a frame makes no object per creep.
+ */
+export function creepAimPoints(
+  bodies: readonly CreepPlacement[],
+  projection: Projection,
+  into: Map<number, KeptAimPoint> = new Map(),
+): ReadonlyMap<number, { readonly x: number; readonly y: number }> {
+  const call = ++aimPointCalls;
+  const k = FP_ONE / projection.cellPx;
+  let written = 0;
+  for (const b of bodies) {
+    const x = (b.cx - projection.originX) * k;
+    const y = (b.cy - projection.originY) * k;
+    const kept = into.get(b.id);
+    if (kept === undefined) {
+      into.set(b.id, { x, y, call });
+      written += 1;
+    } else {
+      if (kept.call !== call) written += 1;
+      kept.x = x;
+      kept.y = y;
+      kept.call = call;
+    }
+  }
+  // An entry this call did not write is a creep an earlier frame drew and this one does not.
+  if (into.size > written) {
+    for (const [id, p] of into) if (p.call !== call) into.delete(id);
+  }
+  return into;
+}
 
 /**
  * Every creep sprite this frame: each creep's SHADOW, for the creep-shadows layer, and its
@@ -305,39 +417,37 @@ const CANVAS_TOP = 0;
  * pixels that it does not, its cues with it: its wings are its airborne cue, and the
  * detached cue they replace flipped below its creep there for the same reason (Codex P2,
  * PR #87).
+ *
+ * A creep `flashOf` gives an opacity above 0 shows its hit flash (C1): its look's white
+ * silhouette, anchored where its body is, so the two land on the same texels — ground creeps'
+ * first, then flyers', in the order their bodies come.
  */
 export function placeCreeps(
   interpolated: readonly CreepPlacementInput[],
   pal: Palette,
   projection: Projection,
   frames: ReadonlyMap<string, FrameAnchor>,
+  flashOf: (id: number) => number = () => 0,
 ): CreepPlacements {
-  const dpr = projection.dpr;
-  const cellPx = projection.cellPx;
   const shadows: SpritePlacement[] = [];
   const ground: CreepPlacement[] = [];
   const air: CreepPlacement[] = [];
+  const groundFlashes: SpritePlacement[] = [];
+  const airFlashes: SpritePlacement[] = [];
   for (const c of interpolated) {
     const airborne = c.domain === 'air';
     const look = creepLookPlacement(frames, c.creepId, c.boss, airborne);
-    const p = projection.fpToPixel(c.x, c.y);
-    const x = snapToDevicePx(p.x, dpr);
-    const y = snapToDevicePx(p.y, dpr);
+    const { sx: x, sy: y, down, r } = drawnBody(c.x, c.y, look, airborne, projection);
     shadows.push({
       frame: look.shadow,
       x: x - look.shadowAnchor.anchorX,
       y: y - look.shadowAnchor.anchorY,
     });
-    const r = creepRadius(cellPx, look.family);
-    const top = y - look.bodyAnchor.anchorY;
-    // Whole device pixels (the body stays on the texel grid); the epsilon keeps a float's
-    // error on an exact edge from costing a pixel.
-    const down =
-      airborne && top < CANVAS_TOP ? Math.ceil((CANVAS_TOP - top) * dpr - 1e-6) / dpr : 0;
     (airborne ? air : ground).push({
+      id: c.id,
       frame: look.body,
       x: x - look.bodyAnchor.anchorX,
-      y: top + down,
+      y: y - look.bodyAnchor.anchorY + down,
       cx: x,
       cy: y - creepLiftPx(r, airborne) + down,
       r,
@@ -348,6 +458,19 @@ export function placeCreeps(
       stunned: c.stunned,
       warded: c.warded,
     });
+    const flash = flashOf(c.id);
+    if (flash > 0) {
+      (airborne ? airFlashes : groundFlashes).push({
+        frame: look.flash,
+        x: x - look.flashAnchor.anchorX,
+        y: y - look.flashAnchor.anchorY + down,
+        alpha: flash,
+      });
+    }
   }
-  return { shadows, bodies: air.length === 0 ? ground : [...ground, ...air] };
+  return {
+    shadows,
+    bodies: air.length === 0 ? ground : [...ground, ...air],
+    flashes: airFlashes.length === 0 ? groundFlashes : [...groundFlashes, ...airFlashes],
+  };
 }

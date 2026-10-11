@@ -4,10 +4,11 @@
 //
 // WHAT A HEAD AIMS AT is the sim's own target lock, read and never decided here:
 // `TowerVM.targetId` (the sim's `towers.targetId` column, 0 for none) names the creep, and the
-// head turns toward where that creep is DRAWN this frame — its interpolated point, from the
-// same per-frame map the tracers converge on. For a flyer that is its true position, where its
-// shadow is drawn, not its body lifted above it (`CREEP_LIFT`): the head, like the tracers,
-// takes the sim's point. Only the heads drawn to aim turn (`towerAims`: basic, venom, stun,
+// head turns toward where that creep is DRAWN this frame — its body's centre, from the same
+// per-frame map the shots converge on (`creepAimPoints`). For a flyer that is its body lifted
+// above its true position (`CREEP_LIFT`), where the player sees it, not its shadow: a head, its
+// shot and the creep it is aimed at agree (visual pass C2, #181; R4's heads took the flyer's
+// true position until then). Only the heads drawn to aim turn (`towerAims`: basic, venom, stun,
 // antiair); the rest never do.
 //
 // HOW IT TURNS: toward that point along the shorter arc, never faster than
@@ -88,9 +89,9 @@ export interface AimShot {
 export interface AimFrame {
   /** The towers the sim holds this frame (`curVm.towers`). */
   readonly towers: readonly TowerVM[];
-  /** Where each creep truly is this frame, by entity id, in fixed-point sim units — the
-   *  interpolated points (`interpolateCreeps`), the map the tracers converge on. A flyer's body
-   *  is drawn above its point; its shadow sits on it. */
+  /** Where each creep is drawn this frame, by entity id, in fixed-point sim units — its body's
+   *  centre (`creepAimPoints`), the map the shots converge on: a ground creep's interpolated
+   *  point, snapped as its sprite is; a flyer's body, lifted above it. */
   readonly creeps: ReadonlyMap<number, { readonly x: number; readonly y: number }>;
   /** Render time, in fractional ticks (`renderTimeOf`). */
   readonly renderTick: number;
@@ -125,6 +126,12 @@ interface Head {
  *  `tower-fire.ts` finds a shot's tower by it, so all three must meet the same point. */
 export function footprintCentreFp(cell: number): number {
   return (cell + 1) * FP_ONE;
+}
+
+/** One number for a fixed-point point, so a map can be keyed by it: sim coordinates are whole and
+ *  far below 2^26. */
+export function fpPointKey(x: number, y: number): number {
+  return x * 67108864 + y;
 }
 
 /** The bearing of `shot` from its tower's footprint centre: toward where its target is drawn,

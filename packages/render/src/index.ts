@@ -9,13 +9,21 @@
 
 export { createProjection } from './projection';
 export type { BoardLayout, Projection } from './projection';
-export { deriveViewModel, deriveHud } from './view-model';
+// `creepLook`: a creep's look from its catalog id alone, by the view model's own joins — for a
+// kill the board never drew (`apps/web`'s `combat-events.ts`, #181 C1).
+export { deriveViewModel, deriveHud, creepLook } from './view-model';
 export { interpolateCreeps } from './interpolate';
 export { resolvePalette, roleColour, COLOUR_MODES } from './palette';
 export type { Palette } from './palette';
-export { renderTimeOf, positionTracers, tracerPaintOps } from './tracers';
-export type { PositionedTracer, TracerPaintOp } from './tracers';
+export { renderTimeOf, positionTracers } from './tracers';
+export type { PositionedTracer } from './tracers';
 export { isDetonation } from './scorches';
+// The board's bounty-pop gem and leak-pulse inks (#181 C1): the HUD's own bounty and lives
+// colours, which `hud-icons.test.ts` holds them to.
+export { ART_GEM, ART_LIVES } from './art-ink';
+// Where a tower's shots start — the sim's fire origin, its footprint centre — for the controller
+// to find a shot's tower by, as the renderer does (`tower-fire.ts`).
+export { footprintCentreFp, fpPointKey } from './tower-aim';
 export {
   creepShapeFor,
   creepFamilyFor,
@@ -65,4 +73,7 @@ export type {
   RenderOverlay,
   RenderHandle,
   TracerVM,
+  SparkPoint,
+  KillVM,
+  CreepLookVM,
 } from './types';

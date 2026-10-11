@@ -72,6 +72,8 @@ const REQUIRED_TOKENS = [
   'fg-dim',
   'lives',
   'lives-pill',
+  // #181 (C1): the lives chip's fill for the moment a creep gets through.
+  'lives-leak',
   'bounty',
   'stars',
   'icon-ink',
@@ -104,6 +106,8 @@ describe('DOM contrast gate — ui.css tokens (WCAG text ≥ 4.5:1, non-text ≥
       // score's dim "Score" label and the stars' "/ 3". The lives value is read on its pill.
       ['fg-dim', 'bg'],
       ['fg', 'lives-pill'],
+      // #181 (C1): and on the red the chip turns as a creep gets through.
+      ['fg', 'lives-leak'],
       // The wave strip is a `surface` box: its title and counts (`fg`, gated above) and a
       // single-entry wave's dim name and clause.
       ['fg-dim', 'surface'],
@@ -151,6 +155,8 @@ describe('DOM contrast gate — ui.css tokens (WCAG text ≥ 4.5:1, non-text ≥
       // heart also sits on the lives pill, whose border is the same ink.
       ['lives', 'bg'],
       ['lives', 'lives-pill'],
+      // #181 (C1): the heart and Standard's pill border on the leak's red.
+      ['lives', 'lives-leak'],
       ['bounty', 'bg'],
       ['stars', 'bg'],
       // The gem's and star's outline and facets, against the fills they outline.

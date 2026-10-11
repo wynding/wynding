@@ -421,7 +421,7 @@ describe('runCombat — landed-impact StepEvents (#31)', () => {
       events,
     );
     expect(result.creeps.hp[0]).toBe(100 - DIRECT_DAMAGE); // damaged, alive
-    expect(events.impactPoints).toEqual([{ x: cx(7), y: cy(6), radiusFp: 0 }]);
+    expect(events.impactPoints).toEqual([{ x: cx(7), y: cy(6), radiusFp: 0, targetId: 1 }]);
   });
 
   it('a kill produces exactly one event, at the point before death', () => {
@@ -449,7 +449,7 @@ describe('runCombat — landed-impact StepEvents (#31)', () => {
       events,
     );
     expect(result.creeps.id).toHaveLength(0); // killed and swept
-    expect(events.impactPoints).toEqual([{ x: cx(7), y: cy(6), radiusFp: 0 }]);
+    expect(events.impactPoints).toEqual([{ x: cx(7), y: cy(6), radiusFp: 0, targetId: 1 }]);
   });
 
   it('same-tick two-impact overkill produces exactly one event (the second is wasted)', () => {
@@ -515,7 +515,7 @@ describe('runCombat — landed-impact StepEvents (#31)', () => {
     }
     // Exactly one fire+resolve landed within this window (fired at t=0, resolves at
     // TRAVEL_TICKS, next fire not due until FIRE_INTERVAL) — the collector accumulated it.
-    expect(events.impactPoints).toEqual([{ x: cx(7), y: cy(6), radiusFp: 0 }]);
+    expect(events.impactPoints).toEqual([{ x: cx(7), y: cy(6), radiusFp: 0, targetId: 1 }]);
   });
 });
 
@@ -2441,6 +2441,43 @@ describe('runCombat — StepEvents dotTicks/dotDropped (M2-S5a P3, #31/#32 prece
       );
     }).not.toThrow();
     expect(Object.keys(events)).toEqual(['impactPoints', 'fired']); // no new keys appeared
+  });
+
+  it('StepEvents.killed (#181): a kill where no position derives — a forged row only a direct `runCombat` call can carry — is credited, not reported', () => {
+    // `step()` never hands combat such a row (movement drops it first), and a targeted or a
+    // blast impact never strikes one; a DoT tick does, since it goes by hp and id alone.
+    const creeps = restingCreeps([
+      { id: 1, col: 7, row: 6, hp: 5 },
+      { id: 2, col: 9, row: 6, hp: 5 },
+    ]);
+    creeps.progress[0] = -1; // `deriveValidCreepPosition` rejects a negative progress
+    const poison = (targetId: number): DotRecord => ({
+      targetId,
+      sourceId: 100,
+      amount: 10,
+      cadenceTicks: 5,
+      nextTickTick: 0,
+      untilTick: 100,
+    });
+    const events: StepEvents = { impactPoints: [], fired: [], killed: [] };
+    const result = runCombatT(
+      creeps,
+      emptyTowers(),
+      [],
+      0,
+      0,
+      FIELD,
+      GRID,
+      TOWER_BY_ID,
+      RULESET.balance.slowFloorNum,
+      RULESET.balance.slowFloorDen,
+      events,
+      new Rng(TEST_RNG_SEED),
+      [poison(1), poison(2)],
+    );
+    expect(result.creeps.id).toEqual([]); // both died
+    expect(result.killBounty).toBe(2); // and both were credited
+    expect(events.killed).toEqual([{ id: 2, creepId: 'normal', x: cx(9), y: cy(6), bounty: 1 }]);
   });
 });
 

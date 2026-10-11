@@ -92,6 +92,8 @@ const overlay = (sparks: RenderOverlay['sparks']): RenderOverlay => ({
   colourMode: 'default',
   reducedMotion: false,
   tracers: [],
+  kills: [],
+  leaks: 0,
 });
 // A mine going off with no tracer drawn: only its marked landing, at its footprint centre.
 const LANDING = [{ x: 7 * 256, y: 3 * 256, radiusFp: 2.5 * 256, detonation: true }] as const;

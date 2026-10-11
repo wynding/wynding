@@ -48,6 +48,7 @@ import { validateSurveyPayload, type SurveyPayload } from '@wynding/feedback';
 import { type SurveyAsk, type SurveySendResult, type SurveyTransport } from './survey';
 import type { WakeLockApi } from './wakelock';
 import { fakeWakeLock } from './wakelock-fakes';
+import { LEAK_CUE_GAP_MS, LEAK_CUE_MS } from './leak-cue';
 
 // The shared fake handle the mocked scene returns (same object every mount call).
 const fakeHandle = (mountMock as unknown as () => RenderHandle)();
@@ -3172,5 +3173,71 @@ describe('main — Compact’s chips cut wiring (#181 QC round 2)', () => {
         (window as unknown as { ResizeObserver: unknown }).ResizeObserver = originalRO;
       }
     }
+  });
+});
+
+describe('main — the lives chip’s leak cue, wired to a real run (#181 C1)', () => {
+  it('cues the chip in the frame its count drops, at most once a second, for the cue’s span — and Play again clears one still showing', () => {
+    const root = document.createElement('div');
+    document.body.appendChild(root);
+    const sched = manualSchedule();
+    let clock = 0;
+    const app = createApp(document, root, {
+      sceneFactory: () => fakeHandle,
+      schedule: sched.schedule,
+      now: () => clock,
+      seed: 7,
+    });
+    openApps.push(app);
+    sched.frame((clock += FRAME_MS));
+    const chip = root.querySelector<HTMLElement>('.wy-chip[data-wy-chip="lives"]')!;
+    const count = (): number => Number(chip.querySelector('.wy-chip-value')!.textContent);
+    const cued = (): boolean => chip.hasAttribute('data-wy-leak');
+    expect(count()).toBeGreaterThan(1);
+    dockButton(root, 'Start').click();
+    const starts: number[] = [];
+    let drops = 0;
+    let ends = 0;
+    const startLives = count();
+    let boardLeaks = 0;
+    // Every leak but the last, frame by frame at 1×.
+    for (let i = 0; i < 100_000 && count() > 1; i++) {
+      const was = { lives: count(), cued: cued() };
+      sched.frame((clock += FRAME_MS));
+      boardLeaks += vi.mocked(fakeHandle.draw).mock.calls.at(-1)?.[3]?.leaks ?? 0;
+      const dropped = count() < was.lives;
+      if (dropped && drops++ === 0) expect(cued(), 'the first leak cues at once').toBe(true);
+      if (cued() && !was.cued) {
+        expect(dropped, `a cue at ${clock} with no leak`).toBe(true);
+        starts.push(clock);
+      }
+      if (!cued() && was.cued) {
+        ends++;
+        expect(clock - starts.at(-1)!).toBeGreaterThanOrEqual(LEAK_CUE_MS);
+        expect(clock - FRAME_MS - starts.at(-1)!).toBeLessThan(LEAK_CUE_MS);
+      }
+    }
+    expect(drops, 'the premise: creeps leaked').toBeGreaterThanOrEqual(3);
+    expect(starts.length).toBeGreaterThanOrEqual(2);
+    expect(ends).toBeGreaterThanOrEqual(1);
+    // The board is handed every leak the lives chip lost a life to — the cue's rate limit
+    // spares the chip's flashes, never the board's.
+    expect(boardLeaks, 'every leak reaches the board').toBe(startLives - count());
+    for (let i = 1; i < starts.length; i++) {
+      expect(starts[i]! - starts[i - 1]!).toBeGreaterThanOrEqual(LEAK_CUE_GAP_MS);
+    }
+    // The last life: hold the run past the cue's gap, then let the creep through — its cue
+    // begins with the loss, and Play again clears it at once.
+    const pause = dockButton(root, 'Pause');
+    pause.click();
+    for (let i = 0; i < 80; i++) sched.frame((clock += FRAME_MS)); // 1.28 s, the sim held
+    expect(cued()).toBe(false);
+    pause.click(); // Resume
+    const results = root.querySelector<HTMLElement>('.wy-results')!;
+    for (let i = 0; i < 100_000 && results.hidden; i++) sched.frame((clock += FRAME_MS));
+    expect(results.hidden).toBe(false);
+    expect(cued(), 'the losing leak cues the chip').toBe(true);
+    results.querySelector<HTMLButtonElement>('.wy-btn')!.click(); // Play again
+    expect(cued()).toBe(false);
   });
 });

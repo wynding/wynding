@@ -1336,6 +1336,10 @@ cost; untraced runs are what size it.
   ring, that 1% is under a quarter of a pixel at the cell size a 1440×900 window plays at,
   thirty-three pixels, and at any smaller cell; at larger cells it grows with the ring, to just
   under half a pixel at sixty-pixel cells. A flash at thirty-three-pixel cells has thirteen sides.
+  _Updated by R5:_ the flash and the rings now take their side count from `circle-path.ts`'s
+  `circleSegments`, the rule R4 gave every other live circle, so the board has one rule: within a
+  quarter of a device pixel of the circle at the dpr. The counts above are R3's own rule's, not
+  the code's any more; `circle-polygon.test.ts` pins the current ones.
 
 **After (QC round 2, the code of `3d83684`).** Four runs of the record-only suite, gated, one
 worker, on AC power with the gate's fast policy throughout, alternating the head and T3 off
@@ -1401,3 +1405,47 @@ line holds unchanged. It changes no budget, no trigger, `R0`, `TOLERANCE` or the
 **What this evidence is.** Emulation on one development machine (Chrome 149.0.7827.55, ANGLE Metal
 on an Apple M4 Pro), the same class of evidence as V2's entry: the CPU throttles slow JavaScript,
 not the GPU. It does not stand in for the real-device pass that ruling 6 above still holds open.
+
+## Amendment — 2026-10-11 (visual pass C1 and C2, #181) — what combat feedback costs
+
+Visual pass items C1 and C2 add the combat feedback the board shows (kill bursts, bounty pops,
+the exit's leak pulse, hit flashes, one tracer per tower) and the lives chip's leak cue, a restyle
+and a shake of one DOM chip. This entry records what that costs at low-end, which is where it
+shows; it changes no budget, no trigger, `R0`, `TOLERANCE` or the CI ratio gate.
+
+**Measured at low-end (R5's QC, `075942e` against `5dde238`, the head before it).** Gated runs of
+the record-only suite, one worker, on AC power. Frames counted in the sampling window, the mean
+over runs: twelve of `5dde238` in each scene, and of `075942e` fifteen in the catalog scene and
+nine in the stress scene.
+
+| scene   | `5dde238` | `075942e` | change |
+| ------- | --------- | --------- | ------ |
+| catalog | 832.8     | 804.3     | −3.4%  |
+| stress  | 627.6     | 611.8     | −2.5%  |
+
+By the median the stress scene's change is −3.5% (634 frames to 612): one of the earlier head's
+twelve stress runs counted 562 frames, the others 621 to 641. No run of either head breached p95.
+Taking the leak cue's restyle out gave back under two percent of the catalog scene's frames, over
+nine runs; the per-frame JavaScript the feedback adds is about 1% of the frame. Two changes followed
+the measurement: the board frame keeps one map of where each creep is drawn instead of building one
+per frame (`creepAimPoints`), and the controller finds what a step removed in one walk down two
+sorted lists (`stepOutcome`), returning early from `markFlyerSparks` when no flyer stands or fell.
+In three runs each, neither moved the mean frame count by 2% either way, and every mean stayed
+inside the spread of `075942e`'s own runs (793 to 810 frames in the catalog scene, 592 to 629 in the
+stress scene): they trim work the suite does not see at this size. The reading of the frame counts
+is the mean-frame-time one T3's entry above gives.
+
+The combat feedback names its creeps from the step, not from where they stood. For a caller that
+passes the lists, the sim's movement phase appends the id of each creep it removes at the exit to
+`StepEvents.leaked`; its combat sweep appends each creep it kills to `StepEvents.killed`, with its
+kind, the bounty credited and its position, derived once by the derivation every reader of a
+creep's position uses; and each targeted impact's point carries the id of the creep it struck.
+That is an array push per leak and per kill, one position derivation per kill and one more field
+per targeted impact point; it adds no state, changes no world hash and needs no `SIM_VERSION`
+bump. It also retires the walk down two sorted lists recorded above: `stepOutcome` takes the
+kills the step reports and reads the view model from before the step only for where each was
+last drawn, and `markFlyerSparks` looks each point's creep up by that id.
+
+**What this evidence is.** Emulation on one development machine, the same class of evidence as
+T3's entry: the CPU throttles slow JavaScript, not the GPU. It does not stand in for the
+real-device pass that ruling 6 above still holds open.

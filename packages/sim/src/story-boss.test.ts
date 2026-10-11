@@ -32,7 +32,14 @@
 import { describe, it, expect } from 'vitest';
 import type { Ruleset } from '@wynding/types';
 import { compileRuleset, type CompiledRuleset } from './ruleset';
-import { createInitialState, step, resolveCreepLeakCost, type SimState } from './index';
+import {
+  createInitialState,
+  hashSimState,
+  step,
+  resolveCreepLeakCost,
+  type SimState,
+  type StepEvents,
+} from './index';
 import { pushCreep } from './test-support';
 
 const LANE = {
@@ -220,5 +227,58 @@ describe('resolveCreepLeakCost — direct unit test of the resolver itself', () 
     const ruleset = buildRuleset(10);
     expect(resolveCreepLeakCost(ruleset.creepById, undefined)).toBe(1);
     expect(resolveCreepLeakCost(ruleset.creepById, 42)).toBe(1);
+  });
+});
+
+describe('StepEvents.leaked — the ids of the creeps that leaked, from the step itself', () => {
+  const collector = (): StepEvents => ({ impactPoints: [], fired: [], leaked: [] });
+
+  it('names exactly the creeps that leaked, in the order movement removed them', () => {
+    const ruleset = buildRuleset(10);
+    const s = createInitialState(1, ruleset);
+    pushAboutToLeak(s, { id: 4, creepId: 'heavy' });
+    // A creep mid-lane, far from the exit, which does not leak this tick.
+    pushCreep(s, { id: 5, hp: 200, col: 2, row: LANE.exit.row, creepId: 'grunt', wave: 0 });
+    pushAboutToLeak(s, { id: 9, creepId: 'grunt' });
+    const events = collector();
+    step(s, ruleset, [], events);
+    expect(events.leaked).toEqual([4, 9]);
+    expect(s.leakedCount).toBe(2);
+  });
+
+  it('reports none on a tick where nothing leaks', () => {
+    const ruleset = buildRuleset(10);
+    const s = createInitialState(1, ruleset);
+    pushCreep(s, { id: 1, hp: 200, col: 2, row: LANE.exit.row, creepId: 'grunt', wave: 0 });
+    const events = collector();
+    step(s, ruleset, [], events);
+    expect(events.leaked).toEqual([]);
+  });
+
+  it('leaves a caller that passes no `leaked` array unaffected', () => {
+    const ruleset = buildRuleset(10);
+    const s = createInitialState(1, ruleset);
+    pushAboutToLeak(s, { id: 1, creepId: 'heavy' });
+    const events: StepEvents = { impactPoints: [], fired: [] };
+    step(s, ruleset, [], events);
+    expect(events.leaked).toBeUndefined();
+    expect(s.leakedCount).toBe(1);
+  });
+
+  it('never changes the world hash: a run stepped with the events object matches one without', () => {
+    const ruleset = buildRuleset(10);
+    const run = (withEvents: boolean): string[] => {
+      const s = createInitialState(7, ruleset);
+      pushAboutToLeak(s, { id: 1, creepId: 'heavy' });
+      pushCreep(s, { id: 2, hp: 200, col: 11, row: LANE.exit.row, creepId: 'grunt', wave: 0 });
+      pushAboutToLeak(s, { id: 3, creepId: 'grunt' });
+      const hashes: string[] = [];
+      for (let t = 0; t < 6; t++) {
+        step(s, ruleset, [], withEvents ? collector() : undefined);
+        hashes.push(hashSimState(s));
+      }
+      return hashes;
+    };
+    expect(run(true)).toEqual(run(false));
   });
 });

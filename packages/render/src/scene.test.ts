@@ -168,6 +168,8 @@ const EMPTY_OVERLAY: RenderOverlay = {
   colourMode: 'default',
   reducedMotion: false,
   tracers: [],
+  kills: [],
+  leaks: 0,
 };
 
 const vmWith = (towers: readonly TowerVM[]): RenderVM => ({
@@ -225,6 +227,7 @@ function drawnPending(towerId: string): Call[] {
 // Off the diagonal (x ≠ y) on purpose: a cue or pip drawn with its coordinates swapped must
 // land somewhere else, or the centre tests below could not see it.
 const creep = (opts: Partial<CreepIn> = {}): CreepIn => ({
+  id: 1,
   x: 5 * 256,
   y: 3 * 256,
   hpFrac: 1,

@@ -28,6 +28,15 @@
 // shot restarts it. The shots first seen in a frame are handed back (`FireTracker.update`), so
 // the aim tracker can turn each one's head onto its bearing (`tower-aim.ts`).
 //
+// EACH SHOT'S TOWER, for its style (visual pass C2: `shots.ts` draws a shot in the style of the
+// tower that fired it). The same first sight finds it — for every new shot, whether or not its
+// feedback shows — and the tracker keeps it by the footprint centre the shot left from, so the
+// shot keeps its style for its whole flight (`towerIdOf`). A tower no longer standing when its
+// shot is first seen — sold within the frame that caught up on its firing tick — can no longer
+// be found there, or a tower built in its place would be: the controller gives such a shot its
+// tower's id (`TracerVM.towerId`), which comes first, and that shot shows no recoil or flash, as
+// its tower is gone.
+//
 // PHOTOSENSITIVITY (ADR 0003, WCAG 2.3.1): a shot is one flash or one pulse, a single rise and
 // fade, shown when its tracer is first seen: from its launch tick to just under
 // `FIRE_FEEDBACK_TICKS` after it. A tower fires at most once per cadence, so four of its
@@ -53,7 +62,7 @@ import { HEAD_AT_REST, type HeadPose } from './placement';
 import type { Projection } from './projection';
 import { isDetonation } from './scorches';
 import { ART_FLASH, FIRE_PULSE_RINGS, MUZZLE_FLASH, RECOIL_DEPTH } from './tower-art';
-import { footprintCentreFp, type AimTracker } from './tower-aim';
+import { footprintCentreFp, fpPointKey, type AimTracker } from './tower-aim';
 import { towerRoleFor } from './tower-paint';
 import type { TowerVM, TracerVM } from './types';
 
@@ -119,8 +128,9 @@ export interface FireFrame {
   readonly tracers: readonly TracerVM[];
   /** The towers the sim holds this frame (`curVm.towers`). */
   readonly towers: readonly TowerVM[];
-  /** Where each creep truly is this frame, by entity id (a flyer's body is drawn above that
-   *  point) — the map the tracers converge on and the heads turn toward (`AimFrame.creeps`). Only whether a shot's creep is in it is read. */
+  /** Where each creep is drawn this frame, by entity id (`creepAimPoints`) — the map the shots
+   *  converge on and the heads turn toward (`AimFrame.creeps`). Only whether a shot's creep is
+   *  in it is read. */
   readonly creeps: ReadonlyMap<number, { readonly x: number; readonly y: number }>;
   /** Render time, in fractional ticks (`renderTimeOf`). */
   readonly renderTick: number;
@@ -141,6 +151,11 @@ export interface FireTracker {
   /** Ticks of render time since tower `id` last fired, as of the last update — or null when
    *  it has not fired within `FIRE_FEEDBACK_TICKS`. */
   sinceFired(id: number): number | null;
+  /** The catalog id of the tower that fired shot `t` (EACH SHOT'S TOWER, above): the one the
+   *  controller gave it, if its tower is gone, or else the one standing at its footprint centre
+   *  when a shot from there was last first seen — undefined for a shot from a footprint no
+   *  tower was found at. */
+  towerIdOf(t: TracerVM): string | undefined;
   /** Forget everything — a new run starts with no shot in the air. */
   reset(): void;
 }
@@ -157,6 +172,8 @@ function towerAt(towers: readonly TowerVM[], x: number, y: number): TowerVM | un
 export function createFireTracker(): FireTracker {
   /** Each tower that fired recently, by entity id: the render tick its shot was first seen. */
   const fired = new Map<number, number>();
+  /** Each footprint centre's tower, by catalog id, as of the latest shot first seen from it. */
+  const towerIdAt = new Map<number, string>();
   /** The latest launch tick taken in: a shot launched no later has been (DETECTION, above). */
   let takenThrough = -Infinity;
   let now = -Infinity;
@@ -168,6 +185,7 @@ export function createFireTracker(): FireTracker {
       // gone by, and nothing it noted stands.
       if (renderTick < now) {
         fired.clear();
+        towerIdAt.clear();
         takenThrough = -Infinity;
       }
       now = renderTick;
@@ -179,9 +197,12 @@ export function createFireTracker(): FireTracker {
         // Taken in already — or a mine going off, which its scorch shows.
         if (t.launchTick <= takenThrough || isDetonation(t)) continue;
         if (t.launchTick > latest) latest = t.launchTick;
+        // Its tower, for its style, whatever shows of its firing — unless the controller has
+        // said it is gone, when a tower standing there now is another one.
+        const tower = t.towerId === undefined ? towerAt(towers, t.originX, t.originY) : undefined;
+        if (tower !== undefined) towerIdAt.set(fpPointKey(t.originX, t.originY), tower.towerId);
         if (renderTick - t.launchTick >= FIRE_FEEDBACK_TICKS) continue; // over before it showed
         if (reducedMotion) continue; // taken in, and never shown
-        const tower = towerAt(towers, t.originX, t.originY);
         if (tower === undefined) continue; // no tower's shot — or one already sold
         // An aiming head's shot at a creep no longer drawn has no tracer and no bearing to turn
         // onto: it shows nothing, rather than a flash along wherever the head happens to face.
@@ -197,8 +218,12 @@ export function createFireTracker(): FireTracker {
       const at = fired.get(id);
       return at === undefined ? null : now - at;
     },
+    towerIdOf(t) {
+      return t.towerId ?? towerIdAt.get(fpPointKey(t.originX, t.originY));
+    },
     reset() {
       fired.clear();
+      towerIdAt.clear();
       takenThrough = -Infinity;
       now = -Infinity;
       shots.length = 0;

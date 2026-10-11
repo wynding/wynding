@@ -1,19 +1,26 @@
 // board-frame.ts — one frame of the board, Phaser-free (V2, #181). Everything the renderer
 // draws per frame is decided here: which live layer each cue goes into, which sprite shows
 // which frame where, and in what order. `scene.ts` supplies the targets — the baked board
-// image, three live `Graphics` and seven sprite pools, all as structural interfaces — and
+// image, three live `Graphics` and ten sprite pools, all as structural interfaces — and
 // this fills them, so the routing that keeps every aura shell under every tower body (M2-S8)
 // is a unit-tested fact rather than a property of call order in a coverage-excluded file.
 //
 // The layers composite in `layers.ts`'s order: board, scorches, shells, plates, heads, rims,
-// pending, creep shadows, effects (selection, fire feedback, tracers), creeps, cues (HP bars
-// and status cues, then the ghost, then sparks).
+// pending, creep shadows, effects (selection, fire feedback, the shots' live parts), shots,
+// creeps, flashes, cues (HP bars and status cues, then the ghost, then sparks, then kill
+// bursts and the leak pulse), pops.
 //
 // State that lives across frames — where mines went off, where each head points, which towers
-// just fired — is kept in Phaser-free trackers the scene owns (`scorches.ts`, `tower-aim.ts`,
-// `tower-fire.ts`), each fed once a frame on the render clock, before anything it shapes is
-// placed or drawn: the scorch tracker by the scene's `draw()`, before any early return, and the
-// other two here. `resetBoardFrame` requires all three.
+// just fired, which creeps flash and which kills and leaks are still showing — is kept in
+// Phaser-free trackers the scene owns (`scorches.ts`, `tower-aim.ts`, `tower-fire.ts`,
+// `combat-feedback.ts`), each fed once a frame, before anything it shapes is placed or drawn:
+// the scorch tracker by the scene's `draw()`, before any early return, and the rest here.
+// `resetBoardFrame` requires all four.
+//
+// ONE DRAWN POINT PER CREEP (visual pass C2, #181). A creep is drawn at its interpolated point,
+// snapped to a whole device pixel, and a flyer's body lifted above it (`placeCreeps`). The heads
+// aim at that body's centre and the shots land on it (`creepAimPoints`), so a head, its shot and
+// the creep the player sees agree — a flyer's lifted body included.
 
 import { MS_PER_TICK } from '@wynding/sim';
 import {
@@ -26,18 +33,29 @@ import {
 } from './board-draw';
 import { polygonCircles, type PathGraphics } from './circle-path';
 import { fillCircleAsPolygon, strokeCircleAsPolygon, type PolygonGraphics } from './circle-polygon';
+import {
+  bountyPopPlacements,
+  killBurstStrokes,
+  leakPulseStrokes,
+  type FeedbackStroke,
+  type FeedbackTracker,
+} from './combat-feedback';
 import { snapToDevicePx } from './device-px';
 import { interpolateCreeps } from './interpolate';
 import { resolvePalette, type Palette } from './palette';
 import {
+  creepAimPoints,
+  creepBodyCentre,
   placeCreeps,
   placeScorches,
   placeTowers,
   type FrameAnchor,
+  type KeptAimPoint,
   type SpritePlacement,
 } from './placement';
 import type { Projection } from './projection';
 import type { ScorchTracker } from './scorches';
+import { planShots, type ShotPlan } from './shots';
 import type { LiveSpark } from './sparks';
 import type { AimTracker } from './tower-aim';
 import {
@@ -46,8 +64,8 @@ import {
   type FireFeedbackOp,
   type FireTracker,
 } from './tower-fire';
-import { positionTracers, renderTimeOf, tracerPaintOps } from './tracers';
-import type { CreepVM, RenderOverlay, RenderVM, TowerVM } from './types';
+import { positionTracers, renderTimeOf } from './tracers';
+import type { RenderOverlay, RenderVM, TowerVM } from './types';
 
 /** A live layer: a `Graphics` that is cleared and re-recorded every frame. Wider than
  *  `GraphicsLike` by what only per-frame drawing uses — clearing, the outline rectangle and the
@@ -62,10 +80,11 @@ export interface LayerGraphics extends GraphicsLike, PolygonGraphics {
 export interface LiveLayers {
   /** Every support-aura shell — under every tower body. */
   readonly shells: LayerGraphics;
-  /** The selection cue, then the shots' muzzle flashes and ring pulses, then in-flight
-   *  tracers — over the heads and the pending builds, under the creeps. */
+  /** The selection cue, then the shots' muzzle flashes and ring pulses, then the shots' live
+   *  parts — over the heads and the pending builds, under the shots' sprites and the creeps. */
   readonly effects: LayerGraphics;
-  /** Every creep's HP bar and status cues, then the build ghost, then impact sparks — on top. */
+  /** Every creep's HP bar and status cues, then the build ghost, then impact sparks, then kill
+   *  bursts and the exit's leak pulse — on top of every body. */
   readonly cues: LayerGraphics;
 }
 
@@ -99,12 +118,21 @@ export interface SpriteLayer {
 
 /** A sprite layer's name — the one it is made under, and its depth is read from. */
 export type SpriteLayerName =
-  'scorches' | 'plates' | 'heads' | 'rims' | 'pending' | 'creepShadows' | 'creeps';
+  | 'scorches'
+  | 'plates'
+  | 'heads'
+  | 'rims'
+  | 'pending'
+  | 'creepShadows'
+  | 'shots'
+  | 'creeps'
+  | 'flashes'
+  | 'pops';
 
 /** One `S` per sprite layer. */
 export type SpriteLayers<S> = { readonly [L in SpriteLayerName]: S };
 
-/** The seven sprite layers, each made by `make` under its own name, as `createLiveLayers`. */
+/** The ten sprite layers, each made by `make` under its own name, as `createLiveLayers`. */
 export function createSpriteLayers<S>(make: (layer: SpriteLayerName) => S): SpriteLayers<S> {
   return {
     scorches: make('scorches'),
@@ -113,7 +141,10 @@ export function createSpriteLayers<S>(make: (layer: SpriteLayerName) => S): Spri
     rims: make('rims'),
     pending: make('pending'),
     creepShadows: make('creepShadows'),
+    shots: make('shots'),
     creeps: make('creeps'),
+    flashes: make('flashes'),
+    pops: make('pops'),
   };
 }
 
@@ -152,8 +183,14 @@ export interface BoardTargets {
   readonly pending: SpriteLayer;
   /** Every creep's ground shadow — under every creep's body. */
   readonly creepShadows: SpriteLayer;
+  /** Every shot's tracer (C2): lobs' landing rings and shadows, then the tracers. */
+  readonly shots: SpriteLayer;
   /** Every creep's body: those on the ground, then flyers over them. */
   readonly creeps: SpriteLayer;
+  /** Each hit creep's flash (C1), over every body. */
+  readonly flashes: SpriteLayer;
+  /** Each kill's bounty pop (C1), over everything. */
+  readonly pops: SpriteLayer;
 }
 
 export interface BoardFrameInput {
@@ -165,6 +202,10 @@ export interface BoardFrameInput {
   readonly projection: Projection;
   /** The baked atlas's frames, for placement. */
   readonly frames: ReadonlyMap<string, FrameAnchor>;
+  /** The board's exit cell, where a leak pulses (C1). */
+  readonly exit: { readonly col: number; readonly row: number };
+  /** The wall clock, ms — the clock the sparks fade on, and combat feedback's (C1). */
+  readonly nowMs: number;
   /** The sparks still lit this frame (`SparkStore.live`). */
   readonly sparks: readonly LiveSpark[];
   /** Where mines went off (`scorches.ts`): state the scene keeps across frames and resets
@@ -175,10 +216,20 @@ export interface BoardFrameInput {
    *  feeds it its towers, where every creep is drawn and the shots first seen, then turns the
    *  heads to it. */
   readonly aim: AimTracker;
-  /** Which towers just fired (`tower-fire.ts`), kept and reset the same way. Each frame feeds
-   *  it its tracers and towers — the shots it first sees go on to the aim tracker — then
-   *  knocks back and flashes or pulses the towers that fired. */
+  /** Which towers just fired, and which tower fired each shot (`tower-fire.ts`), kept and reset
+   *  the same way. Each frame feeds it its tracers and towers — the shots it first sees go on to
+   *  the aim tracker — then knocks back and flashes or pulses the towers that fired, and styles
+   *  each shot as its tower's. */
   readonly fire: FireTracker;
+  /** Which creeps flash, and which kills and leaks still show (`combat-feedback.ts`), kept and
+   *  reset the same way. Each frame feeds it the shots, which creeps are drawn, and the kills
+   *  and leaks since the last frame. */
+  readonly feedback: FeedbackTracker;
+  /** Where each creep is drawn, in sim units (`creepAimPoints`): one map for every frame, each
+   *  rewriting it in place, so a frame makes no object per creep. The scene owns it and resets
+   *  it with the run. Read only while a frame is drawn — nothing a frame feeds it to keeps it,
+   *  or a point in it, past that frame. */
+  readonly drawnPoints: Map<number, KeptAimPoint>;
 }
 
 /** The trackers a frame keeps across frames — what a reset must forget, every one of them. */
@@ -186,11 +237,13 @@ export interface BoardFrameTrackers {
   readonly scorches: Pick<ScorchTracker, 'reset'>;
   readonly aim: Pick<AimTracker, 'reset'>;
   readonly fire: Pick<FireTracker, 'reset'>;
+  readonly feedback: Pick<FeedbackTracker, 'reset'>;
+  readonly drawnPoints: Pick<Map<number, KeptAimPoint>, 'clear'>;
 }
 
 /** Draw one frame into `t`. */
 export function drawBoardFrame(t: BoardTargets, input: BoardFrameInput): void {
-  const { prevVm, curVm, alpha, overlay, projection, frames } = input;
+  const { prevVm, curVm, alpha, overlay, projection, frames, drawnPoints } = input;
   const pal = resolvePalette(overlay.colourMode); // resolved once per frame, passed down
   const { shells, effects, cues } = t.layers;
   // ONE render-time derivation per frame, shared by the scorches, the tracers and the
@@ -211,12 +264,25 @@ export function drawBoardFrame(t: BoardTargets, input: BoardFrameInput): void {
   t.scorches.sync(placeScorches(input.scorches.live(renderTimeTicks), projection, frames));
   // shells — under every tower.
   drawAuraShells(shells, pal, curVm, overlay, projection);
-  // Interpolated ONCE and shared: the creep placement below, the tracers' lerp targets and
-  // the points the heads turn toward are the same points (#32/P6). The map holds the
-  // interpolated creeps themselves, by id — no object per creep per frame.
+  // Interpolated ONCE and shared by every creep sprite and, through where their bodies are
+  // drawn, by the heads and the shots (#32/P6).
   const interpolated = interpolateCreeps(prevVm, curVm, alpha);
-  const drawnAt = new Map<number, CreepVM>();
-  for (const c of interpolated) drawnAt.set(c.id, c);
+  // Combat feedback takes in the frame first — a hit that lands now flashes in this frame's
+  // placement — reading only which creeps are drawn.
+  const drawnIds = new Set<number>();
+  for (const c of interpolated) drawnIds.add(c.id);
+  const feedback = input.feedback;
+  feedback.update({
+    nowMs: input.nowMs,
+    sparks: overlay.sparks,
+    drawn: drawnIds,
+    kills: overlay.kills,
+    leaks: overlay.leaks,
+  });
+  const creeps = placeCreeps(interpolated, pal, projection, frames, (id) => feedback.flashOf(id));
+  // Where each creep is DRAWN — its body's centre, a flyer's lifted one — in sim units: what the
+  // heads turn toward and the shots land on.
+  const drawnAt = creepAimPoints(creeps.bodies, projection, drawnPoints);
   // The towers whose shots just appeared are noted, then the heads turn toward where their
   // targets are drawn, each that just fired onto its shot's bearing — before a head is placed.
   const shots = input.fire.update({
@@ -242,7 +308,7 @@ export function drawBoardFrame(t: BoardTargets, input: BoardFrameInput): void {
   t.heads.sync(towers.heads);
   t.rims.sync(towers.rims);
   t.pending.sync(towers.pending);
-  // effects — the selection cue, then the shots' flashes and pulses, then tracers.
+  // effects — the selection cue, then the shots' flashes and pulses, then the shots' live parts.
   drawSelection(effects, pal, overlay, projection);
   drawFireFeedback(
     effects,
@@ -254,29 +320,81 @@ export function drawBoardFrame(t: BoardTargets, input: BoardFrameInput): void {
       pal,
       projection,
     ),
+    projection.dpr,
   );
-  drawTracers(effects, pal, overlay, renderTimeTicks, drawnAt, projection);
-  // creep shadows and creeps — atlas sprites: every shadow, then every body over them.
-  const creeps = placeCreeps(interpolated, pal, projection, frames);
+  const plan = planShots(
+    overlay.reducedMotion ? [] : positionTracers(overlay.tracers, drawnAt, renderTimeTicks),
+    (shot) => input.fire.towerIdOf(shot),
+    overlay.reducedMotion,
+    pal,
+    projection,
+    frames,
+  );
+  drawShots(effects, plan);
+  // shots — every tracer, over the effects and under the creeps.
+  t.shots.sync(plan.sprites);
+  // creep shadows, creeps and their flashes — atlas sprites: every shadow, then every body over
+  // them, then each hit creep's flash over its body.
   t.creepShadows.sync(creeps.shadows);
   t.creeps.sync(creeps.bodies);
-  // cues — every HP bar and status cue over every body, then the ghost, then sparks.
+  t.flashes.sync(creeps.flashes);
+  // cues — every HP bar and status cue over every body, then the ghost, then sparks, then kill
+  // bursts and the leak pulse.
   // CLOCK DOMAIN (QC round 2): `renderTimeOf` is in fractional TICKS (tracers.test.ts:
   // `renderTimeOf(vm(5), vm(6), 0.5) === 5.5`); the paint-plan's pulse period is
   // MILLISECONDS (`renderTimeMs`) — convert here, or the 900ms breath becomes a
   // 900-TICK (45s) one and the motion cue is imperceptible inside a 40-tick slow.
   drawCreepCues(cues, pal, creeps.bodies, overlay.reducedMotion, renderTimeTicks * MS_PER_TICK);
   drawGhost(cues, pal, overlay, projection);
-  drawSparks(cues, pal, input.sparks, overlay.reducedMotion, projection);
+  drawSparks(cues, pal, input.sparks, overlay.reducedMotion, projection, frames);
+  // Kill bursts and pops, each on the body the creep was last drawn with; then the exit pulse.
+  const pops: SpritePlacement[] = [];
+  for (const { kill, sinceMs } of feedback.kills()) {
+    const at = creepBodyCentre(kill.x, kill.y, kill, projection, frames);
+    drawFeedbackStrokes(
+      cues,
+      killBurstStrokes(kill, at, sinceMs, overlay.reducedMotion, pal, projection.cellPx),
+    );
+    for (const p of bountyPopPlacements(
+      kill.bounty,
+      at,
+      sinceMs,
+      overlay.reducedMotion,
+      projection.cellPx,
+      projection.dpr,
+      frames,
+    )) {
+      pops.push(p);
+    }
+  }
+  const pulse = feedback.pulseSinceMs();
+  if (pulse !== null) {
+    const exit = projection.cellToPixel(input.exit.col, input.exit.row);
+    const half = projection.cellPx / 2;
+    drawFeedbackStrokes(
+      cues,
+      leakPulseStrokes(
+        { x: exit.x + half, y: exit.y + half },
+        pulse,
+        overlay.reducedMotion,
+        projection.cellPx,
+      ),
+    );
+  }
+  // pops — each kill's bounty, over everything.
+  t.pops.sync(pops);
 }
 
 /** Hide and clear everything a frame drew (Play again), and forget what the run left — its
- *  scorches, where its heads pointed, the shots it fired: the next `drawBoardFrame` shows
- *  exactly what it draws, on a clean floor, with every head pointing up. */
+ *  scorches, where its heads pointed, the shots it fired, the flashes, bursts, pops and pulse
+ *  still showing: the next `drawBoardFrame` shows exactly what it draws, on a clean floor, with
+ *  every head pointing up. */
 export function resetBoardFrame(t: BoardTargets, state: BoardFrameTrackers): void {
   state.scorches.reset();
   state.aim.reset();
   state.fire.reset();
+  state.feedback.reset();
+  state.drawnPoints.clear();
   t.layers.shells.clear();
   t.layers.effects.clear();
   t.layers.cues.clear();
@@ -287,55 +405,70 @@ export function resetBoardFrame(t: BoardTargets, state: BoardFrameTrackers): voi
   t.rims.hideAll();
   t.pending.hideAll();
   t.creepShadows.hideAll();
+  t.shots.hideAll();
   t.creeps.hideAll();
+  t.flashes.hideAll();
+  t.pops.hideAll();
 }
 
 /** A tower's shot, shown (T3): a thin executor of `fireFeedbackPaintOps`' plan, whose content
  *  and reduced-motion gate are tested against the plan itself (`tower-fire.test.ts`) — a
- *  muzzle flash is a filled disc, a pulse ring a stroked circle, each drawn as a polygon
- *  (`circle-polygon.ts`: Phaser would draw either as a 101-point arc). */
+ *  muzzle flash is a filled disc, a pulse ring a stroked circle, each drawn as a polygon with
+ *  the sides the board's one rule gives it at `dpr` (`circle-polygon.ts`: Phaser would draw
+ *  either as a 101-point arc). */
 export function drawFireFeedback(
   g: Pick<LayerGraphics, 'fillStyle' | 'lineStyle' | 'fillPoints' | 'strokePoints'>,
   ops: readonly FireFeedbackOp[],
+  dpr: number,
 ): void {
   for (const op of ops) {
     if (op.kind === 'flash') {
       g.fillStyle(op.colour, op.alpha);
-      fillCircleAsPolygon(g, op.x, op.y, op.r);
+      fillCircleAsPolygon(g, op.x, op.y, op.r, dpr);
     } else {
       g.lineStyle(op.width, op.colour, op.alpha);
-      strokeCircleAsPolygon(g, op.x, op.y, op.r);
+      strokeCircleAsPolygon(g, op.x, op.y, op.r, dpr);
     }
   }
 }
 
-/**
- * In-flight tracers (#32/P6), a thin executor of `tracerPaintOps`' plan — the ordering and
- * content gate lives in `tracers.test.ts` against the plan itself. Each tracer lerps toward
- * its target creep's interpolated point (`drawnAt`, by creep id — the frame's one map of
- * them), and its dot is snapped to a whole device pixel the way the creep sprites are
- * (`placement.ts`), so a tracer that has arrived sits EXACTLY on the creep's true centre
- * (a flyer's body is drawn above that point, its shadow on it), not up to half a device pixel
- * off it.
- */
-export function drawTracers(
-  g: GraphicsLike,
-  pal: Palette,
-  overlay: RenderOverlay,
-  renderTimeTicks: number, // fractional TICKS — derived ONCE per frame (CodeRabbit #73)
-  drawnAt: ReadonlyMap<number, { readonly x: number; readonly y: number }>,
-  projection: Projection,
+/** The shots' live parts (C2), a thin executor of `planShots`' plan, whose content and
+ *  reduced-motion gate are tested against the plan itself (`shots.test.ts`): each stroke — a
+ *  lob's dashed path as every other segment of it, a stun arc as an open polyline — then each
+ *  unknown tower's dot. */
+export function drawShots(
+  g: Pick<LayerGraphics, 'fillStyle' | 'lineStyle' | 'strokePoints' | 'lineBetween' | 'fillCircle'>,
+  plan: Pick<ShotPlan, 'strokes' | 'dots'>,
 ): void {
-  if (overlay.tracers.length === 0) return;
-  const positioned = positionTracers(overlay.tracers, drawnAt, renderTimeTicks);
-  for (const op of tracerPaintOps(positioned, overlay.reducedMotion, pal)) {
-    const p = projection.fpToPixel(op.x, op.y); // op.x/y are fp-unit sim coordinates
-    g.fillStyle(op.colour, 1);
-    g.fillCircle(
-      snapToDevicePx(p.x, projection.dpr),
-      snapToDevicePx(p.y, projection.dpr),
-      Math.max(2, projection.cellPx * 0.15),
-    );
+  for (const s of plan.strokes) {
+    g.lineStyle(s.width, s.colour, s.alpha);
+    if (!s.dashed) {
+      g.strokePoints(s.points, false, false);
+      continue;
+    }
+    for (let i = 0; i + 1 < s.points.length; i += 2) {
+      const a = s.points[i] as { x: number; y: number };
+      const b = s.points[i + 1] as { x: number; y: number };
+      g.lineBetween(a.x, a.y, b.x, b.y);
+    }
+  }
+  for (const d of plan.dots) {
+    g.fillStyle(d.colour, 1);
+    g.fillCircle(d.x, d.y, d.r);
+  }
+}
+
+/** Combat feedback's strokes (C1), a thin executor of `killBurstStrokes`' and
+ *  `leakPulseStrokes`' plans (`combat-feedback.test.ts`): a ring as a stroked circle — a polygon
+ *  on a live layer (`circle-path.ts`) — and a shard as a straight line. */
+export function drawFeedbackStrokes(
+  g: Pick<LayerGraphics, 'lineStyle' | 'strokeCircle' | 'lineBetween'>,
+  strokes: readonly FeedbackStroke[],
+): void {
+  for (const s of strokes) {
+    g.lineStyle(s.width, s.colour, s.alpha);
+    if (s.kind === 'ring') g.strokeCircle(s.x, s.y, s.r);
+    else g.lineBetween(s.x1, s.y1, s.x2, s.y2);
   }
 }
 
@@ -391,16 +524,28 @@ export function drawGhost(
   }
 }
 
-/** Impact sparks, each faded by its `k` (`sparks.ts`). */
+/** Impact sparks, each faded by its `k` (`sparks.ts`). A spark the controller marked as a
+ *  flyer's (`SparkPoint.flyer`) is drawn on that flyer's body, lifted above the point the sim
+ *  reports, as its body is (C2) — the frame's atlas places the lift. */
 export function drawSparks(
   g: GraphicsLike,
   pal: Palette,
   sparks: readonly LiveSpark[],
   reducedMotion: boolean,
   projection: Projection,
+  frames: ReadonlyMap<string, FrameAnchor>,
 ): void {
   for (const s of sparks) {
-    const p = projection.fpToPixel(s.x, s.y);
+    const p =
+      s.flyer === undefined
+        ? projection.fpToPixel(s.x, s.y)
+        : creepBodyCentre(
+            s.x,
+            s.y,
+            { creepId: s.flyer.creepId, boss: s.flyer.boss, domain: 'air' },
+            projection,
+            frames,
+          );
     const k = s.k; // 1 → 0 as the spark ages (both variants fade the same way)
     if (s.radiusFp === 0) {
       g.fillStyle(pal.spark, reducedMotion ? 0.5 * k : k);

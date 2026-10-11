@@ -6,6 +6,9 @@ import {
   step,
   hashSimState,
   previewInputs,
+  projectCreep,
+  cellCenterX,
+  cellCenterY,
   type CreepArrays,
   type SimInput,
   type SimState,
@@ -13,7 +16,7 @@ import {
   type ReadonlyImpact,
 } from './index';
 import type { Impact } from './combat';
-import { testRuleset } from './test-support';
+import { pushCreep, testRuleset, TEST_AOE_TOWER, TEST_DOT_TOWER } from './test-support';
 
 /** A small straight board: entrance (0,2) → exit (4,2), four orthogonal edges. */
 const RULESET = testRuleset({
@@ -222,6 +225,157 @@ describe('step() StepEvents plumbing (#31/#32)', () => {
     expect(events.fired.length).toBeGreaterThan(0); // at least one shot fired across the window
     // Every fired event carries a well-formed tick window (launch strictly before impact).
     for (const f of events.fired) expect(f.launchTick).toBeLessThan(f.impactTick);
+  });
+});
+
+describe('StepEvents.killed and each targeted point’s creep — the step reports what it did (#181)', () => {
+  const collector = (): StepEvents => ({ impactPoints: [], fired: [], leaked: [], killed: [] });
+  const cx = cellCenterX;
+  const cy = cellCenterY;
+  const targeted = (targetId: number, amount: number): Impact => ({
+    kind: 'targeted',
+    impactTick: 0,
+    targetId,
+    sourceId: 90,
+    domain: 'ground',
+    effects: [{ kind: 'direct', amount }],
+  });
+  const blast = (x: number, y: number, radiusFp: number, amount: number): Impact => ({
+    kind: 'blast',
+    impactTick: 0,
+    x,
+    y,
+    radiusFp,
+    sourceId: 91,
+    domain: 'ground',
+    effects: [{ kind: 'direct', amount }],
+  });
+
+  it('a targeted kill reports the creep, its kind, the bounty credited and where the step left it: the point its impact names', () => {
+    const s = createInitialState(1, RULESET);
+    pushCreep(s, { id: 5, hp: 10, col: 1, row: 2, bounty: 3 });
+    s.impacts.push(targeted(5, 50));
+    const events = collector();
+    step(s, RULESET, [], events);
+    expect(s.creeps.id).toEqual([]); // killed and swept
+    expect(s.cumulativeKillBounty).toBe(3);
+    // Rested on (1,2)'s centre, it moved one budget east before the impact struck it there.
+    expect(events.impactPoints).toEqual([{ x: cx(1) + 26, y: cy(2), radiusFp: 0, targetId: 5 }]);
+    expect(events.killed).toEqual([
+      { id: 5, creepId: 'normal', x: cx(1) + 26, y: cy(2), bounty: 3 },
+    ]);
+  });
+
+  it('a DoT kill reports the same: its position is the one the view model projects for a twin the step left alive', () => {
+    const run = (poisoned: boolean): { s: SimState; events: StepEvents } => {
+      const s = createInitialState(1, RULESET);
+      pushCreep(s, { id: 5, hp: 10, col: 1, row: 2, bounty: 3 });
+      if (poisoned) {
+        s.dots.push({
+          targetId: 5,
+          sourceId: 90,
+          amount: 50,
+          cadenceTicks: 10,
+          nextTickTick: 0,
+          untilTick: 60,
+        });
+      }
+      const events = collector();
+      step(s, RULESET, [], events);
+      return { s, events };
+    };
+    const dot = run(true);
+    expect(dot.s.creeps.id).toEqual([]);
+    expect(dot.events.impactPoints).toEqual([]); // no impact: the DoT tick killed it
+    const twin = run(false).s;
+    const at = projectCreep(twin.creeps, 0, RULESET.board.grid);
+    expect(at).not.toBeNull();
+    expect(dot.events.killed).toEqual([
+      { id: 5, creepId: 'normal', x: at!.x, y: at!.y, bounty: 3 },
+    ]);
+  });
+
+  it('reports a creep spawned and killed inside one step, which no state before or after it holds', () => {
+    const s = createInitialState(1, RULESET);
+    // A blast already due on the tick the wave launches, landing on the entrance.
+    s.impacts.push(blast(cx(0), cy(2), 256, 50));
+    expect(s.creeps.id, 'the premise: no creep before the step').toEqual([]);
+    const events = collector();
+    step(s, RULESET, callEarly, events);
+    expect(s.waveSpawnCursor[0], 'the premise: the step spawned one creep').toBe(1);
+    expect(s.creeps.id, 'and it is gone after the step').toEqual([]);
+    expect(s.cumulativeKillBounty).toBe(1); // the sim paid for it
+    expect(events.killed).toEqual([
+      { id: 1, creepId: 'normal', x: cx(0) + 26, y: cy(2), bounty: 1 },
+    ]);
+  });
+
+  it('reports kills in the order the sweep credits them — creep rows, not creep ids', () => {
+    const s = createInitialState(1, RULESET);
+    pushCreep(s, { id: 7, hp: 10, col: 2, row: 2 });
+    pushCreep(s, { id: 3, hp: 10, col: 2, row: 2 });
+    s.impacts.push(blast(cx(2), cy(2), 256, 50));
+    const events = collector();
+    step(s, RULESET, [], events);
+    expect(events.killed!.map((k) => k.id)).toEqual([7, 3]);
+  });
+
+  it('a targeted point names the creep it struck; a blast point names none', () => {
+    const s = createInitialState(1, RULESET);
+    pushCreep(s, { id: 5, hp: 100, col: 1, row: 2 });
+    pushCreep(s, { id: 6, hp: 100, col: 3, row: 2 });
+    s.impacts.push(targeted(6, 10), blast(cx(1), cy(2), 128, 10));
+    const events = collector();
+    step(s, RULESET, [], events);
+    expect(events.impactPoints).toEqual([
+      { x: cx(3) + 26, y: cy(2), radiusFp: 0, targetId: 6 },
+      { x: cx(1), y: cy(2), radiusFp: 128 },
+    ]);
+    expect('targetId' in events.impactPoints[1]!).toBe(false);
+    expect(events.killed).toEqual([]); // both lived
+  });
+
+  it('a caller that passes no `killed` array gets none, and the kill is credited as before', () => {
+    const s = createInitialState(1, RULESET);
+    pushCreep(s, { id: 5, hp: 10, col: 1, row: 2, bounty: 3 });
+    s.impacts.push(targeted(5, 50));
+    const events: StepEvents = { impactPoints: [], fired: [] };
+    step(s, RULESET, [], events);
+    expect(s.cumulativeKillBounty).toBe(3);
+    expect(Object.keys(events)).toEqual(['impactPoints', 'fired']); // no new keys appeared
+  });
+
+  it('never changes the world hash: a run stepped with every collector field matches one stepped without', () => {
+    const wide = testRuleset(
+      { widthTiles: 14, heightTiles: 14, entrance: { col: 0, row: 6 }, exit: { col: 13, row: 6 } },
+      { extraTowers: [TEST_DOT_TOWER, TEST_AOE_TOWER] },
+    );
+    const build: SimInput[] = [
+      { kind: 'placeTower', anchor: { col: 3, row: 4 }, towerId: 'basic' },
+      { kind: 'placeTower', anchor: { col: 6, row: 7 }, towerId: 'venom' },
+      { kind: 'placeTower', anchor: { col: 9, row: 4 }, towerId: 'aoe' },
+      { kind: 'callWaveEarly' },
+    ];
+    const run = (full: boolean): { hashes: string[]; killed: number; named: number } => {
+      let s = createInitialState(3, wide);
+      const hashes: string[] = [];
+      let killed = 0;
+      let named = 0;
+      for (let t = 0; t < 400; t++) {
+        const events: StepEvents | undefined = full
+          ? { impactPoints: [], fired: [], dotTicks: 0, dotDropped: 0, leaked: [], killed: [] }
+          : undefined;
+        s = step(s, wide, t === 0 ? build : [], events);
+        hashes.push(hashSimState(s));
+        killed += events?.killed?.length ?? 0;
+        named += events?.impactPoints.filter((p) => p.targetId !== undefined).length ?? 0;
+      }
+      return { hashes, killed, named };
+    };
+    const full = run(true);
+    expect(full.killed, 'the premise: the run killed creeps').toBeGreaterThan(0);
+    expect(full.named, 'the premise: targeted impacts named their creeps').toBeGreaterThan(0);
+    expect(full.hashes).toEqual(run(false).hashes);
   });
 });
 

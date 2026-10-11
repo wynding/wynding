@@ -277,7 +277,14 @@ export interface SelectionVM {
  *  toward its OWN fixed `destX`/`destY` (the same fire-time lead point the impact will
  *  land at) regardless of whether the original target survives — left undiscriminated,
  *  every blast tracer would visibly fly toward wherever its fire-time target ends up
- *  rather than where the blast actually lands (`tracers.ts`). */
+ *  rather than where the blast actually lands (`tracers.ts`).
+ *
+ *  `towerId` (visual pass C2, #181) is the firing tower's catalog id, and it is set ONLY when
+ *  that tower left the board while the shot was in flight — sold, or sold and another built on
+ *  its footprint. The renderer finds a shot's tower by its footprint centre, where every shot
+ *  starts (`tower-fire.ts`), the first time it sees the shot; a tower gone before then can no
+ *  longer be found that way, so the controller notes it, looking the tower up in the view model
+ *  from before the step that removed it. Absent on every other shot. */
 export type TracerVM =
   | {
       readonly kind: 'targeted';
@@ -286,6 +293,7 @@ export type TracerVM =
       readonly targetId: number;
       readonly launchTick: number;
       readonly impactTick: number;
+      readonly towerId?: string;
     }
   | {
       readonly kind: 'blast';
@@ -295,7 +303,14 @@ export type TracerVM =
       readonly destY: number;
       readonly launchTick: number;
       readonly impactTick: number;
+      readonly towerId?: string;
     };
+
+/** What the renderer needs to draw an effect on a creep as its body is drawn — its look's
+ *  catalog joins, as `CreepVM` carries them (`creepLookFor`): its silhouette, its family's hue
+ *  and size, and whether it flies, so a flyer's effect lands on its body, lifted above its true
+ *  point (visual pass C1/C2, #181). */
+export type CreepLookVM = Pick<CreepVM, 'creepId' | 'domain' | 'boss'>;
 
 /** One impact/spark point in fixed-point sim units — shared shape for `RenderOverlay.sparks`,
  *  `scene.ts`'s internal `Spark` (which adds a `bornAt` stamp), and its `preReady` buffer. */
@@ -307,6 +322,28 @@ export interface SparkPoint {
    *  destination (`isDetonation`, `scorches.ts`). Set by the controller from the shot it
    *  fired, so a detonation whose tracer no frame drew is still known by its landing. */
   readonly detonation?: boolean;
+  /** Set on a targeted impact that struck a FLYER: that creep's look, so its spark is drawn on
+   *  the flyer's body, lifted above the true point the sim reports (visual pass C2, #181). The
+   *  controller knows the creep by the id the sim names on the impact's point. Absent on every
+   *  other spark. */
+  readonly flyer?: Pick<CreepVM, 'creepId' | 'boss'>;
+  /** Set on a targeted impact: the entity id of the creep it struck, as the sim names it on the
+   *  impact's point (`StepEvents.impactPoints`). Absent on a blast's point. The hit flash
+   *  (`combat-feedback.ts`) follows it, and the spark store keeps only what it draws. */
+  readonly targetId?: number;
+}
+
+/** A creep killed since the last frame (visual pass C1, #181): its look, the bounty its kill
+ *  paid, and where its burst shows, in fixed-point sim units — where the board last drew it, as
+ *  the tick that killed it began, or, for a creep that tick spawned and killed before the board
+ *  could draw it, where that tick left it. The step reports each kill (`StepEvents.killed`); the
+ *  controller passes it on, and nothing here is new sim state. Drawn as a burst in its family's
+ *  hue and a "+N" pop. */
+export interface KillVM extends CreepLookVM {
+  readonly id: number;
+  readonly x: number;
+  readonly y: number;
+  readonly bounty: number;
 }
 
 /** Board-space presentation state handed to `draw()` alongside the two view-models.
@@ -341,9 +378,15 @@ export interface RenderOverlay {
   /** When true the scene damps the impact-spark FX (WCAG 2.3.3 / GAG §2). */
   readonly reducedMotion: boolean;
   /** Shots currently in flight (Tracer, #32/P6) — copied from `FrameSnapshot.tracers`
-   *  each frame. Under reduced motion the scene omits them entirely (`tracerPaintOps`
-   *  returns an empty plan), same posture as the impact spark's damping. */
+   *  each frame. Under reduced motion the scene omits them entirely (`planShots` returns an
+   *  empty plan), same posture as the impact spark's damping. */
   readonly tracers: readonly TracerVM[];
+  /** Creeps killed since the last frame (visual pass C1, #181) — accumulated per sim tick by
+   *  the controller, like `sparks`, so a catch-up frame still bursts every kill. */
+  readonly kills: readonly KillVM[];
+  /** How many creeps reached the exit since the last frame (C1): the ids the step
+   *  reported as leaked (`StepEvents.leaked`), counted. The exit pulses for them, rate-limited (`combat-feedback.ts`). */
+  readonly leaks: number;
 }
 
 /** Live handle to a mounted Phaser view. The controller feeds it the last two render

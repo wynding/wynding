@@ -16,7 +16,7 @@ import {
 import { getBundledRuleset, defaultBoardId } from '@wynding/content';
 import type { Ruleset } from '@wynding/types';
 import { createProjection } from './projection';
-import { deriveViewModel, deriveHud } from './view-model';
+import { deriveViewModel, deriveHud, creepLook } from './view-model';
 import { interpolateCreeps } from './interpolate';
 import { resolvePalette } from './palette';
 import type { ColourMode, RenderVM } from './types';
@@ -470,6 +470,23 @@ describe('view-model + hud derivation', () => {
     s.creeps.creepId[0] = 'nonexistent';
     vm = deriveViewModel(s, ruleset);
     expect(vm.creeps[0]?.domain).toBe('ground');
+  });
+
+  it('gives a creep no view model drew, by its catalog id alone, the look the view model draws one of that id with (`creepLook`, #181 C1)', () => {
+    let s = createInitialState(1, ruleset);
+    s = step(s, ruleset, [{ kind: 'callWaveEarly' }]);
+    const ids = [...Object.keys(ruleset.creepById), 'nonexistent'];
+    const looks = ids.map((creepId) => {
+      s.creeps.creepId[0] = creepId;
+      const drawn = deriveViewModel(s, ruleset).creeps[0]!;
+      const look = creepLook(ruleset, creepId);
+      expect(look, creepId).toEqual({ creepId, domain: drawn.domain, boss: drawn.boss });
+      return look;
+    });
+    // Not vacuous: the catalog's looks differ on both joins.
+    expect(looks.some((l) => l.domain === 'air')).toBe(true);
+    expect(looks.some((l) => l.boss)).toBe(true);
+    expect(looks.at(-1)).toEqual({ creepId: 'nonexistent', domain: 'ground', boss: false });
   });
 
   it('projects `poisoned` from live DoT records, many-to-many-ish (M2-S5a P7)', () => {
@@ -1227,6 +1244,7 @@ describe('render barrel', () => {
     expect(barrel.createProjection).toBeTypeOf('function');
     expect(barrel.deriveViewModel).toBeTypeOf('function');
     expect(barrel.deriveHud).toBeTypeOf('function');
+    expect(barrel.creepLook).toBeTypeOf('function'); // a never-drawn kill's look (#181 C1)
     expect(barrel.interpolateCreeps).toBeTypeOf('function');
     expect(barrel.resolvePalette).toBeTypeOf('function');
     // The tower art kit the Card swatches draw through (visual pass T1/T2, #181).

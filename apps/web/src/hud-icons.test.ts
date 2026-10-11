@@ -10,8 +10,13 @@
 // and size steps — is the render package's to test (`creep-art.test.ts`). This file imports
 // only the package's public API, and typechecks against its declarations.
 
+import { readFileSync } from 'node:fs';
+import { fileURLToPath } from 'node:url';
+import path from 'node:path';
 import { describe, it, expect } from 'vitest';
 import {
+  ART_GEM,
+  ART_LIVES,
   artSvgNodes,
   COLOUR_MODES,
   creepArtColour,
@@ -468,5 +473,27 @@ describe('hud-icons — the countdown dial: a stopwatch face (#181 H1, QC round 
     expect(dialDash(-1)).toBe(dialDash(0));
     expect(dialDash(Number.NaN)).toBe(dialDash(0));
     expect(dialDash(Number.POSITIVE_INFINITY)).toBe(dialDash(0));
+  });
+});
+
+// #181 (C1): the board's bounty pop draws this gem, and its leak pulse rings the exit in this
+// heart's colour. Both are fixed inks in the render package (`art-ink.ts`), as the chip icons'
+// are here — so they are held equal, and a bounty and a leak read the same on the board as on
+// the HUD in every colour mode.
+describe('hud-icons — the board’s feedback inks are the chips’ own (#181 C1)', () => {
+  // Read as `ui-contrast.test.ts` reads it: by path, since jsdom's `URL` is not Node's.
+  const css = readFileSync(
+    path.join(path.dirname(fileURLToPath(import.meta.url)), 'ui.css'),
+    'utf8',
+  );
+  const token = (name: string): number => {
+    const m = new RegExp(`--wy-${name}:\\s*#([0-9a-f]{6})`, 'i').exec(css);
+    if (m === null) throw new Error(`no --wy-${name} in ui.css`);
+    return parseInt(m[1]!, 16);
+  };
+
+  it('inks the pop’s gem in the bounty gem’s colour, and the leak pulse in the lives heart’s', () => {
+    expect(ART_GEM.toString(16)).toBe(token('bounty').toString(16));
+    expect(ART_LIVES.toString(16)).toBe(token('lives').toString(16));
   });
 });

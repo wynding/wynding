@@ -3,14 +3,15 @@
 // graph's depth order rather than the order calls were recorded in — and this is the test
 // that used to be "every aura shell is drawn before any tower body", made structural. The
 // visual pass split a tower into a plate and a head (so a head can turn on its own), added
-// the scorch a spent mine leaves, on the floor, and gave every creep a shadow, under every
-// creep's body.
+// the scorch a spent mine leaves, on the floor, gave every creep a shadow, under every
+// creep's body, and gave combat its own layers (C1, C2): shots between the effects and the
+// creeps, a hit's flash over the bodies, and a kill's bounty pop over everything.
 
 import { describe, it, expect } from 'vitest';
 import { BOARD_LAYERS, layerDepth } from './layers';
 
 describe('BOARD_LAYERS — the board draw order', () => {
-  it('is exactly: board, scorches, shells, plates, heads, rims, pending, creepShadows, effects, creeps, cues', () => {
+  it('is exactly: board, scorches, shells, plates, heads, rims, pending, creepShadows, effects, shots, creeps, flashes, cues, pops', () => {
     expect(BOARD_LAYERS).toEqual([
       'board',
       'scorches',
@@ -21,8 +22,11 @@ describe('BOARD_LAYERS — the board draw order', () => {
       'pending',
       'creepShadows',
       'effects',
+      'shots',
       'creeps',
+      'flashes',
       'cues',
+      'pops',
     ]);
   });
 
@@ -66,8 +70,9 @@ describe('BOARD_LAYERS — the board draw order', () => {
       expect(layerDepth(layer), layer).toBeLessThan(layerDepth('creepShadows'));
     }
     // …under every body, so one creep's shadow never darkens a neighbour, and under the
-    // selection cue, the tracers and every creep cue, so none is dimmed by one.
-    for (const layer of ['effects', 'creeps', 'cues'] as const) {
+    // selection cue, the shots, every creep cue and every hit's feedback, so none is dimmed
+    // by one.
+    for (const layer of ['effects', 'shots', 'creeps', 'flashes', 'cues', 'pops'] as const) {
       expect(layerDepth('creepShadows'), layer).toBeLessThan(layerDepth(layer));
     }
   });
@@ -76,5 +81,23 @@ describe('BOARD_LAYERS — the board draw order', () => {
     expect(layerDepth('heads')).toBeLessThan(layerDepth('pending'));
     expect(layerDepth('pending')).toBeLessThan(layerDepth('effects'));
     expect(layerDepth('effects')).toBeLessThan(layerDepth('creeps'));
+  });
+
+  it('flies each shot over its tower’s muzzle flash and under the creeps it reaches (C2)', () => {
+    // A shot leaves the flash behind it as it goes, and a creep it reaches covers it, as
+    // the style frame draws its shots.
+    expect(layerDepth('effects')).toBeLessThan(layerDepth('shots'));
+    expect(layerDepth('shots')).toBeLessThan(layerDepth('creeps'));
+  });
+
+  it('whitens a hit creep over every body, under every creep cue (C1)', () => {
+    // The flash IS its body, whitened — and a creep's HP bar and status stay readable
+    // through it.
+    expect(layerDepth('creeps')).toBeLessThan(layerDepth('flashes'));
+    expect(layerDepth('flashes')).toBeLessThan(layerDepth('cues'));
+  });
+
+  it('draws a kill’s bounty pop over everything (C1)', () => {
+    expect(BOARD_LAYERS.at(-1)).toBe('pops');
   });
 });

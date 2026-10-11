@@ -465,6 +465,90 @@ describe('createFireTracker — which tower fired', () => {
   });
 });
 
+describe('createFireTracker — which tower fired each shot, for its style (C2)', () => {
+  const basic = tower(1, 'basic', 2);
+  const slow = tower(2, 'slow', 6);
+
+  it('finds a shot’s tower at its footprint centre when the shot is first seen, and keeps it for the whole flight — its tower sold too', () => {
+    const fire = createFireTracker();
+    const a = shot(basic, 10, 8);
+    const b = lob(slow, 10);
+    expect(fire.towerIdOf(a)).toBeUndefined(); // not seen yet
+    fire.update(frame({ towers: [basic, slow], tracers: [a, b], renderTick: 10 }));
+    expect(fire.towerIdOf(a)).toBe('basic');
+    expect(fire.towerIdOf(b)).toBe('slow');
+    fire.update(frame({ towers: [], tracers: [a, b], renderTick: 12 })); // both sold
+    expect(fire.towerIdOf(a)).toBe('basic');
+    expect(fire.towerIdOf(b)).toBe('slow');
+  });
+
+  it('finds it whether or not the shot’s feedback shows: first seen late, under Reduce motion, or aimed at a creep no longer drawn', () => {
+    const late = createFireTracker();
+    late.update(
+      frame({
+        towers: [basic],
+        tracers: [shot(basic, 10, 8)],
+        renderTick: 10 + FIRE_FEEDBACK_TICKS,
+      }),
+    );
+    expect(late.sinceFired(1)).toBeNull();
+    expect(late.towerIdOf(shot(basic, 10, 8))).toBe('basic');
+    const reduced = createFireTracker();
+    reduced.update(
+      frame({ towers: [basic], tracers: [shot(basic, 10)], renderTick: 10, reducedMotion: true }),
+    );
+    expect(reduced.towerIdOf(shot(basic, 10))).toBe('basic');
+    const lost = createFireTracker();
+    lost.update(
+      frame({ towers: [basic], tracers: [shot(basic, 10)], creeps: NONE_DRAWN, renderTick: 10 }),
+    );
+    expect(lost.towerIdOf(shot(basic, 10))).toBe('basic');
+  });
+
+  it('takes the controller’s word for a shot whose tower is gone — before a tower now standing there — and shows that shot no recoil or flash', () => {
+    const fire = createFireTracker();
+    // Basic's shot, its tower sold and a splash tower built on its footprint in the frame that
+    // caught up on both: the controller names the tower that fired it.
+    const rebuilt = tower(5, 'splash', 2);
+    const named: TracerVM = { ...shot(basic, 10), towerId: 'basic' };
+    expect(fire.update(frame({ towers: [rebuilt], tracers: [named], renderTick: 10.5 }))).toEqual(
+      [],
+    );
+    expect(fire.towerIdOf(named)).toBe('basic');
+    expect(fire.sinceFired(5)).toBeNull(); // the splash tower did not fire it
+    // The splash tower's own shot, from the same centre, is its own.
+    const own = lob(rebuilt, 12);
+    fire.update(frame({ towers: [rebuilt], tracers: [named, own], renderTick: 12 }));
+    expect(fire.towerIdOf(own)).toBe('splash');
+    expect(fire.towerIdOf(named)).toBe('basic');
+  });
+
+  it('knows no tower for a mine going off, nor for a shot from no tower’s centre', () => {
+    const fire = createFireTracker();
+    const mine = tower(3, 'mine', 10);
+    const offCentre: TracerVM = { ...shot(basic, 10), originX: centreOf(basic).x + 1 };
+    fire.update(
+      frame({
+        towers: [basic, mine],
+        tracers: [detonation(mine, 10), offCentre],
+        renderTick: 10,
+      }),
+    );
+    expect(fire.towerIdOf(detonation(mine, 10))).toBeUndefined();
+    expect(fire.towerIdOf(offCentre)).toBeUndefined();
+  });
+
+  it('forgets every shot’s tower on a reset, and when render time runs backwards', () => {
+    const fire = createFireTracker();
+    fire.update(frame({ towers: [basic], tracers: [shot(basic, 40)], renderTick: 40 }));
+    fire.reset();
+    expect(fire.towerIdOf(shot(basic, 40))).toBeUndefined();
+    fire.update(frame({ towers: [basic], tracers: [shot(basic, 40)], renderTick: 40 }));
+    fire.update(frame({ towers: [], tracers: [], renderTick: 7 })); // a new run, not reset
+    expect(fire.towerIdOf(shot(basic, 40))).toBeUndefined();
+  });
+});
+
 describe('headPose — the turn and the knock-back placement gives a head', () => {
   const cellPx = 32; // one design unit is one CSS px
   const basic = tower(1, 'basic', 2);
@@ -658,5 +742,17 @@ describe('fireFeedbackPaintOps — the muzzle flash and the ring pulse', () => {
     const [ring] = fireFeedbackPaintOps([t], aimAt(), firedAgo({ 1: 0 }), false, PAL, frac);
     expect(ring!.x).toBe(snapToDevicePx(raw.x, 1.25) + frac.cellPx);
     expect(ring!.y).toBe(snapToDevicePx(raw.y, 1.25) + frac.cellPx);
+  });
+});
+
+describe('createFireTracker — each shot’s tower, told apart by its whole centre (C2)', () => {
+  it('keeps two towers apart whose footprint centres’ coordinates sum alike', () => {
+    const fire = createFireTracker();
+    const across = tower(1, 'basic', 2, 6); // centre (3, 7) cells
+    const down = tower(2, 'slow', 6, 2); // centre (7, 3) cells: the same sum
+    const a = shot(across, 10);
+    const b = shot(down, 10);
+    fire.update(frame({ towers: [across, down], tracers: [a, b], renderTick: 10 }));
+    expect([fire.towerIdOf(a), fire.towerIdOf(b)]).toEqual(['basic', 'slow']);
   });
 });

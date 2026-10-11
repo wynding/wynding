@@ -42,7 +42,16 @@ export type ArtColour =
   /** A creep's FAMILY hue (`creepColour`, palette) — its body's fill (C3). Creep art only. */
   | 'family'
   /** `palette.airborne` — the fill of a flyer's wings (C4). Creep art only. */
-  | 'airborne';
+  | 'airborne'
+  /** A shot's bright core: its tower's role colour, mixed most of the way to white (C2). Effect
+   *  art only (`effect-art.ts`). */
+  | 'core'
+  /** A creep's hit flash, white (C1). Effect art only. */
+  | 'flash'
+  /** The bounty pop's numerals, white (C1). Effect art only. */
+  | 'glyph'
+  /** The bounty pop's gem, the HUD's bounty gem (C1). Effect art only. */
+  | 'gem';
 
 /** Every `ArtColour`, as a value — keyed on the union, so the two cannot drift: a token added to
  *  the union and not listed here, or listed here and not in the union, fails to compile. */
@@ -60,6 +69,10 @@ const ALL_ART_COLOURS: Readonly<Record<ArtColour, true>> = {
   crack: true,
   family: true,
   airborne: true,
+  core: true,
+  flash: true,
+  glyph: true,
+  gem: true,
 };
 
 /** Whether `value` is an `ArtColour` — for a token read back from outside the type system,

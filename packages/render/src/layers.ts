@@ -25,16 +25,29 @@
 //             towers, rims and pending builds included, since a flyer's falls on whatever
 //             it crosses
 //   effects   live: the selection ring/outline/blast spokes, then each shot's muzzle flash
-//             or ring pulse (visual pass T3), then in-flight tracers
+//             or ring pulse (visual pass T3), then the live parts of the shots in flight
+//             (visual pass C2): a lob's dashed path, a stun arc, an unknown tower's dot
+//   shots     sprites: each shot's tracer (C2) — a lob's landing ring and shadow on the
+//             ground first, then every tracer over them — over the effects, so a shot
+//             leaves its tower's muzzle flash behind it, and under the creeps, as the style
+//             frame draws its shots: a creep the shot reaches covers it
 //   creeps    sprites: every creep's body — ground creeps, then flyers over them
-//   cues      live: every HP bar and status cue, then the build ghost, then sparks
+//   flashes   sprites: each hit creep's flash (visual pass C1) — its body's silhouette in
+//             white — over every body, since it IS its body, whitened; under the cues, so a
+//             creep's HP bar and status stay readable through it
+//   cues      live: every HP bar and status cue, then the build ghost, then sparks, then each
+//             kill's burst and the exit's leak pulse (C1): feedback over everything it marks
+//   pops      sprites: each kill's bounty pop (C1) — the gem and its numerals — over
+//             everything, as the frame draws it: it reads over creeps, cues and bursts alike
 //
 // Creep cues sit ABOVE every body, so a creep's status cue is never hidden under a
 // neighbour's body — the one ordering V2 changed on purpose (creeps used to draw one whole
 // stack at a time). The visual pass split a tower into a plate and a head, put scorches on
 // the floor under everything a tower draws, and gave creeps shadows a layer below every body,
 // so no creep's shadow darkens a neighbour, and below the effects, so a shadow never dims the
-// selection cue or a tracer; the rest keeps the order it had.
+// selection cue or a tracer; the rest keeps the order it had. A flash over every body means a
+// ground creep's 80 ms flash shows over a flyer passing right above it, which interleaving
+// flashes into the creeps layer would avoid at the cost of reshuffling that pool on every hit.
 
 export const BOARD_LAYERS = [
   'board',
@@ -46,8 +59,11 @@ export const BOARD_LAYERS = [
   'pending',
   'creepShadows',
   'effects',
+  'shots',
   'creeps',
+  'flashes',
   'cues',
+  'pops',
 ] as const;
 
 export type BoardLayer = (typeof BOARD_LAYERS)[number];
