@@ -1,15 +1,20 @@
 // outline-overlap.ts — test support: how much two pieces of art share an OUTLINE (visual pass,
-// #181). The measure `tower-art.test.ts` holds the tower heads apart with (T1), shared here for
-// the creep silhouettes (C3): each outline is rasterized as fractional coverage of a grid laid
-// over its own bounding box — normalised to the box, so it measures shape, not size — and two
-// outlines overlap by the soft intersection over union of their coverage. `tower-art.test.ts`
-// carries its own copy of the same functions; the two are one measure.
+// #181). One measure, and one bar, for the art kit: `tower-art.test.ts` holds the tower heads
+// apart with it (T1), and `creep-art.test.ts` the creep silhouettes (C3). Each outline is
+// rasterized as fractional coverage of a grid laid over its own bounding box — normalised to the
+// box, so it measures shape, not size — and two outlines overlap by the soft intersection over
+// union of their coverage.
 
 import { artBounds, shapeOutline, type Point, type Polyline } from '../art-geometry';
 import { strokeWidthAt, type ArtShape } from '../art-ir';
 
+/** The most two outlines may overlap — the art kit's bar, for the tower heads and the creep
+ *  silhouettes alike. Each suite records what its own art measures against it, and the controls
+ *  that must fail it. */
+export const MAX_OUTLINE_OVERLAP = 0.88;
+
 /** Even-odd point-in-polygon over a set of rings. */
-function insideRings(x: number, y: number, rings: readonly (readonly Point[])[]): boolean {
+export function insideRings(x: number, y: number, rings: readonly (readonly Point[])[]): boolean {
   let inside = false;
   for (const ring of rings) {
     for (let i = 0, j = ring.length - 1; i < ring.length; j = i++) {
@@ -31,7 +36,13 @@ export function distToSegment(x: number, y: number, a: Point, b: Point): number 
   return Math.hypot(x - (ax + t * dx), y - (ay + t * dy));
 }
 
-function nearStroke(x: number, y: number, lines: readonly Polyline[], half: number): boolean {
+/** Whether (x, y) lies within `half` of any segment of `lines` — on a stroke that wide. */
+export function nearStroke(
+  x: number,
+  y: number,
+  lines: readonly Polyline[],
+  half: number,
+): boolean {
   for (const { points, closed } of lines) {
     const n = points.length;
     for (let i = 0; i < (closed ? n : n - 1); i++) {
@@ -62,7 +73,14 @@ export function covers(shape: ArtShape, x: number, y: number, unit = Infinity): 
  *  shifted by `offset` of a grid cell. Each cell is supersampled 4×4 over every visible shape
  *  — fills, and strokes at their width at `unit` CSS px per design unit (`Infinity`: the
  *  design width) — so a cell an edge crosses counts the share of it covered. Shadows are not
- *  part of a silhouette (dark on the dark floor). */
+ *  part of a silhouette (dark on the dark floor).
+ *
+ *  Normalising to the box makes this measure SHAPE — not size, which a copy at 90% of the
+ *  size only changes (a footprint-sized raster scored such a copy of a tower head as a
+ *  different outline), and not where edges fall on the pixel grid (a footprint-sized raster at
+ *  a phone's 26px swung splash against frost-splash from 0.82 to 0.91 between 20px and 33px).
+ *  Each suite pins the measure grid-independent for its own art: a coarser grid at a
+ *  third-cell offset reads every pair the same. */
 export function outline(
   shapes: readonly ArtShape[],
   n = 64,

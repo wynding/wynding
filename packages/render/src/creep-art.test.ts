@@ -29,7 +29,7 @@ import {
 import { CREEP_FAMILIES, CREEP_LOOKS, CREEP_SHAPE_VALUES, type CreepShape } from './creep-paint';
 import { COLOUR_MODES, creepColour, resolvePalette } from './palette';
 import { ART_INK, ART_SHADOW, artColour } from './tower-art';
-import { covers, outline, overlap } from './test-support/outline-overlap';
+import { covers, MAX_OUTLINE_OVERLAP, outline, overlap } from './test-support/outline-overlap';
 
 /** The narrow compact floor's cell (`CELL_PX_MIN_NARROW`). */
 const FLOOR_CELL = 10;
@@ -136,9 +136,6 @@ describe('bodies — the silhouette, the primary cue, in its family’s hue and 
     expect(hex.filter(([, y]) => y === Math.min(...hex.map((p) => p[1])))).toHaveLength(2);
   });
 
-  /** The most two silhouettes' outlines may overlap — the art kit's bar, the one the tower
-   *  heads are held to (`tower-art.test.ts`'s `MAX_OUTLINE_OVERLAP`). */
-  const MAX_OUTLINE_OVERLAP = 0.88;
   const shapes = CREEP_SHAPE_VALUES;
   // Built while the suite is collected: rasterising outlines takes a while under coverage.
   const atDesign = new Map(shapes.map((s) => [s, outline([CREEP_BODY[s]])]));

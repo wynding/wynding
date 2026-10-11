@@ -30,6 +30,13 @@ import { COLOUR_MODES, resolvePalette, roleColour } from './palette';
 import { artUnit, boostArtAt } from './art-frames';
 import { drawnRim, rimScales } from './test-support/rim-scales';
 import {
+  insideRings,
+  MAX_OUTLINE_OVERLAP,
+  nearStroke,
+  outline,
+  overlap,
+} from './test-support/outline-overlap';
+import {
   TOWER_FOOTPRINT_MARKS,
   TOWER_LOOKS,
   TOWER_ROLES,
@@ -50,112 +57,17 @@ const ALL_ART: readonly (readonly [string, readonly ArtShape[]])[] = [
   ]),
 ];
 
-// ---- A small rasterizer: what a head COVERS, sampled on a grid ----
-
-/** Even-odd point-in-polygon over a set of rings. */
-function insideRings(x: number, y: number, rings: readonly (readonly Point[])[]): boolean {
-  let inside = false;
-  for (const ring of rings) {
-    for (let i = 0, j = ring.length - 1; i < ring.length; j = i++) {
-      const [xi, yi] = ring[i]!;
-      const [xj, yj] = ring[j]!;
-      if (yi > y !== yj > y && x < ((xj - xi) * (y - yi)) / (yj - yi) + xi) inside = !inside;
-    }
-  }
-  return inside;
-}
-
-function distToSegment(x: number, y: number, a: Point, b: Point): number {
-  const [ax, ay] = a;
-  const dx = b[0] - ax;
-  const dy = b[1] - ay;
-  const len2 = dx * dx + dy * dy;
-  const t = len2 === 0 ? 0 : Math.max(0, Math.min(1, ((x - ax) * dx + (y - ay) * dy) / len2));
-  return Math.hypot(x - (ax + t * dx), y - (ay + t * dy));
-}
-
-function nearStroke(x: number, y: number, lines: readonly Polyline[], half: number): boolean {
-  for (const { points, closed } of lines) {
-    const n = points.length;
-    for (let i = 0; i < (closed ? n : n - 1); i++) {
-      if (distToSegment(x, y, points[i]!, points[(i + 1) % n]!) <= half) return true;
-    }
-  }
-  return false;
-}
-
-/** A head's OUTLINE as fractional coverage of an `n`×`n` grid laid over its own bounding
- *  box: scaled uniformly (aspect kept) so the box's longer side spans the grid, centred, and
- *  shifted by `offset` of a grid cell. Each cell is supersampled 4×4 over every visible shape
- *  — fills, and strokes at their design width — so a cell an edge crosses counts the share
- *  of it covered. Shadows are not part of a silhouette (dark on the dark floor).
- *
- *  Normalising to the box makes this measure SHAPE — not size, which a copy at 90% of the
- *  size only changes (a footprint-sized raster scored such a copy as a different outline),
- *  and not where edges fall on the pixel grid (a footprint-sized raster at a phone's 26px
- *  swung splash against frost-splash from 0.82 to 0.91 between 20px and 33px). The measure
- *  itself is pinned grid-independent below. */
-function outline(shapes: readonly ArtShape[], n = 64, offset = 0): Float64Array {
-  const visible = shapes.filter((s) => s.fill !== 'shadow');
-  const b = artBounds(visible, Infinity); // Infinity: strokes at their design width
-  const side = Math.max(b.maxX - b.minX, b.maxY - b.minY);
-  const x0 = (b.minX + b.maxX) / 2 - side / 2 - (offset * side) / n;
-  const y0 = (b.minY + b.maxY) / 2 - side / 2 - (offset * side) / n;
-  const prepared = visible.map((s) => {
-    const lines = shapeOutline(s);
-    return {
-      rings: s.fill === undefined ? null : lines.map((l) => l.points),
-      half: s.stroke === undefined ? -1 : strokeWidthAt(s, Infinity) / 2,
-      lines,
-    };
-  });
-  const SS = 4;
-  const out = new Float64Array(n * n);
-  for (let py = 0; py < n; py++) {
-    for (let px = 0; px < n; px++) {
-      let hits = 0;
-      for (let sy = 0; sy < SS; sy++) {
-        for (let sx = 0; sx < SS; sx++) {
-          const x = x0 + ((px + (sx + 0.5) / SS) * side) / n;
-          const y = y0 + ((py + (sy + 0.5) / SS) * side) / n;
-          if (
-            prepared.some(
-              (p) =>
-                (p.rings !== null && insideRings(x, y, p.rings)) ||
-                (p.half >= 0 && nearStroke(x, y, p.lines, p.half)),
-            )
-          ) {
-            hits++;
-          }
-        }
-      }
-      out[py * n + px] = hits / (SS * SS);
-    }
-  }
-  return out;
-}
-
-/** How much two outlines overlap: soft intersection over union of their coverage, Σmin/Σmax
- *  — 1 for one outline twice, falling as they differ. */
-function overlap(a: Float64Array, b: Float64Array): number {
-  let lo = 0;
-  let hi = 0;
-  for (let i = 0; i < a.length; i++) {
-    lo += Math.min(a[i]!, b[i]!);
-    hi += Math.max(a[i]!, b[i]!);
-  }
-  return lo / hi;
-}
-
-/** The most any two heads' outlines may overlap. Measured, closest first: basic's ring with
- *  its barrel against venom's droplet, 0.85 (each a round body with a point straight up —
- *  and each its own colour and glyph); then splash's octagon against frost-splash's plus,
- *  0.72 (0.83 with the plus's first, broader arms, which this bar would still have passed but
- *  not clearly — so the arms were slimmed). Controls that must FAIL it, below: stun's
- *  diamond at 90% of its size (0.99 — scale is not shape), the style frame's own
- *  frost-splash against splash (1.00 — splash's octagon with another glyph inside), and
- *  stun's diamond squashed to 90% of its height (0.90 — a near-copy of an outline). */
-const MAX_OUTLINE_OVERLAP = 0.88;
+// ---- What a head COVERS, sampled on a grid: the art kit's outline measure ----
+//
+// `test-support/outline-overlap.ts` holds the measure and its bar (`MAX_OUTLINE_OVERLAP`), one
+// for the tower heads and the creep silhouettes alike. Against it, measured, closest first:
+// basic's ring with its barrel against venom's droplet, 0.85 (each a round body with a point
+// straight up — and each its own colour and glyph); then splash's octagon against
+// frost-splash's plus, 0.72 (0.83 with the plus's first, broader arms, which the bar would
+// still have passed but not clearly — so the arms were slimmed). Controls that must FAIL it,
+// below: stun's diamond at 90% of its size (0.99 — scale is not shape), the style frame's own
+// frost-splash against splash (1.00 — splash's octagon with another glyph inside), and stun's
+// diamond squashed to 90% of its height (0.90 — a near-copy of an outline).
 
 /** The most two heads of ONE role may overlap — they share a colour, so outline and glyph are
  *  all that tell them apart at a glance. The closest such pair is slow's star and stun's
