@@ -395,6 +395,30 @@ describe('layout — the countdown dial, the hud floor, and hidden text’s cont
     expect(outside).not.toMatch(/\.wy-chip-glance\s*\{[^}]*flex-wrap/);
   });
 
+  it('Compact’s strip rows wrap the same way — icon above count — and a count wraps inside only at the zero-width space beside its number', () => {
+    // #181: a one-line row ran its count past the column's edge, which does not grow with the
+    // text. The count may narrow (`flex-shrink: 1`) and break (`white-space: normal`: under the
+    // glance's `nowrap` neither WebKit nor Chromium breaks at a zero-width space) only in
+    // Compact's column.
+    const compact = uncommented.slice(uncommented.indexOf(`@media ${COMPACT_QUERY}`));
+    const glance = ruleBody(compact, '.wy-wave-preview-list .wy-preview-glance');
+    expect(glance).toContain('flex-wrap: wrap;');
+    // R4's gap stays the wings' room beside the icon; the row gap after it keeps the lines tight.
+    expect(glance).toMatch(/(^|; )gap: 0\.15em; .*row-gap: 0;/);
+    expect(ruleBody(compact, '.wy-wave-preview-list .wy-creep-icon')).toContain(
+      'margin-inline-start: 0.15em;',
+    );
+    const count = ruleBody(compact, '.wy-wave-preview-list .wy-preview-count');
+    expect(count).toContain('flex-shrink: 1;');
+    expect(count).toContain('white-space: normal;');
+    // Outside Compact's block — the base rule and Standard's — a row is one line, its count whole.
+    expect(ruleBody(uncommented, '.wy-preview-glance')).toContain('white-space: nowrap;');
+    expect(ruleBody(uncommented, '.wy-preview-count')).toContain('flex: none;');
+    const outside = uncommented.slice(0, uncommented.indexOf(`@media ${COMPACT_QUERY}`));
+    expect(outside).not.toMatch(/\.wy-preview-glance\s*\{[^}]*flex-wrap/);
+    expect(outside).not.toMatch(/\.wy-preview-count\s*\{[^}]*(white-space: normal|flex-shrink)/);
+  });
+
   it('the hud never shrinks below one whole chip beside the link (no sliver)', () => {
     expect(ruleBody(standard, '.wy-shell .wy-hud')).toMatch(/min-width: min\(100%, [0-9.]+rem\);/);
   });

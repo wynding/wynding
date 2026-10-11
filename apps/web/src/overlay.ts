@@ -302,6 +302,10 @@ const ICONS = {
   dismiss: '×',
 } as const;
 
+/** A zero-width space: a line-break opportunity that paints nothing, set in a strip count wherever
+ *  its number meets the message's own text (`countText`, #181). */
+const COUNT_BREAK = '\u200b';
+
 /** The ONE chip write path (contract §4): both forms are always written together from the
  *  same call, so the visible glance and the accessible full message can never disagree, and
  *  no caller can sentence-split a label away from its value. An empty full form means the
@@ -2249,10 +2253,30 @@ export function createOverlay(
     single: boolean,
   ): { readonly count: string; readonly name: string; readonly clause: string } {
     return {
-      count: t('hud.preview.count', { count: entry.count }),
+      count: countText(entry.count),
       name: single ? creepName(entry.creepId) : '',
       clause: single ? previewEntryNotes(entry).join(' · ') : '',
     };
+  }
+
+  /** A strip count as its glance writes it (#181): its one catalog message, with a zero-width
+   *  space wherever the number meets the message's own text — "×16" is "×", the space, "16". It
+   *  paints nothing and reads as nothing (the glance is `aria-hidden`), but it is a line-break
+   *  opportunity, so where even the count is wider than Compact's column it wraps beside its
+   *  number, never inside it, as the countdown's unit does at its `<wbr>` (`shell.ts`). Not a
+   *  `<wbr>` here: that would split the count into two text nodes, which Chromium measures
+   *  1/64px wider than one, moving all that follows it on Standard's one-line strip; one text
+   *  node keeps Standard exactly as it was. And the message stays whole, where the countdown's
+   *  unit is a catalog string of its own: that number is a leaf rewritten every second (#98),
+   *  while a row is rebuilt only when its wave changes, so the break simply goes wherever the
+   *  message puts the number. Formatted with its own placeholder in the number's place, the
+   *  message shows where that is. */
+  function countText(count: number): string {
+    return t('hud.preview.count', { count: '{count}' })
+      .split('{count}')
+      .flatMap((text, i) => (i === 0 ? [text] : [String(count), text]))
+      .filter((piece) => piece !== '')
+      .join(COUNT_BREAK);
   }
 
   /** The text `buildEntryGlance` writes, in document order — the locale sentinel's half of the
