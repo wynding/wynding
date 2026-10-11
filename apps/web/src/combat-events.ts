@@ -60,10 +60,7 @@ export function stepOutcome(
   // holds still at its limit) is no leak.
   const leaks = Number.isSafeInteger(leaked) && leaked > 0 ? leaked : 0;
   if (before.creeps.length === 0) return { kills: [], leaks };
-  const still = new Set<number>();
-  for (const c of after.creeps) still.add(c.id);
-  const gone: CreepVM[] = [];
-  for (const c of before.creeps) if (!still.has(c.id)) gone.push(c);
+  const gone = vanished(before.creeps, after.creeps);
   if (gone.length === 0) return { kills: [], leaks };
   const ex = cellCenterX(exit.col);
   const ey = cellCenterY(exit.row);
@@ -88,6 +85,38 @@ export function stepOutcome(
   };
 }
 
+/** Whether every creep in `creeps` has a higher entity id than the one before it. */
+function risingIds(creeps: readonly CreepVM[]): boolean {
+  for (let i = 1; i < creeps.length; i++) {
+    if (!((creeps[i] as CreepVM).id > (creeps[i - 1] as CreepVM).id)) return false;
+  }
+  return true;
+}
+
+/**
+ * The creeps in `before` that are not in `after`, in `before`'s order. Called once a tick, so
+ * it walks rather than builds a set: the sim keeps its creep rows in the order they spawned (it
+ * compacts a removed row out and appends each new creep) and gives each new creep a higher
+ * entity id than any before it, so both lists run in rising id order and one walk down the two
+ * finds every creep that vanished. Lists that do not (a forged state's) take the set.
+ */
+function vanished(before: readonly CreepVM[], after: readonly CreepVM[]): CreepVM[] {
+  const gone: CreepVM[] = [];
+  if (!risingIds(before) || !risingIds(after)) {
+    const still = new Set<number>();
+    for (const c of after) still.add(c.id);
+    for (const c of before) if (!still.has(c.id)) gone.push(c);
+    return gone;
+  }
+  let j = 0;
+  for (const c of before) {
+    while (j < after.length && (after[j] as CreepVM).id < c.id) j++;
+    if (j < after.length && (after[j] as CreepVM).id === c.id) j++;
+    else gone.push(c);
+  }
+  return gone;
+}
+
 /** A key for a fixed-point point, one number: sim coordinates are whole and far below 2^26. */
 const pointKey = (x: number, y: number): number => x * 67108864 + y;
 
@@ -102,27 +131,41 @@ const pointKey = (x: number, y: number): number => x * 67108864 + y;
  * puts it, if it survived: the same derivation gives both. One that matches no survivor struck a
  * creep the step killed, and a killed creep is reported where the step began, a step's movement
  * back: the kill nearest the point is the one.
+ *
+ * `struck` holds the entity ids the step's due targeted impacts name (read from the state before
+ * the step): only those creeps can be what a point matches, so a ground creep and a flyer
+ * sharing a point are told apart.
  */
 export function markFlyerSparks(
   points: readonly SparkPoint[],
   after: RenderVM,
   kills: readonly KillVM[],
+  struck: ReadonlySet<number>,
 ): SparkPoint[] {
   if (!points.some((p) => p.radiusFp === 0)) return [...points];
+  // With no flyer standing and none killed, no impact struck one: every point passes through.
+  if (!after.creeps.some((c) => c.domain === 'air') && !kills.some((k) => k.domain === 'air')) {
+    return [...points];
+  }
   const at = new Map<number, CreepVM>();
-  for (const c of after.creeps) at.set(pointKey(c.x, c.y), c);
+  for (const c of after.creeps) if (struck.has(c.id)) at.set(pointKey(c.x, c.y), c);
   return points.map((p) => {
     if (p.radiusFp !== 0) return p;
-    const struck: CreepLookVM | undefined = at.get(pointKey(p.x, p.y)) ?? nearest(kills, p);
-    if (struck?.domain !== 'air') return p;
-    return { ...p, flyer: { creepId: struck.creepId, boss: struck.boss } };
+    const hit: CreepLookVM | undefined = at.get(pointKey(p.x, p.y)) ?? nearest(kills, p, struck);
+    if (hit?.domain !== 'air') return p;
+    return { ...p, flyer: { creepId: hit.creepId, boss: hit.boss } };
   });
 }
 
-function nearest(kills: readonly KillVM[], p: { x: number; y: number }): KillVM | undefined {
+function nearest(
+  kills: readonly KillVM[],
+  p: { x: number; y: number },
+  struck: ReadonlySet<number>,
+): KillVM | undefined {
   let best: KillVM | undefined;
   let bestD = Infinity;
   for (const k of kills) {
+    if (!struck.has(k.id)) continue;
     const d = (k.x - p.x) * (k.x - p.x) + (k.y - p.y) * (k.y - p.y);
     if (d < bestD) {
       best = k;

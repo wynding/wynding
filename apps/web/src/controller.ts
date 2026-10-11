@@ -733,10 +733,15 @@ export function createController(
     // costs an increment only on the drop path.
     const events: StepEvents = { impactPoints: [], fired: [], dotDropped: 0 };
     // Combat feedback (visual pass C1/C2, #181) is read from either side of the step
-    // (`combat-events.ts`), and `step` changes `state` in place: so note first the two things
-    // it reads from the state as it stands — the sim's leak counter, and the bounty column the
-    // kill sweep credits each kill from.
+    // (`combat-events.ts`), and `step` changes `state` in place: so note first the things
+    // it reads from the state as it stands — the sim's leak counter, the creeps its due targeted
+    // impacts name (to tell which creep each impact point is), and the bounty column the kill
+    // sweep credits each kill from.
     const leakedBefore = state.leakedCount;
+    const struck = new Set<number>();
+    for (const imp of state.impacts) {
+      if (imp.kind === 'targeted' && imp.impactTick <= state.tick) struck.add(imp.targetId);
+    }
     const bountyIds = state.creeps.id.slice();
     const bounties = state.creeps.bounty.slice();
     hooks?.begin('step');
@@ -785,7 +790,7 @@ export function createController(
     );
     for (const kill of outcome.kills) pendingKills.push(kill);
     pendingLeaks += outcome.leaks;
-    for (const pt of markFlyerSparks(events.impactPoints, curVm, outcome.kills)) {
+    for (const pt of markFlyerSparks(events.impactPoints, curVm, outcome.kills, struck)) {
       // A blast landing at a detonation tracer's origin (still listed: `frame()` prunes it,
       // and a catch-up frame may never have drawn it) is that mine going off — mark it so
       // the scorch survives the tracer being pruned unseen (`SparkPoint.detonation`).
