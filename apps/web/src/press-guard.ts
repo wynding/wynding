@@ -35,7 +35,8 @@
 //     release, and none come where the dialog arrived over the board meanwhile). On this board a
 //     tap gives no `mousedown` or `click` at all, so these spots are touch's only protection.
 //     `arm` notes the arrival and the spot of every press still down or let go under 2 s ago
-//     (two fingers, or taps at two places, each keep their own); a press on a panel control
+//     (two fingers, or taps at two places, each keep their own; a press still down 10 s after it
+//     began is taken for a lost release and forgotten); a press on a panel control
 //     within the window of the arrival, inside the slop of ANY of those spots, is held: it
 //     belongs to a gesture begun before the dialog was there. Where pointers were still down as
 //     the dialog arrived, the arrival is timed from the last release among those presses
@@ -79,6 +80,11 @@ export const PRESS_GUARD_WINDOW_MS = 500;
  *  likely to choose, capped. Also how long ago a press may have been let go for the arrival to
  *  count it. */
 export const PRESS_GUARD_REPEAT_MS = 2000;
+
+/** How long a press may stay "still down" at the dialog's arrival and still count: one whose
+ *  `pointerdown` came this long before the arrival is taken for a release the page never heard,
+ *  and is forgotten. */
+export const PRESS_GUARD_STILL_DOWN_MAX_MS = 10_000;
 
 /** How far a press may land from the last one and still be at the same spot, for a mouse or a
  *  pen: WCAG 2.5.8's smallest target. */
@@ -184,6 +190,8 @@ export function guardPresses(root: HTMLElement): PressGuard {
     {
       readonly x: number;
       readonly y: number;
+      /** Its `pointerdown`. */
+      readonly at: number;
       /** Its release (`pointerup` or `pointercancel`): null while it is still down. */
       readonly up: number | null;
     }
@@ -284,7 +292,7 @@ export function guardPresses(root: HTMLElement): PressGuard {
       }
     }
     pressing.set(e.pointerId, ++pressCount);
-    downs.set(pressCount, { x: e.clientX, y: e.clientY, up: null });
+    downs.set(pressCount, { x: e.clientX, y: e.clientY, at: e.timeStamp, up: null });
   };
 
   /** A pointer let go. Where the dialog arrived while it was down, the arrival is timed from
@@ -415,13 +423,19 @@ export function guardPresses(root: HTMLElement): PressGuard {
     arm: (): void => {
       arrivals++;
       const now = view?.performance.now() ?? 0;
-      // A press still down as the dialog arrives is never stale, however long it was held; one
-      // let go is stale 2 s after its release, as a gesture is timed from its release.
+      // A press still down as the dialog arrives counts, however long it was held, unless it began
+      // 10 s ago or more (a lost release); one let go is stale 2 s after its release, as a
+      // gesture is timed from its release.
       const spots: { readonly x: number; readonly y: number }[] = [];
       const during = new Set<number>();
       for (const [id, down] of downs) {
-        if (down.up === null) during.add(id);
-        else if (now - down.up >= PRESS_GUARD_REPEAT_MS) {
+        if (down.up === null) {
+          if (now - down.at >= PRESS_GUARD_STILL_DOWN_MAX_MS) {
+            downs.delete(id);
+            continue;
+          }
+          during.add(id);
+        } else if (now - down.up >= PRESS_GUARD_REPEAT_MS) {
           downs.delete(id);
           continue;
         }

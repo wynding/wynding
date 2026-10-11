@@ -4,6 +4,7 @@ import {
   PRESS_GUARD_KEY_HOLD_MS,
   PRESS_GUARD_REPEAT_MS,
   PRESS_GUARD_SLOP_PX,
+  PRESS_GUARD_STILL_DOWN_MAX_MS,
   PRESS_GUARD_TOUCH_SLOP_PX,
   PRESS_GUARD_WINDOW_MS,
 } from './press-guard';
@@ -1141,5 +1142,37 @@ describe('press guard — a pinned trade-off, a thumb resting across the arrival
     ptr(h.b, 'pointerdown', 5520, 10);
     mouseTap(h.b, 5600); // the retry, 600 ms after the lift
     expect(h.pressed, 'the retry passes').toEqual(['B']);
+  });
+});
+
+describe('press guard — a press whose release never came is forgotten after 10 s (#181 H2)', () => {
+  it('S1: a lost-release touch is held at an arrival 9999 ms after its down, not at 10000 ms', () => {
+    expect(PRESS_GUARD_STILL_DOWN_MAX_MS).toBe(10_000);
+    for (const [arriveAt, held] of [
+      [PRESS_GUARD_STILL_DOWN_MAX_MS - 1, true],
+      [PRESS_GUARD_STILL_DOWN_MAX_MS, false],
+      [600_000, false],
+    ] as const) {
+      const h = fixture();
+      ptr(h.board, 'pointerdown', 0, 7); // its pointerup is lost
+      setNow(arriveAt);
+      h.guard.arm();
+      ptr(h.b, 'pointerdown', arriveAt + 150, 8);
+      mouseTap(h.b, arriveAt + 200);
+      expect(h.pressed, `a tap 200 ms after an arrival at ${arriveAt}`).toEqual(held ? [] : ['B']);
+      vi.restoreAllMocks();
+    }
+  });
+
+  it('the forgotten press is dropped: a later arrival does not bring it back', () => {
+    const h = fixture();
+    ptr(h.board, 'pointerdown', 0, 7);
+    setNow(20_000);
+    h.guard.arm(); // forgets it
+    setNow(20_100);
+    h.guard.arm(); // a second arrival, with nothing left to note
+    ptr(h.b, 'pointerdown', 20_150, 8);
+    mouseTap(h.b, 20_200);
+    expect(h.pressed).toEqual(['B']);
   });
 });

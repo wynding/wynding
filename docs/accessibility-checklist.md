@@ -1234,8 +1234,8 @@ board. What no longer moves:
   again's. A single press that lands there at that moment retries the send: the guard holds such a
   press only inside a gesture. The shift was measured, not a press against it; logged for the
   owner's UAT pass.
-- A pointer whose release the page never hears stays "still down": a touch's spot is held in the
-  first 500ms of every later arrival; a mouse heals at its next press.
+- A pointer whose release the page never hears is forgotten 10s after its press began: until
+  then its spot is held in the first 500ms of an arrival; a mouse heals at its next press.
 - The fourth tap of a burst passes, because Chromium caps its tap count at 3 and counts it as a
   fresh single tap.
 
