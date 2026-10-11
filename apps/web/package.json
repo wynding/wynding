@@ -19,7 +19,7 @@
     "e2e": "playwright test",
     "perf:e2e": "playwright test --config playwright.perf.config.ts",
     "gen:icons": "node scripts/gen-icons.mjs",
-    "clean": "rm -rf dist dist-perf dist-host *.tsbuildinfo"
+    "clean": "rm -rf dist dist-perf dist-host dist-e2e *.tsbuildinfo"
   },
   "dependencies": {
     "@wynding/content": "workspace:*",

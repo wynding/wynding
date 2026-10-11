@@ -40,6 +40,7 @@ const control: HarnessControl = {
 };
 // Deliberately not a `declare global`: an augmentation would be program-wide, and this is
 // the one place that may name the hook (see `tsconfig.json`'s note on test-only globals).
+// The name is also `check:build-layering`'s marker for this module: rename it there too.
 (window as unknown as { __wySurvey: HarnessControl }).__wySurvey = control;
 
 const transport: SurveyTransport = {
@@ -61,6 +62,7 @@ const booting = boot(document, {
 if (booting === null) throw new Error('missing #app root element');
 booting.catch((cause: unknown) => {
   setTimeout(() => {
+    // This message is also a `check:build-layering` marker for this module: reword it there too.
     throw new Error('survey harness failed to boot', { cause });
   });
 });

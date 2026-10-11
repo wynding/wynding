@@ -1,7 +1,7 @@
 // build-layering-attribution.test.ts — the sourcemap reader behind `check:build-layering`'s
 // `emittedBy` binding (`scripts/build-layering-attribution.mjs`, #168), on synthetic chunks.
 //
-// The real check needs two Vite builds and reads whatever they happen to emit, so it can only
+// The real check needs its Vite builds and reads whatever they happen to emit, so it can only
 // ever show that today's output attributes correctly. The reader's contract is narrower and
 // is pinned here directly: a generated column is a UTF-16 code-unit offset, so an emitted chunk
 // must be decoded as UTF-8 before a marker's index is compared with the map's segments. A

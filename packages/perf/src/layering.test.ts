@@ -18,7 +18,7 @@
 //   2. `pnpm run check:build-layering` — the reachability check over BUILD OUTPUT (e2e job).
 //      It asks Vite, so it sees reaches spelled as paths: all six in #129's escape table, and
 //      the template literal below. It is the authoritative one for the web app; it is also the
-//      slow one, needing three real builds, and it reads STRING-SHAPED markers, so a reach
+//      slow one, needing four real builds, and it reads STRING-SHAPED markers, so a reach
 //      that drags in no marker-bearing string can still pass it.
 //
 // This file's own contribution, stated exactly: it is the only one of the three that reads
