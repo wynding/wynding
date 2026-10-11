@@ -19,7 +19,7 @@
 //
 // PHOTOSENSITIVITY (ADR 0003, WCAG 2.3.1: no more than three flashes in any second). A creep's
 // hit flashes begin at least `MIN_FLASH_GAP_MS` apart, however many towers hit it: a hit inside
-// the gap shows nothing new, so four of one creep's flashes span at least a second. The exit's
+// the gap shows nothing new, so four of one creep's flashes span more than a second. The exit's
 // pulse plays `LEAK_PULSES` pulses and does not begin again until `LEAK_PULSE_GAP_MS` after it
 // began, whatever leaks in between. The kill burst needs no bound: a creep dies once.
 //
@@ -54,7 +54,7 @@ export const HIT_FLASH_MS = 80;
 /** A hit flash's opacity the instant it begins: the frame's. */
 export const HIT_FLASH_ALPHA = 0.85;
 /** The least time between the starts of two of one creep's hit flashes, ms: four of them then
- *  span at least three gaps — a second or more — so no second holds four (ADR 0003). */
+ *  span three gaps, more than a second, so no second holds four, both ends counted (ADR 0003). */
 export const MIN_FLASH_GAP_MS = Math.ceil(1000 / MAX_FLASHES_PER_SECOND);
 
 /** How long a kill's burst lasts, ms: the frame's shards flying out over 260 ms. */

@@ -63,9 +63,10 @@ export interface Palette {
   readonly roleAir: number;
   readonly roleSupport: number;
   readonly roleBurst: number;
-  /** The in-flight shot dot (`tracerPaintOps`). It drew in the tower body's colour until the
-   *  visual pass gave `tower` to the plate rim; it keeps that colour here, unchanged, until
-   *  shots get their own look. */
+  /** The dot a shot is drawn as when its tower is one the shot table does not know
+   *  (`planShots`) — every shot's look until C2 gave each tower its own tracer. It drew in the
+   *  tower body's colour until the visual pass gave `tower` to the plate rim, and keeps that
+   *  colour. */
   readonly tracer: number;
   /** The range ring stroke. */
   readonly range: number;

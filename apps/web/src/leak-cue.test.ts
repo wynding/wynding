@@ -24,7 +24,8 @@ describe('createLeakCue — the lives chip’s leak cue', () => {
   });
 
   it('never begins more than three cues in any second, though a creep leaks every frame', () => {
-    expect(LEAK_CUE_GAP_MS).toBeGreaterThanOrEqual(1000 / 3);
+    // Four starts span three gaps, more than a second: no closed second holds four.
+    expect(3 * LEAK_CUE_GAP_MS).toBeGreaterThan(1000);
     expect(LEAK_CUE_GAP_MS).toBeGreaterThan(LEAK_CUE_MS); // the cue is off between two
     const cue = createLeakCue();
     const starts: number[] = [];
@@ -37,7 +38,7 @@ describe('createLeakCue — the lives chip’s leak cue', () => {
     }
     expect(starts.length).toBeGreaterThan(5); // it does show, as often as it may
     for (let i = 3; i < starts.length; i++) {
-      expect(starts[i]! - starts[i - 3]!).toBeGreaterThanOrEqual(1000);
+      expect(starts[i]! - starts[i - 3]!).toBeGreaterThan(1000); // a closed second, both ends
     }
     for (let i = 1; i < starts.length; i++) {
       expect(starts[i]! - starts[i - 1]!).toBeGreaterThanOrEqual(LEAK_CUE_GAP_MS);

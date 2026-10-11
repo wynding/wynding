@@ -72,15 +72,15 @@ const frame = (opts: Partial<FeedbackFrame> = {}): FeedbackFrame => ({
   ...opts,
 });
 
-/** Whether `starts` (ms, ascending) ever puts more than `max` in one second: any four within a
- *  second of each other would. */
+/** The most of `starts` (ms, ascending) that any one second holds — a CLOSED second, both ends
+ *  counted, the stricter count: four starts a second apart end to end would be four. */
 function mostInAnySecond(starts: readonly number[]): number {
   let most = 0;
   for (let i = 0; i < starts.length; i++) {
     let n = 0;
     for (
       let j = i;
-      j < starts.length && (starts[j] as number) - (starts[i] as number) < 1000;
+      j < starts.length && (starts[j] as number) - (starts[i] as number) <= 1000;
       j++
     ) {
       n += 1;
@@ -186,8 +186,9 @@ describe('createFeedbackTracker — a hit flashes its creep', () => {
 describe('createFeedbackTracker — photosensitivity (ADR 0003, WCAG 2.3.1)', () => {
   it('no creep flashes more than three times in any second, though four towers hit it every tick', () => {
     expect(MAX_FLASHES_PER_SECOND).toBe(3);
-    // The bound's arithmetic: four flashes' starts span three gaps, a second or more.
-    expect(3 * MIN_FLASH_GAP_MS).toBeGreaterThanOrEqual(1000);
+    // The bound's arithmetic: four flashes' starts span three gaps, more than a second, so no
+    // closed second holds four.
+    expect(3 * MIN_FLASH_GAP_MS).toBeGreaterThan(1000);
     const fb = createFeedbackTracker();
     const drawn = new Set([7]);
     const starts: number[] = [];

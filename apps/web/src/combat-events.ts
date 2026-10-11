@@ -37,11 +37,13 @@ export type BountyOf = (creepId: number) => number;
  * The creeps the step from `before` to `after` removed, sorted into leaks and kills.
  *
  * A creep in `before` and not in `after` either reached the exit (the movement phase removes
- * it and adds one to `leakedCount`) or was killed (the combat phase sweeps it). The sim does not
- * say which creep did which, but it does count the leaks exactly: `leaked`, the counter's move
- * over the step. Every leak was within one step of the exit as the step began, so the `leaked`
- * vanished creeps NEAREST the exit — by straight-line distance to its cell's centre, ties in
- * view-model order — are the leaks, and the rest are kills (#181's UAT ledger records the rule).
+ * it and adds one to `leakedCount`) or was killed (the combat phase sweeps it). (The sim also
+ * removes a row it finds corrupt, with no leak and no bounty; no genuine run makes one, and one
+ * would read here as a kill.) The sim does not say which creep did which, but it does count the
+ * leaks exactly: `leaked`, the counter's move over the step. Every leak was within one step of
+ * the exit as the step began, so the `leaked` vanished creeps NEAREST the exit — by
+ * straight-line distance to its cell's centre, ties in view-model order — are the leaks, and the
+ * rest are kills (#181's UAT ledger records the rule).
  * Each kill carries its look, its position as the step began (where the board last drew it)
  * and the bounty the sweep credited for it: the creep's own `bounty` column, which the sim sets
  * from the catalog at spawn and never changes — `bountyOf` reads it as it stood before the step,

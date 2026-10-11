@@ -371,8 +371,8 @@ export interface RenderOverlay {
   /** When true the scene damps the impact-spark FX (WCAG 2.3.3 / GAG §2). */
   readonly reducedMotion: boolean;
   /** Shots currently in flight (Tracer, #32/P6) — copied from `FrameSnapshot.tracers`
-   *  each frame. Under reduced motion the scene omits them entirely (`tracerPaintOps`
-   *  returns an empty plan), same posture as the impact spark's damping. */
+   *  each frame. Under reduced motion the scene omits them entirely (`planShots` returns an
+   *  empty plan), same posture as the impact spark's damping. */
   readonly tracers: readonly TracerVM[];
   /** Creeps killed since the last frame (visual pass C1, #181) — accumulated per sim tick by
    *  the controller, like `sparks`, so a catch-up frame still bursts every kill. */

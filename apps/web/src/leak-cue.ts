@@ -7,8 +7,8 @@
 // is a change of colour on and off — a flash — and a run of leaks would otherwise blink it as
 // fast as they came. A cue begins at most once every `LEAK_CUE_GAP_MS`, however many leaks
 // arrive between: one that lands while a cue shows, or before the gap has run, starts nothing
-// new. So no second holds more than one cue — and the HUD's lives count, its accessible
-// source, still changes with every leak.
+// new. So cues begin a second or more apart, far inside the bound — and the HUD's lives count,
+// its accessible source, still changes with every leak.
 
 /** How long the chip shows a leak, ms: the frame's leak moment, its exit pulsing twice. */
 export const LEAK_CUE_MS = 600;

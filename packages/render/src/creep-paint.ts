@@ -243,7 +243,7 @@ export function hpBarPaintOp(
  *  opacity (it is the essential cue, and the palette contrast gate treats `slowed` as an
  *  opaque cue — QC round 1); `'pulse'` is the motion cue — a ring whose radius genuinely
  *  OSCILLATES with render time — omitted entirely under reduced motion (WCAG 2.3.3 /
- *  GAG §2, the same posture `tracerPaintOps`/the impact spark already take). */
+ *  GAG §2, the same posture the shots (`planShots`) and the impact spark already take). */
 export type SlowTelegraphOpKind = 'ring' | 'pulse';
 
 export interface SlowTelegraphPaintOp {
@@ -275,8 +275,8 @@ const PULSE_R_SPAN = 0.6;
  * telegraph still renders, merely un-animated for that frame).
  */
 /** NOTE the units: `creep.x`/`y` here are PIXELS (the projected centre), NOT the
- *  fixed-point sim units `CreepVM` carries — unlike `tracerPaintOps`, which takes and
- *  emits fixed-point and is converted by its executor. Both signatures are bare
+ *  fixed-point sim units `CreepVM` carries — unlike `positionTracers`, which takes and
+ *  emits fixed-point and leaves the projection to its caller. Both signatures are bare
  *  `{x, y}`, and passing the raw `CreepVM` drew this cue off-canvas for two milestones
  *  (Codex, PR #78). */
 export function slowTelegraphPaintOps(
