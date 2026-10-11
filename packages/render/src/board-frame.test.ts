@@ -781,6 +781,31 @@ describe('drawBoardFrame — towers that aim and fire (visual pass T3)', () => {
     expect(head.rotation).not.toBeCloseTo(aimAngle(centre.x, centre.y, body.cx, body.cy)!, 2);
   });
 
+  it('between ticks, a creep is PLACED where its head aims and its tracer lands — one interpolated point', () => {
+    const { t, draw } = run();
+    const basic = tower(2, 'basic', 4, { targetId: 7 });
+    const creeps = {
+      prev: [creep({ x: CX + 512, y: CY })],
+      cur: [creep({ x: CX + 512, y: CY + 512 })],
+    };
+    const arrived = { ...shotFrom(basic, 0), impactTick: 4 };
+    for (let tick = 10; tick <= 30; tick++)
+      draw(tick, 0.5, [basic], creeps, { tracers: [arrived] });
+    const mid = PROJECTION.fpToPixel(CX + 512, CY + 256);
+    const at = [snapToDevicePx(mid.x, PROJECTION.dpr), snapToDevicePx(mid.y, PROJECTION.dpr)];
+    const [shadow] = t.creepShadows.syncs.at(-1)!;
+    const sa = framesFor(PROJECTION).get(shadow!.frame)!;
+    expect([shadow!.x + sa.anchorX, shadow!.y + sa.anchorY]).toEqual(at);
+    const body = t.creeps.syncs.at(-1)![0] as CreepPlacement;
+    expect([body.cx, body.cy]).toEqual(at);
+    const dot = lastFrame(t.layers.effects).calls.find((c) => c.method === 'fillCircle')!;
+    expect(dot.args.slice(0, 2)).toEqual(at);
+    expect(t.heads.syncs.at(-1)![0]!.rotation).toBeCloseTo(
+      aimAngle(CX, CY, CX + 512, CY + 256)!,
+      9,
+    );
+  });
+
   it('sweeps rather than snaps: the first frames turn it a bounded step at a time', () => {
     const { t, draw } = run();
     const basic = tower(2, 'basic', 4, { targetId: 7 });
