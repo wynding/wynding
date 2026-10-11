@@ -311,13 +311,20 @@ describe('stepOutcome / markFlyerSparks — what the attribution tests above cou
   it('tells apart two creeps whose coordinates sum alike: an impact on the walker is no flyer’s', () => {
     const walker = creep(5, { x: 900, y: 800 });
     const flyer = creep(1, { creepId: 'flying', domain: 'air', x: 800, y: 900 });
-    const [out] = markFlyerSparks(
-      [{ x: 900, y: 800, radiusFp: 0 }],
+    // Both struck, each at its own point, so both are looked up by point and only the points'
+    // keys tell them apart. (With the walker alone struck, the flyer is never looked up, and
+    // keys that collide could not show.)
+    const [onWalker, onFlyer] = markFlyerSparks(
+      [
+        { x: 900, y: 800, radiusFp: 0 },
+        { x: 800, y: 900, radiusFp: 0 },
+      ],
       vm([walker, flyer]),
       [],
-      new Set([5]),
+      new Set([5, 1]),
     );
-    expect(out!.flyer).toBeUndefined();
+    expect(onWalker!.flyer).toBeUndefined();
+    expect(onFlyer!.flyer).toEqual({ creepId: 'flying', boss: false });
   });
 });
 
