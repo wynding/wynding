@@ -223,7 +223,8 @@ export interface Controller {
   /** The creeps killed and the leaks counted since the last call, then cleared (visual pass
    *  C1, #181). Accumulated per sim tick, like the sparks, so a catch-up frame still shows
    *  every kill and every leak. Derived from the view models either side of each step and the
-   *  sim's own leak counter (`combat-events.ts`), never from new sim state. */
+   *  ids the step reports as leaked (`StepEvents.leaked`, `combat-events.ts`), never from new
+   *  sim state. */
   drainFeedback(): StepFeedback;
   /** Derived HUD fields for the DOM overlay. */
   hud(): HudVM;
@@ -731,13 +732,12 @@ export function createController(
     // this is a tripwire for a future story that widens a DoT duration, not a live
     // concern. `impactPoints`/`fired` stay as they were; the counter is a scalar and
     // costs an increment only on the drop path.
-    const events: StepEvents = { impactPoints: [], fired: [], dotDropped: 0 };
+    const events: StepEvents = { impactPoints: [], fired: [], dotDropped: 0, leaked: [] };
     // Combat feedback (visual pass C1/C2, #181) is read from either side of the step
     // (`combat-events.ts`), and `step` changes `state` in place: so note first the things
-    // it reads from the state as it stands — the sim's leak counter, the creeps its due targeted
-    // impacts name (to tell which creep each impact point is), and the bounty column the kill
-    // sweep credits each kill from.
-    const leakedBefore = state.leakedCount;
+    // it reads from the state as it stands — the creeps its due targeted impacts name (to tell
+    // which creep each impact point is), and the bounty column the kill sweep credits each kill
+    // from. (Which creeps leaked comes from the step itself: `events.leaked`.)
     const struck = dueTargets(state);
     const bountyIds = state.creeps.id.slice();
     const bounties = state.creeps.bounty.slice();
@@ -775,16 +775,10 @@ export function createController(
     curVm = deriveViewModel(state, ruleset);
     hooks?.end('derive');
     // What the step removed: its kills, where they stood as it began, and its leaks.
-    const outcome = stepOutcome(
-      before,
-      curVm,
-      state.leakedCount - leakedBefore,
-      grid.exit,
-      (id) => {
-        const i = bountyIds.indexOf(id);
-        return i < 0 ? 0 : (bounties[i] as number);
-      },
-    );
+    const outcome = stepOutcome(before, curVm, events.leaked ?? [], (id) => {
+      const i = bountyIds.indexOf(id);
+      return i < 0 ? 0 : (bounties[i] as number);
+    });
     for (const kill of outcome.kills) pendingKills.push(kill);
     pendingLeaks += outcome.leaks;
     for (const pt of markFlyerSparks(events.impactPoints, curVm, outcome.kills, struck)) {

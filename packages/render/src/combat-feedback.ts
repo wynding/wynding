@@ -10,7 +10,7 @@
 // impact tick the creep it was aimed at flashes, if it is still drawn. One it killed is not
 // drawn by then — the step that landed the shot has removed it — and its burst shows instead. A
 // KILL and a LEAK come from the controller (`RenderOverlay.kills` and `leaks`), which reads them
-// off the view models either side of each step and the sim's own leak counter.
+// off the view models either side of each step and the ids the step reports as leaked.
 //
 // THE CLOCK is the wall clock the impact sparks fade on (`sparks.ts`), not render time: the
 // frame's durations are wall-clock ones, and the rate bounds below are what a viewer sees in a
@@ -45,7 +45,7 @@ import {
   type GlyphChar,
 } from './effect-art';
 import { GEM_FRAME_KEY, glyphFrameKey } from './art-frames';
-import type { FrameAnchor, SpritePlacement } from './placement';
+import { anchorOf, type FrameAnchor, type SpritePlacement } from './placement';
 import { MAX_FLASHES_PER_SECOND } from './tower-fire';
 import type { KillVM, TracerVM } from './types';
 
@@ -336,11 +336,7 @@ export function bountyPopPlacements(
   const p = sinceMs / BOUNTY_POP_MS;
   const rise = reducedMotion ? 0 : BOUNTY_POP_RISE * u * (1 - (1 - p) * (1 - p));
   const keys = [GEM_FRAME_KEY, ...popChars(bounty).map(glyphFrameKey)];
-  const anchors = keys.map((key) => {
-    const a = frames.get(key);
-    if (a === undefined) throw new Error(`board atlas has no frame '${key}'`);
-    return a;
-  });
+  const anchors = keys.map((key) => anchorOf(frames, key));
   // The row's centre line, its lift above the kill and risen — but never so high that a sprite's
   // top would leave the canvas. Anchors sit on whole texels, so the floor stays on the grid.
   let floor = 0;

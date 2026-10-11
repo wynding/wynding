@@ -1,6 +1,6 @@
 // combat-events.test.ts — what one sim step did that the board shows as combat feedback (#181
 // C1/C2), read from data the controller already holds: which vanished creeps were kills and
-// which leaks (the sim's own leak count, nearest the exit), each kill's look, position and
+// which leaks (the ids the step reports as leaked), each kill's look, position and
 // bounty; which flyer a targeted impact struck; and which shots in flight lost their tower.
 
 import { describe, it, expect } from 'vitest';
@@ -9,8 +9,7 @@ import type { SimState } from '@wynding/sim';
 import { dueTargets, markFlyerSparks, noteTowerless, stepOutcome } from './combat-events';
 
 const FP = 256;
-/** The exit cell in these steps, and its centre in fixed-point units. */
-const EXIT = { col: 20, row: 10 } as const;
+/** The exit cell's centre in these steps, in fixed-point units. */
 const EXIT_AT = { x: 20 * FP + FP / 2, y: 10 * FP + FP / 2 };
 
 const creep = (id: number, opts: Partial<CreepVM> = {}): CreepVM => ({
@@ -49,13 +48,13 @@ const tower = (id: number, towerId: string, col: number, row: number): TowerVM =
 const bountyIsId = (id: number): number => id;
 
 describe('stepOutcome — the kills and leaks of one step', () => {
-  it('a creep the step removed, with no leak counted, is a kill: its look, where it stood as the step began, and its bounty', () => {
+  it('a creep the step removed that the step did not name as leaked is a kill: its look, where it stood as the step began, and its bounty', () => {
     const before = vm([
       creep(1),
       creep(2, { creepId: 'armored-flyer', domain: 'air', boss: true, x: 7 * FP, y: 3 * FP }),
     ]);
     const after = vm([creep(1)]);
-    expect(stepOutcome(before, after, 0, EXIT, bountyIsId)).toEqual({
+    expect(stepOutcome(before, after, [], bountyIsId)).toEqual({
       kills: [
         {
           id: 2,
@@ -71,75 +70,76 @@ describe('stepOutcome — the kills and leaks of one step', () => {
     });
   });
 
-  it('takes the sim’s leak count as exact: the vanished creeps nearest the exit are the leaks, the rest the kills, in view-model order', () => {
+  it('takes the ids the step reports as exact: the vanished creeps it names are the leaks, the rest the kills, in view-model order', () => {
     const before = vm([
-      creep(1, { x: 2 * FP, y: 2 * FP }), // far from the exit
-      creep(2, { x: EXIT_AT.x - 10, y: EXIT_AT.y }), // at the exit
+      creep(1, { x: 2 * FP, y: 2 * FP }),
+      creep(2, { x: EXIT_AT.x - 10, y: EXIT_AT.y }),
       creep(3, { x: 9 * FP, y: 9 * FP }),
-      creep(4, { x: EXIT_AT.x - 40, y: EXIT_AT.y + 3 }), // next to it
+      creep(4, { x: EXIT_AT.x - 40, y: EXIT_AT.y + 3 }),
       creep(5), // survives
     ]);
     const after = vm([creep(5)]);
-    const one = stepOutcome(before, after, 1, EXIT, bountyIsId);
+    // The far creep leaks and the ones beside the exit die: position does not decide it.
+    const one = stepOutcome(before, after, [1], bountyIsId);
     expect(one.leaks).toBe(1);
-    expect(one.kills.map((k) => k.id)).toEqual([1, 3, 4]);
-    const two = stepOutcome(before, after, 2, EXIT, bountyIsId);
+    expect(one.kills.map((k) => k.id)).toEqual([2, 3, 4]);
+    const two = stepOutcome(before, after, [4, 1], bountyIsId);
     expect(two.leaks).toBe(2);
-    expect(two.kills.map((k) => k.id)).toEqual([1, 3]);
+    expect(two.kills.map((k) => k.id)).toEqual([2, 3]);
   });
 
-  it('breaks a tie in distance by view-model order: the first is the leak', () => {
+  it('calls the creep the step named the leak, not the one that began nearer the exit: a faster creep leaks while a slower one beside the exit is killed', () => {
     const before = vm([
-      creep(1, { x: EXIT_AT.x - 64, y: EXIT_AT.y }),
-      creep(2, { x: EXIT_AT.x + 64, y: EXIT_AT.y }),
+      creep(1, { x: EXIT_AT.x - 3 * FP, y: EXIT_AT.y }), // fast: began farther out, reaches the exit
+      creep(2, { x: EXIT_AT.x - 20, y: EXIT_AT.y }), // slow: began at the door, killed
     ]);
-    expect(stepOutcome(before, vm([]), 1, EXIT, bountyIsId).kills.map((k) => k.id)).toEqual([2]);
+    const out = stepOutcome(before, vm([]), [1], bountyIsId);
+    expect(out.leaks).toBe(1);
+    expect(out.kills).toEqual([
+      {
+        id: 2,
+        x: EXIT_AT.x - 20,
+        y: EXIT_AT.y,
+        creepId: 'normal',
+        domain: 'ground',
+        boss: false,
+        bounty: 2, // the kill pays its bounty; the leaker, which paid none, is no burst
+      },
+    ]);
   });
 
-  it('counts every leak even when no creep it knows vanished — and reports no kill', () => {
-    expect(stepOutcome(vm([]), vm([]), 2, EXIT, bountyIsId)).toEqual({ kills: [], leaks: 2 });
-    expect(stepOutcome(vm([creep(1)]), vm([creep(1)]), 1, EXIT, bountyIsId)).toEqual({
+  it('counts every leak the step names even when no creep it knows vanished — and reports no kill', () => {
+    expect(stepOutcome(vm([]), vm([]), [7, 8], bountyIsId)).toEqual({ kills: [], leaks: 2 });
+    expect(stepOutcome(vm([creep(1)]), vm([creep(1)]), [9], bountyIsId)).toEqual({
       kills: [],
       leaks: 1,
     });
-    // More leaks than creeps vanished: every one of them leaked.
-    expect(stepOutcome(vm([creep(1)]), vm([]), 3, EXIT, bountyIsId)).toEqual({
+    // More leaks named than creeps vanished: every one of them leaked.
+    expect(stepOutcome(vm([creep(1)]), vm([]), [1, 8, 9], bountyIsId)).toEqual({
       kills: [],
       leaks: 3,
     });
-  });
-
-  it('reads no leak from a counter that did not rise by a whole number', () => {
-    for (const leaked of [0, -1, 0.5, NaN, Infinity]) {
-      expect(stepOutcome(vm([creep(1)]), vm([]), leaked, EXIT, bountyIsId), String(leaked)).toEqual(
-        expect.objectContaining({ leaks: 0 }),
-      );
-    }
   });
 
   it('finds the same vanished creeps whether or not the view models list them in rising id order', () => {
     // As the sim lists them: rising ids, a spawn (7) appended after the survivors.
     const before = vm([1, 2, 3, 4, 5, 6].map((id) => creep(id, { x: id * FP })));
     const after = vm([creep(2, { x: 2 * FP }), creep(5, { x: 5 * FP }), creep(7)]);
-    expect(stepOutcome(before, after, 0, EXIT, bountyIsId).kills.map((k) => k.id)).toEqual([
-      1, 3, 4, 6,
-    ]);
+    expect(stepOutcome(before, after, [], bountyIsId).kills.map((k) => k.id)).toEqual([1, 3, 4, 6]);
     // Out of order — a forged state's — the same creeps vanished, reported in `before`'s order.
     const shuffled = (v: RenderVM): RenderVM => vm([...v.creeps].reverse());
     expect(
-      stepOutcome(shuffled(before), shuffled(after), 0, EXIT, bountyIsId).kills.map((k) => k.id),
+      stepOutcome(shuffled(before), shuffled(after), [], bountyIsId).kills.map((k) => k.id),
     ).toEqual([6, 4, 3, 1]);
     // Nothing vanished, with and without a spawn: no kill.
-    expect(stepOutcome(before, before, 0, EXIT, bountyIsId).kills).toEqual([]);
-    expect(
-      stepOutcome(before, vm([...before.creeps, creep(9)]), 0, EXIT, bountyIsId).kills,
-    ).toEqual([]);
+    expect(stepOutcome(before, before, [], bountyIsId).kills).toEqual([]);
+    expect(stepOutcome(before, vm([...before.creeps, creep(9)]), [], bountyIsId).kills).toEqual([]);
   });
 
   it('credits a kill the bounty its creep’s column held — and 0 for a value the sweep would not credit', () => {
     const before = vm([creep(1), creep(2), creep(3), creep(4)]);
     const bounty = (id: number): number => [0, 7, -2, 1.5, NaN][id] as number;
-    expect(stepOutcome(before, vm([]), 0, EXIT, bounty).kills.map((k) => k.bounty)).toEqual([
+    expect(stepOutcome(before, vm([]), [], bounty).kills.map((k) => k.bounty)).toEqual([
       7, 0, 0, 0,
     ]);
   });
@@ -281,19 +281,6 @@ describe('noteTowerless — the shots in flight whose tower the step took away',
 });
 
 describe('stepOutcome / markFlyerSparks — what the attribution tests above could not tell apart', () => {
-  it('measures nearness to the exit in both axes: a creep in the exit’s row or column but cells away is no leak beside one at its door', () => {
-    const inColumn = vm([
-      creep(1, { x: EXIT_AT.x, y: EXIT_AT.y - 6 * FP }), // the exit's own column, six cells up
-      creep(2, { x: EXIT_AT.x - 20, y: EXIT_AT.y }), // at the door
-    ]);
-    expect(stepOutcome(inColumn, vm([]), 1, EXIT, bountyIsId).kills.map((k) => k.id)).toEqual([1]);
-    const inRow = vm([
-      creep(3, { x: EXIT_AT.x - 6 * FP, y: EXIT_AT.y }), // the exit's own row, six cells back
-      creep(4, { x: EXIT_AT.x, y: EXIT_AT.y + 20 }), // at the door
-    ]);
-    expect(stepOutcome(inRow, vm([]), 1, EXIT, bountyIsId).kills.map((k) => k.id)).toEqual([3]);
-  });
-
   it('a targeted impact at a surviving flyer’s point is that flyer’s, whatever else the step killed', () => {
     const flyer = creep(1, { creepId: 'flying', domain: 'air', x: 800, y: 900 });
     const kills: KillVM[] = [

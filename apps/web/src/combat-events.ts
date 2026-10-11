@@ -4,12 +4,13 @@
 // it once per tick, beside the impact points it already collects (`controller.ts`).
 //
 // NOTHING HERE IS NEW SIM STATE. Every answer is read from what the controller already holds:
-// the view models either side of the step, the sim's own `leakedCount`, the bounty column it
-// credits a kill from, its impact points and the shots it fired. Determinism and replay never
-// see any of it.
+// the view models either side of the step, the ids the step reports as leaked (the optional
+// presentational `StepEvents.leaked`, never hash-relevant), the bounty column it credits a kill
+// from, its impact points and the shots it fired. Determinism and replay never see any of it.
 
 import {
   footprintCentreFp,
+  fpPointKey,
   isDetonation,
   type CreepLookVM,
   type CreepVM,
@@ -19,13 +20,13 @@ import {
   type TowerVM,
   type TracerVM,
 } from '@wynding/render';
-import { cellCenterX, cellCenterY, type SimState } from '@wynding/sim';
+import type { SimState } from '@wynding/sim';
 
 /** What one step removed from the board, as feedback shows it. */
 export interface StepOutcome {
   /** The creeps it killed, each where it stood as the step began. */
   readonly kills: KillVM[];
-  /** How many creeps reached the exit: the sim's `leakedCount` moved by this much. */
+  /** How many creeps reached the exit: the ids the step named as leaked. */
   readonly leaks: number;
 }
 
@@ -37,13 +38,11 @@ export type BountyOf = (creepId: number) => number;
  * The creeps the step from `before` to `after` removed, sorted into leaks and kills.
  *
  * A creep in `before` and not in `after` either reached the exit (the movement phase removes
- * it and adds one to `leakedCount`) or was killed (the combat phase sweeps it). (The sim also
- * removes a row it finds corrupt, with no leak and no bounty; no genuine run makes one, and one
- * would read here as a kill.) The sim does not say which creep did which, but it does count the
- * leaks exactly: `leaked`, the counter's move over the step. Every leak was within one step of
- * the exit as the step began, so the `leaked` vanished creeps NEAREST the exit — by
- * straight-line distance to its cell's centre, ties in view-model order — are the leaks, and the
- * rest are kills (#181's UAT ledger records the rule).
+ * it) or was killed (the combat phase sweeps it). (The sim also removes a row it finds corrupt,
+ * with no leak and no bounty; no genuine run makes one, and one would read here as a kill.) The
+ * step itself says which: `leaked`, the entity ids its movement phase removed as leaks
+ * (`StepEvents.leaked`). So a vanished creep whose id is named there leaked, every other is a
+ * kill, and the leak count is the number of ids the step named.
  * Each kill carries its look, its position as the step began (where the board last drew it)
  * and the bounty the sweep credited for it: the creep's own `bounty` column, which the sim sets
  * from the catalog at spawn and never changes — `bountyOf` reads it as it stood before the step,
@@ -52,35 +51,29 @@ export type BountyOf = (creepId: number) => number;
 export function stepOutcome(
   before: RenderVM,
   after: RenderVM,
-  leaked: number,
-  exit: { readonly col: number; readonly row: number },
+  leaked: readonly number[],
   bountyOf: BountyOf,
 ): StepOutcome {
-  // The counter only grows; a move that is not a whole number above zero (a counter the sim
-  // holds still at its limit) is no leak.
-  const leaks = Number.isSafeInteger(leaked) && leaked > 0 ? leaked : 0;
+  const leaks = leaked.length;
   if (before.creeps.length === 0) return { kills: [], leaks };
   const gone = vanished(before.creeps, after.creeps);
   if (gone.length === 0) return { kills: [], leaks };
-  const ex = cellCenterX(exit.col);
-  const ey = cellCenterY(exit.row);
-  const far = (c: CreepVM): number => (c.x - ex) * (c.x - ex) + (c.y - ey) * (c.y - ey);
-  // Nearest the exit first; `sort` is stable, so equal distances keep view-model order.
-  const byExit = gone.map((c, i) => ({ c, i, d: far(c) })).sort((a, b) => a.d - b.d || a.i - b.i);
-  const killed = byExit.slice(Math.min(leaks, byExit.length)).sort((a, b) => a.i - b.i);
+  const left = new Set(leaked);
   return {
-    kills: killed.map(({ c }) => {
-      const b = bountyOf(c.id);
-      return {
-        id: c.id,
-        x: c.x,
-        y: c.y,
-        creepId: c.creepId,
-        domain: c.domain,
-        boss: c.boss,
-        bounty: Number.isSafeInteger(b) && b > 0 ? b : 0,
-      };
-    }),
+    kills: gone
+      .filter((c) => !left.has(c.id))
+      .map((c) => {
+        const b = bountyOf(c.id);
+        return {
+          id: c.id,
+          x: c.x,
+          y: c.y,
+          creepId: c.creepId,
+          domain: c.domain,
+          boss: c.boss,
+          bounty: Number.isSafeInteger(b) && b > 0 ? b : 0,
+        };
+      }),
     leaks,
   };
 }
@@ -116,9 +109,6 @@ function vanished(before: readonly CreepVM[], after: readonly CreepVM[]): CreepV
   }
   return gone;
 }
-
-/** A key for a fixed-point point, one number: sim coordinates are whole and far below 2^26. */
-const pointKey = (x: number, y: number): number => x * 67108864 + y;
 
 /**
  * The creeps the next step strikes with a targeted impact, read from the state before it runs:
@@ -164,10 +154,10 @@ export function markFlyerSparks(
     return [...points];
   }
   const at = new Map<number, CreepVM>();
-  for (const c of after.creeps) if (struck.has(c.id)) at.set(pointKey(c.x, c.y), c);
+  for (const c of after.creeps) if (struck.has(c.id)) at.set(fpPointKey(c.x, c.y), c);
   return points.map((p) => {
     if (p.radiusFp !== 0) return p;
-    const hit: CreepLookVM | undefined = at.get(pointKey(p.x, p.y)) ?? nearest(kills, p, struck);
+    const hit: CreepLookVM | undefined = at.get(fpPointKey(p.x, p.y)) ?? nearest(kills, p, struck);
     if (hit?.domain !== 'air') return p;
     return { ...p, flyer: { creepId: hit.creepId, boss: hit.boss } };
   });
@@ -194,7 +184,8 @@ function nearest(
 /** Each tower in `towers` by its footprint centre, where its shots start. */
 function byOrigin(towers: readonly TowerVM[]): Map<number, TowerVM> {
   const out = new Map<number, TowerVM>();
-  for (const t of towers) out.set(pointKey(footprintCentreFp(t.col), footprintCentreFp(t.row)), t);
+  for (const t of towers)
+    out.set(fpPointKey(footprintCentreFp(t.col), footprintCentreFp(t.row)), t);
   return out;
 }
 
@@ -216,7 +207,7 @@ export function noteTowerless(tracers: TracerVM[], before: RenderVM, after: Rend
   let out: TracerVM[] | null = null;
   tracers.forEach((t, i) => {
     if (t.towerId !== undefined || isDetonation(t)) return;
-    const key = pointKey(t.originX, t.originY);
+    const key = fpPointKey(t.originX, t.originY);
     const fired = was.get(key);
     if (fired === undefined || now.get(key)?.id === fired.id) return;
     out ??= [...tracers];

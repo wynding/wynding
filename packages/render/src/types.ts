@@ -377,8 +377,8 @@ export interface RenderOverlay {
   /** Creeps killed since the last frame (visual pass C1, #181) — accumulated per sim tick by
    *  the controller, like `sparks`, so a catch-up frame still bursts every kill. */
   readonly kills: readonly KillVM[];
-  /** How many creeps reached the exit since the last frame (C1): the sim's own `leakedCount`
-   *  moved by this much. The exit pulses for them, rate-limited (`combat-feedback.ts`). */
+  /** How many creeps reached the exit since the last frame (C1): the ids the step
+   *  reported as leaked (`StepEvents.leaked`), counted. The exit pulses for them, rate-limited (`combat-feedback.ts`). */
   readonly leaks: number;
 }
 
