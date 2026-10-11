@@ -314,6 +314,12 @@ export interface StepEvents {
    *  (`applyDot`'s drop branch, {@link MAX_DOT_RECORDS}) — a SCALAR, same optional-
    *  collector idiom and rationale as {@link StepEvents.dotTicks} above. */
   dotDropped?: number;
+  /** Entity ids of the creeps that LEAKED this tick (reached the exit in the movement
+   *  phase), in the order that phase removed them — so a caller can tell a leak from a
+   *  kill by identity rather than by guessing. Optional and presentational, same
+   *  contract as `impactPoints`/`fired`: append-only, never hash-relevant, never
+   *  serialized; a caller that passes no `leaked` array sees no difference at all. */
+  readonly leaked?: number[];
 }
 
 /** Structural creep SoA combat reads/mutates (CreepArrays is assignable to it).

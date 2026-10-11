@@ -1024,6 +1024,7 @@ export function step(
     );
     if (outcome.kind === 'drop') continue;
     if (outcome.kind === 'leak') {
+      events?.leaked?.push(src.id[i] as number);
       // Guarded: a non-safe `lives` or one at MIN_SAFE_INTEGER removes the creep but
       // leaves `lives` unchanged; otherwise subtract `leakCost`. No low clamp — win/
       // loss resolution reads `lives <= 0`. `leakedCount` is presentation/telemetry;
