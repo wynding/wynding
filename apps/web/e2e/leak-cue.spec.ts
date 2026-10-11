@@ -302,7 +302,7 @@ for (const size of [
     // none short of it (a clipped fill).
     // (A pill's tips are anti-aliased, so up to 3 px of its own length may fall short of a
     // pixel of the exact red; a ring 0.2em wide would run to about the same past the box.)
-    const past = 1.5;
+    const past = 1;
     const short = 3;
     const gaps = {
       left: found!.l - glance.l,
