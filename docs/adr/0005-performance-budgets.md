@@ -1435,10 +1435,16 @@ inside the spread of `075942e`'s own runs (793 to 810 frames in the catalog scen
 stress scene): they trim work the suite does not see at this size. The reading of the frame counts
 is the mean-frame-time one T3's entry above gives.
 
-The leak cue names its creeps from the step, not from where they stood: the sim's movement phase
-appends the id of each creep it removes at the exit to an optional `StepEvents.leaked` list, which
-the controller hands to `stepOutcome`. That is one array push per leak and only for a caller that
-passes the list; it adds no state, changes no world hash and needs no `SIM_VERSION` bump.
+The combat feedback names its creeps from the step, not from where they stood. For a caller that
+passes the lists, the sim's movement phase appends the id of each creep it removes at the exit to
+`StepEvents.leaked`; its combat sweep appends each creep it kills to `StepEvents.killed`, with its
+kind, the bounty credited and its position, derived once by the derivation every reader of a
+creep's position uses; and each targeted impact's point carries the id of the creep it struck.
+That is an array push per leak and per kill, one position derivation per kill and one more field
+per targeted impact point; it adds no state, changes no world hash and needs no `SIM_VERSION`
+bump. It also retires the walk down two sorted lists recorded above: `stepOutcome` takes the
+kills the step reports and reads the view model from before the step only for where each was
+last drawn, and `markFlyerSparks` looks each point's creep up by that id.
 
 **What this evidence is.** Emulation on one development machine, the same class of evidence as
 T3's entry: the CPU throttles slow JavaScript, not the GPU. It does not stand in for the
