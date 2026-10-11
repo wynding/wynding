@@ -211,6 +211,57 @@ describe('hud-icons — the creep icons draw the board’s own creep art (#181 L
     }
   });
 
+  it('paintCreepIcon checks what it reads back: an icon of no known family is left unpainted, and so is a part whose token is no colour', () => {
+    const pal = resolvePalette('default');
+    /** An armored flyer's icon as built — two wings and a body, each filled and outlined —
+     *  with its paint taken off again. */
+    const unpainted = (): SVGSVGElement => {
+      const icon = creepIcon(
+        document,
+        { creepId: 'armored-flyer', domain: 'air', boss: false },
+        pal,
+      );
+      const parts = [...icon.querySelectorAll('[data-art-fill][data-art-stroke]')];
+      expect(parts, 'the premise: three parts, each with both tokens').toHaveLength(3);
+      for (const part of parts) {
+        part.removeAttribute('fill');
+        part.removeAttribute('stroke');
+      }
+      return icon;
+    };
+    const paint = (el: Element): [string | null, string | null] => [
+      el.getAttribute('fill'),
+      el.getAttribute('stroke'),
+    ];
+    const ink = (token: ArtColour): string => hexColour(creepArtColour(token, pal, 'armored'));
+
+    // A family that is missing, or not one of the union's: nothing is painted, nothing throws.
+    for (const family of [undefined, '', 'dragon', 'Armored', '__proto__', 'constructor']) {
+      const icon = unpainted();
+      if (family === undefined) delete icon.dataset.wyFamily;
+      else icon.dataset.wyFamily = family;
+      paintCreepIcon(icon, pal);
+      for (const part of icon.querySelectorAll('[data-art-fill]')) {
+        expect(paint(part), `family ${String(family)}`).toEqual([null, null]);
+      }
+    }
+
+    // A token that is no colour leaves that paint off its part, and only that one.
+    const icon = unpainted();
+    const body = icon.querySelector('.wy-creep-body')!;
+    const [left, right] = [...icon.querySelectorAll('.wy-creep-wing')];
+    body.setAttribute('data-art-fill', 'not-a-colour');
+    left!.setAttribute('data-art-stroke', '');
+    paintCreepIcon(icon, pal);
+    expect(paint(body)).toEqual([null, ink('ink')]);
+    expect(paint(left!)).toEqual([ink('airborne'), null]);
+    expect(paint(right!)).toEqual([ink('airborne'), ink('ink')]);
+
+    // A token that IS a colour, but not one creep art paints in, is a bug in the art: it throws.
+    body.setAttribute('data-art-fill', 'role');
+    expect(() => paintCreepIcon(icon, pal)).toThrow(/no 'role' colour/);
+  });
+
   it('hexColour writes an SVG paint value, zero-padded and masked to 24 bits', () => {
     expect(hexColour(0xf0e442)).toBe('#f0e442');
     expect(hexColour(0x0000ff)).toBe('#0000ff');

@@ -18,6 +18,7 @@ import {
   isLowHp,
   hpBarPaintOp,
   HP_BAR_BACKING_PX,
+  isCreepFamily,
   slowTelegraphPaintOps,
   dotTelegraphPaintOps,
   stunTelegraphPaintOps,
@@ -84,6 +85,16 @@ describe('creepFamilyFor — the hue and size step a creep wears (C3, #181)', ()
     expect(creepFamilyFor('', false)).toBe('normal');
     expect(creepFamilyFor('__proto__', false)).toBe('normal');
     expect(creepFamilyFor('constructor', false)).toBe('normal');
+  });
+
+  it('isCreepFamily knows every family, and nothing else — no near miss, no name on the prototype, no non-string', () => {
+    for (const family of CREEP_FAMILIES) expect(isCreepFamily(family), family).toBe(true);
+    for (const value of ['', 'Normal', 'boss ', 'flyer', 'resolute', '__proto__', 'constructor']) {
+      expect(isCreepFamily(value), value).toBe(false);
+    }
+    for (const value of [undefined, null, 0, {}, ['normal']]) {
+      expect(isCreepFamily(value), String(value)).toBe(false);
+    }
   });
 });
 

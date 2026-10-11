@@ -44,6 +44,31 @@ export type ArtColour =
   /** `palette.airborne` — the fill of a flyer's wings (C4). Creep art only. */
   | 'airborne';
 
+/** Every `ArtColour`, as a value — keyed on the union, so the two cannot drift: a token added to
+ *  the union and not listed here, or listed here and not in the union, fails to compile. */
+const ALL_ART_COLOURS: Readonly<Record<ArtColour, true>> = {
+  role: true,
+  plate: true,
+  floor: true,
+  rim: true,
+  aura: true,
+  ink: true,
+  bevel: true,
+  shadow: true,
+  gloss: true,
+  scorch: true,
+  crack: true,
+  family: true,
+  airborne: true,
+};
+
+/** Whether `value` is an `ArtColour` — for a token read back from outside the type system,
+ *  like the `data-art-fill` and `data-art-stroke` the SVG renderer writes (`art-svg.ts`). Own
+ *  keys only, so no name `Object.prototype` carries passes for one. */
+export function isArtColour(value: unknown): value is ArtColour {
+  return typeof value === 'string' && Object.prototype.hasOwnProperty.call(ALL_ART_COLOURS, value);
+}
+
 /** How one shape is painted. A shape may fill, stroke, or both (fill first, as in SVG). */
 export interface ArtPaint {
   readonly fill?: ArtColour;

@@ -20,6 +20,7 @@ export {
   creepShapeFor,
   creepFamilyFor,
   creepLookFor,
+  isCreepFamily,
   CREEP_LOOKS,
   slowTelegraphPaintOps,
 } from './creep-paint';
@@ -29,6 +30,7 @@ export type { CreepShape, CreepFamily, CreepLook, SlowTelegraphPaintOp } from '.
 export { creepIconArt, creepArtColour, CREEP_ICON_HALF } from './creep-art';
 export { artSvgNodes } from './art-svg';
 export type { ArtSvgNode } from './art-svg';
+export { isArtColour } from './art-ir';
 export type { ArtColour, ArtShape } from './art-ir';
 export { towerFootprintMarkFor, towerRoleFor, towerLookFor } from './tower-paint';
 export type { TowerFootprintMark, TowerRole, TowerLook } from './tower-paint';

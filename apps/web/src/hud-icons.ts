@@ -28,8 +28,8 @@ import {
   creepArtColour,
   creepIconArt,
   creepLookFor,
-  type ArtColour,
-  type CreepFamily,
+  isArtColour,
+  isCreepFamily,
   type Palette,
 } from '@wynding/render';
 
@@ -152,7 +152,13 @@ export interface CreepIconSpec {
 
 /** The class each part of a creep icon carries, by the colour it paints in: the silhouette in
  *  its family's hue is the body, anything else is a wing — the forced-colors rules (`ui.css`)
- *  repaint the two differently, so a flyer's wings stay apart from its body. */
+ *  repaint the two differently, so a flyer's wings stay apart from its body.
+ *
+ *  This leans on the creep art (`creep-art.ts`): the body is its ONLY part filled
+ *  `family`, and the wings its only other parts. A part the art gains — a highlight on the
+ *  body, say — would be classed a wing here, and forced colours would paint it `Canvas`, as an
+ *  outline on the background; `hud-icons.test.ts` pins the parts each icon carries, so such a
+ *  part fails there first. */
 const partClass = (fill: string | undefined): string =>
   fill === 'family' ? 'wy-creep-body' : 'wy-creep-wing';
 
@@ -177,16 +183,25 @@ export function creepIcon(doc: Document, spec: CreepIconSpec, palette: Palette):
 
 /** Re-ink a built creep icon for `palette` — the colour-mode repaint. Touches only each part's
  *  `fill` and `stroke`, set from the colour token it carries, so a repaint never rebuilds the
- *  strip under a reader. */
+ *  strip under a reader.
+ *
+ *  The family and the tokens are read back from the DOM, so they are CHECKED here, not cast:
+ *  an icon whose `data-wy-family` is missing or names no `CreepFamily` is left unpainted —
+ *  every colour of a creep's art is resolved for its family (`creepArtColour`), so none is
+ *  guessed, and no part reaches the family hue of no family — and so is a part whose token is
+ *  no `ArtColour`. `creepIcon` writes neither. A token that IS an `ArtColour` but not one
+ *  creep art paints in still throws, as `creepArtColour` does: that is a bug in the art, to
+ *  surface, not input to tolerate. */
 export function paintCreepIcon(svg: SVGSVGElement, palette: Palette): void {
-  const family = svg.dataset.wyFamily as CreepFamily;
-  const ink = (token: string | null): string =>
-    hexColour(creepArtColour(token as ArtColour, palette, family));
-  for (const part of svg.querySelectorAll('[data-art-fill]')) {
-    part.setAttribute('fill', ink(part.getAttribute('data-art-fill')));
-  }
-  for (const part of svg.querySelectorAll('[data-art-stroke]')) {
-    part.setAttribute('stroke', ink(part.getAttribute('data-art-stroke')));
+  const family = svg.dataset.wyFamily;
+  if (!isCreepFamily(family)) return;
+  for (const paint of ['fill', 'stroke'] as const) {
+    for (const part of svg.querySelectorAll(`[data-art-${paint}]`)) {
+      const token = part.getAttribute(`data-art-${paint}`);
+      if (isArtColour(token)) {
+        part.setAttribute(paint, hexColour(creepArtColour(token, palette, family)));
+      }
+    }
   }
 }
 

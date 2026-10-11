@@ -98,6 +98,13 @@ const ALL_FAMILIES: Readonly<Record<CreepFamily, true>> = {
 };
 export const CREEP_FAMILIES: readonly CreepFamily[] = Object.keys(ALL_FAMILIES) as CreepFamily[];
 
+/** Whether `value` is a `CreepFamily` — for a family read back from outside the type system,
+ *  like a wave-strip icon's `data-wy-family` (`apps/web`'s `hud-icons.ts`). Own keys only, so no
+ *  name `Object.prototype` carries passes for one. */
+export function isCreepFamily(value: unknown): value is CreepFamily {
+  return typeof value === 'string' && Object.prototype.hasOwnProperty.call(ALL_FAMILIES, value);
+}
+
 const CREEP_FAMILY_BY_ID: Readonly<Partial<Record<string, CreepFamily>>> = {
   normal: 'normal',
   fast: 'fast',
