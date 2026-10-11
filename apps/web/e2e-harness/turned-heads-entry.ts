@@ -32,6 +32,7 @@ el.style.height = `${ROWS * cell}px`;
 
 const control: HarnessControl = { towers: [], creeps: [], colourMode: 'default', frames: 0 };
 // Deliberately not a `declare global` (see `tsconfig.json`'s note on test-only globals).
+// The name is also `check:build-layering`'s marker for this module: rename it there too.
 (window as unknown as { __wyTurnedHeads: HarnessControl }).__wyTurnedHeads = control;
 
 const handle = mount(el, {
