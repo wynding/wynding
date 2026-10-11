@@ -2320,4 +2320,40 @@ describe('controller — combat feedback wiring the tests above could not tell a
     expect(onFlyer, 'the premise: shots struck flyers that lived').toBeGreaterThan(0);
     expect(onWalker).toBe(0); // antiair fires at flyers only
   });
+
+  it('marks no impact a flyer’s while only ground towers fire — not even where a flyer stands on the struck creep’s point (C2)', () => {
+    // Wave 1's normals and wave 8's armoured flyers both move 26 fp a tick and spawn every 20
+    // ticks: launched 20 ticks apart, each flyer spawns with a normal and shares its every point
+    // along the straight row-11 path until a hit stops one. A Basic shoots ground creeps only, so
+    // every point it makes is a ground creep's, whichever creeps stand on it.
+    const c = createController(1);
+    expect(c.callWaveEarly()).toBe(true); // wave 1
+    c.start();
+    c.armTower('basic');
+    c.aimAt(2, 9);
+    expect(c.confirm()).toBe(true);
+    tick(c);
+    for (let wave = 2; wave <= 7; wave++) {
+      expect(c.callWaveEarly()).toBe(true);
+      tick(c);
+    }
+    tick(c, 20 - c.frame().curVm.tick);
+    expect(c.callWaveEarly()).toBe(true); // wave 8, 20 ticks after wave 1
+    tick(c);
+    let shared = 0;
+    for (let n = 0; n < 400 && !c.isTerminal(); n++) {
+      tick(c);
+      const flyers = c.frame().curVm.creeps.filter((cr) => cr.domain === 'air');
+      c.drainFeedback();
+      for (const s of c.drainSparks()) {
+        if (s.radiusFp !== 0) continue;
+        expect(s.flyer, `a Basic's impact at ${s.x},${s.y}`).toBeUndefined();
+        if (flyers.some((f) => f.x === s.x && f.y === s.y)) shared++;
+      }
+    }
+    expect(
+      shared,
+      'the premise: a flyer stood on the point of a creep a shot struck',
+    ).toBeGreaterThan(0);
+  });
 });

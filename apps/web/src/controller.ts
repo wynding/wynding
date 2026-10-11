@@ -47,7 +47,7 @@ import {
   type SparkPoint,
   type TracerVM,
 } from '@wynding/render';
-import { markFlyerSparks, noteTowerless, stepOutcome } from './combat-events';
+import { dueTargets, markFlyerSparks, noteTowerless, stepOutcome } from './combat-events';
 import { validate, currentRulesetHash, MAX_INPUTS_PER_TICK, type Replay } from '@wynding/replay';
 import { getBundledRuleset, defaultBoardId, type Ruleset } from '@wynding/content';
 
@@ -738,10 +738,7 @@ export function createController(
     // impacts name (to tell which creep each impact point is), and the bounty column the kill
     // sweep credits each kill from.
     const leakedBefore = state.leakedCount;
-    const struck = new Set<number>();
-    for (const imp of state.impacts) {
-      if (imp.kind === 'targeted' && imp.impactTick <= state.tick) struck.add(imp.targetId);
-    }
+    const struck = dueTargets(state);
     const bountyIds = state.creeps.id.slice();
     const bounties = state.creeps.bounty.slice();
     hooks?.begin('step');

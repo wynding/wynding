@@ -5,7 +5,8 @@
 
 import { describe, it, expect } from 'vitest';
 import type { CreepVM, KillVM, RenderVM, SparkPoint, TowerVM, TracerVM } from '@wynding/render';
-import { markFlyerSparks, noteTowerless, stepOutcome } from './combat-events';
+import type { SimState } from '@wynding/sim';
+import { dueTargets, markFlyerSparks, noteTowerless, stepOutcome } from './combat-events';
 
 const FP = 256;
 /** The exit cell in these steps, and its centre in fixed-point units. */
@@ -317,5 +318,43 @@ describe('stepOutcome / markFlyerSparks — what the attribution tests above cou
       new Set([5]),
     );
     expect(out!.flyer).toBeUndefined();
+  });
+});
+
+describe('dueTargets — the creeps the next step strikes (C2)', () => {
+  type Impact = SimState['impacts'][number];
+  const effects = [{ kind: 'direct', amount: 1 }] as const;
+  const targeted = (targetId: number, impactTick: number): Impact => ({
+    kind: 'targeted',
+    impactTick,
+    targetId,
+    sourceId: 90,
+    domain: 'both',
+    effects: [...effects],
+  });
+  const blast = (impactTick: number): Impact => ({
+    kind: 'blast',
+    impactTick,
+    x: 512,
+    y: 512,
+    radiusFp: 384,
+    sourceId: 91,
+    domain: 'ground',
+    effects: [...effects],
+  });
+
+  it('names the target of each targeted impact due by the tick, one overdue too — none still in flight, and no blast', () => {
+    const impacts = [
+      targeted(1, 9),
+      targeted(2, 10),
+      targeted(3, 11),
+      targeted(4, 12),
+      targeted(2, 13),
+      blast(10),
+    ];
+    expect(dueTargets({ tick: 10, impacts })).toEqual(new Set([1, 2]));
+    expect(dueTargets({ tick: 11, impacts })).toEqual(new Set([1, 2, 3]));
+    expect(dueTargets({ tick: 8, impacts })).toEqual(new Set());
+    expect(dueTargets({ tick: 10, impacts: [] })).toEqual(new Set());
   });
 });

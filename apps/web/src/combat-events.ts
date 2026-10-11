@@ -19,7 +19,7 @@ import {
   type TowerVM,
   type TracerVM,
 } from '@wynding/render';
-import { cellCenterX, cellCenterY } from '@wynding/sim';
+import { cellCenterX, cellCenterY, type SimState } from '@wynding/sim';
 
 /** What one step removed from the board, as feedback shows it. */
 export interface StepOutcome {
@@ -121,6 +121,21 @@ function vanished(before: readonly CreepVM[], after: readonly CreepVM[]): CreepV
 const pointKey = (x: number, y: number): number => x * 67108864 + y;
 
 /**
+ * The creeps the next step strikes with a targeted impact, read from the state before it runs:
+ * the target of every targeted impact due by its tick. `step` resolves exactly these — an impact
+ * lands once `impactTick <= tick`, the tick before the step advances it (`combat.ts`) — and drops
+ * them from the queue, so they are read first. One whose creep is gone by then (killed earlier in
+ * the same step, or out at the exit) lands on nothing and makes no point.
+ */
+export function dueTargets(state: Pick<SimState, 'tick' | 'impacts'>): Set<number> {
+  const out = new Set<number>();
+  for (const imp of state.impacts) {
+    if (imp.kind === 'targeted' && imp.impactTick <= state.tick) out.add(imp.targetId);
+  }
+  return out;
+}
+
+/**
  * The step's impact points, each targeted one that struck a FLYER marked with that creep's look
  * (`SparkPoint.flyer`), so the board draws its spark on the flyer's lifted body rather than at
  * the true point the sim reports beneath it. Blast landings and impacts on ground creeps pass
@@ -132,9 +147,10 @@ const pointKey = (x: number, y: number): number => x * 67108864 + y;
  * creep the step killed, and a killed creep is reported where the step began, a step's movement
  * back: the kill nearest the point is the one.
  *
- * `struck` holds the entity ids the step's due targeted impacts name (read from the state before
+ * `struck` holds the entity ids the step's due targeted impacts name (`dueTargets`, read before
  * the step): only those creeps can be what a point matches, so a ground creep and a flyer
- * sharing a point are told apart.
+ * sharing a point are told apart — unless one step struck both, when every point there takes
+ * one of the two looks (no measured run has met it).
  */
 export function markFlyerSparks(
   points: readonly SparkPoint[],
