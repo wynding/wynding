@@ -1413,18 +1413,27 @@ the exit's leak pulse, hit flashes, one tracer per tower) and the lives chip's l
 and a shake of one DOM chip. This entry records what that costs at low-end, which is where it
 shows; it changes no budget, no trigger, `R0`, `TOLERANCE` or the CI ratio gate.
 
-**Measured at low-end (R5's QC, pooled over its runs).** About 3.4% fewer frames in the sampling
-window in both scenes than the head before the pass's combat feedback, and no p95 breach the
-head before it did not already show. Taking the leak cue's restyle out accounts for under two
-percent of the catalog scene's frames; the per-frame JavaScript the feedback adds is about 1% of
-the frame.
-The two fixes that came out of the measurement are in the head: the board frame keeps one map of
-where each creep is drawn instead of building one per frame (`creepAimPoints`), and the
-controller's per-tick walk for what a step removed is a single pass down two sorted lists
-(`stepOutcome`), with an early return in `markFlyerSparks` when no flyer stands or fell. The
-traces, profiles and A/B tables are in the R5 QC perf evidence directory
-(`/Users/rob/.claude/jobs/9aacf26a/tmp/r5qc1-perf/`); the percentile and mean-frame-time
-reading is the one T3's entry above gives.
+**Measured at low-end (R5's QC, `075942e` against `5dde238`, the head before it).** Gated runs of
+the record-only suite, one worker, on AC power. Frames counted in the sampling window, the mean
+over runs: twelve of `5dde238` in each scene, and of `075942e` fifteen in the catalog scene and
+nine in the stress scene.
+
+| scene   | `5dde238` | `075942e` | change |
+| ------- | --------- | --------- | ------ |
+| catalog | 832.8     | 804.3     | −3.4%  |
+| stress  | 627.6     | 611.8     | −2.5%  |
+
+By the median the stress scene's change is −3.5% (634 frames to 612): one of the earlier head's
+twelve stress runs counted 562 frames, the others 621 to 641. No run of either head breached p95.
+Taking the leak cue's restyle out gave back under two percent of the catalog scene's frames, over
+nine runs; the per-frame JavaScript the feedback adds is about 1% of the frame. Two changes followed
+the measurement: the board frame keeps one map of where each creep is drawn instead of building one
+per frame (`creepAimPoints`), and the controller finds what a step removed in one walk down two
+sorted lists (`stepOutcome`), returning early from `markFlyerSparks` when no flyer stands or fell.
+In three runs each, neither moved the mean frame count by 2% either way, and every mean stayed
+inside the spread of `075942e`'s own runs (793 to 810 frames in the catalog scene, 592 to 629 in the
+stress scene): they trim work the suite does not see at this size. The reading of the frame counts
+is the mean-frame-time one T3's entry above gives.
 
 **What this evidence is.** Emulation on one development machine, the same class of evidence as
 T3's entry: the CPU throttles slow JavaScript, not the GPU. It does not stand in for the
