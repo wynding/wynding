@@ -8,47 +8,36 @@
 // themselves too and never take a name. They are built with `createElementNS` — no markup
 // strings — in the injected document, like the Shell's own board-mark.
 //
-// THE CREEP ICONS DRAW THE BOARD'S SILHOUETTES. Which silhouette a creep draws is the render
-// package's decision (`creepSilhouettePaintOp` / `creepShapeFor`), never a second table here:
-// the icon asks for the plan and only translates its shape into SVG, as the board's silhouette
-// painter (`board-draw.ts`'s `paintCreepSilhouette`, baked into its atlas since #182) translates
-// it into Phaser calls. The vertex arithmetic per shape is therefore the one thing restated,
-// because `@wynding/render` exports the plan but not its painter. `hud-icons.test.ts` pins every
-// shape's vertices, the airborne chevron's proportions and the boss size step to the board's
-// geometry, recorded from its painters at #182 — fixed numbers, not a reach into the package's
-// source. If the board's creep art is redrawn, that table (and this file) must follow it.
+// THE CREEP ICONS DRAW THE BOARD'S OWN CREEP ART (#181 C3/C4). What a creep looks like — its
+// silhouette, its family's hue and size step, a flyer's wings — is the render package's art,
+// one master for the board's atlas and this strip: the icon asks for the look
+// (`creepLookFor`), takes its art (`creepIconArt`) and has the package's SVG renderer
+// (`artSvgNodes`) write it, so no geometry is restated here. Two things differ from the board,
+// both because an icon has no floor under it: no ground shadow and no lift (depth cues for the
+// board's floor), and one shared scale that fits every look on the ground in the icon's box —
+// the boss the largest, so the strip keeps the board's size steps. A flyer's wings reach past
+// the box's sides, as the icon lets them; in Compact the strip's margin keeps them inside the
+// column's edge (`ui.css`).
 //
-// Two deliberate departures from the board, both icon-scale concerns:
-//  - The airborne chevron keeps the board's glyph SHAPE (half-span 0.9r, tips 0.3r below the
-//    apex) but not its STANDOFF. On the board the apex floats 3.4r above the creep so it clears
-//    every timed telegraph ring (`creep-paint.ts`'s cue-radius ordering); an icon has no rings,
-//    and at that standoff the silhouette would shrink to a third of the icon. Here it sits just
-//    above the silhouette.
-//  - Colour comes from the ACTIVE palette (`resolvePalette(mode).creep` / `.airborne`), so the
-//    icons follow the colour-vision mode; `paintCreepIcon` re-inks a built icon in place.
+// Colour comes from the ACTIVE palette (`creepArtColour`), so the icons follow the
+// colour-vision mode: each element carries the colour token it paints in, and
+// `paintCreepIcon` re-inks a built icon in place from those.
 
-import { creepSilhouettePaintOp, type CreepSilhouettePaintOp, type Palette } from '@wynding/render';
+import {
+  artSvgNodes,
+  creepArtColour,
+  creepIconArt,
+  creepLookFor,
+  isArtColour,
+  isCreepFamily,
+  type Palette,
+} from '@wynding/render';
 
 const SVG_NS = 'http://www.w3.org/2000/svg';
 
-/** The icons' shared coordinate box, the style frame's own (`viewBox="-10 -10 20 20"`). */
+/** The icons' shared coordinate box, the style frame's own (`viewBox="-10 -10 20 20"`) — the
+ *  box `creepIconArt` scales the creep art to. */
 export const ICON_VIEWBOX = '-10 -10 20 20';
-
-/** A creep silhouette's half-size inside that box. Leaves the box's top band free for the
- *  airborne chevron, so every creep icon centres its silhouette on the same point and a row of
- *  mixed ground and air entries lines up. */
-export const CREEP_ICON_R = 6;
-
-/** The boss's size step — the board's own boss cue (`board-draw.ts`'s `BOSS_SCALE`, size being
- *  the ONLY thing that tells a boss from an armored creep there). Restated because the board
- *  does not export it; `hud-icons.test.ts` pins it to the board's step recorded at #182. */
-export const CREEP_ICON_BOSS_SCALE = 1.5;
-
-/** The airborne chevron's glyph, as fractions of r — the board's shape (see the header). */
-export const CHEVRON_HALF_SPAN = 0.9;
-export const CHEVRON_DROP = 0.3;
-/** The icon-only standoff: the gap between the silhouette's top and the chevron's tips. */
-export const CHEVRON_GAP = 0.3;
 
 type Point = readonly [number, number];
 
@@ -154,57 +143,6 @@ export function chipIcon(doc: Document, kind: ChipIconKind): SVGSVGElement {
 
 // --- The creep icons ------------------------------------------------------------------------
 
-/** The silhouette's vertices for a paint op, centred on the op's point — the SVG twin of the
- *  board's per-shape silhouette painter, pinned to its recorded geometry by `hud-icons.test.ts`. */
-export function silhouettePoints(op: CreepSilhouettePaintOp): Point[] {
-  const { x, y, r } = op;
-  const ring = (n: number): Point[] =>
-    Array.from({ length: n }, (_, i): Point => {
-      const angle = ((2 * Math.PI) / n) * i - Math.PI / 2; // apex up, like every board shape
-      return [x + r * Math.cos(angle), y + r * Math.sin(angle)];
-    });
-  switch (op.shape) {
-    case 'diamond':
-      return [
-        [x, y - r],
-        [x + r, y],
-        [x, y + r],
-        [x - r, y],
-      ];
-    case 'square':
-      return [
-        [x - r, y - r],
-        [x + r, y - r],
-        [x + r, y + r],
-        [x - r, y + r],
-      ];
-    case 'hexagon':
-      return ring(6);
-    case 'pentagon':
-      return ring(5);
-    // The board painter's fallback: `'triangle'`, and the shape any id the catalog does not
-    // know draws (`creepShapeFor` is total).
-    default:
-      return [
-        [x, y - r],
-        [x + r, y + r],
-        [x - r, y + r],
-      ];
-  }
-}
-
-/** The airborne chevron above a silhouette of half-size `r` centred at (x, y): apex, then the
- *  two wingtips — the board's glyph at the icon's own standoff (see the header). */
-export function chevronPoints(x: number, y: number, r: number): [Point, Point, Point] {
-  const tipsY = y - r - CHEVRON_GAP * r;
-  const apexY = tipsY - CHEVRON_DROP * r;
-  return [
-    [x - CHEVRON_HALF_SPAN * r, tipsY],
-    [x, apexY],
-    [x + CHEVRON_HALF_SPAN * r, tipsY],
-  ];
-}
-
 /** What a creep icon depicts — the wave preview entry's catalog join, nothing per-tick. */
 export interface CreepIconSpec {
   readonly creepId: string;
@@ -212,37 +150,59 @@ export interface CreepIconSpec {
   readonly boss: boolean;
 }
 
-/** A creep icon: the board's silhouette for `creepId` (sized up for a boss, as the board does),
- *  plus the board's airborne chevron for an air entry, inked from `palette`. */
+/** The class each part of a creep icon carries, by the colour it paints in: the silhouette in
+ *  its family's hue is the body, anything else is a wing — the forced-colors rules (`ui.css`)
+ *  repaint the two differently, so a flyer's wings stay apart from its body.
+ *
+ *  This leans on the creep art (`creep-art.ts`): the body is its ONLY part filled
+ *  `family`, and the wings its only other parts. A part the art gains — a highlight on the
+ *  body, say — would be classed a wing here, and forced colours would paint it `Canvas`, as an
+ *  outline on the background; `hud-icons.test.ts` pins the parts each icon carries, so such a
+ *  part fails there first. */
+const partClass = (fill: string | undefined): string =>
+  fill === 'family' ? 'wy-creep-body' : 'wy-creep-wing';
+
+/** A creep icon: the board's own art for `spec`'s look — its silhouette in its family's hue,
+ *  outlined in ink, at its family's size step, a flyer's wings attached — written by the
+ *  render package's SVG renderer, and inked from `palette`. */
 export function creepIcon(doc: Document, spec: CreepIconSpec, palette: Palette): SVGSVGElement {
   const svg = iconRoot(doc, 'wy-creep-icon');
-  const r = CREEP_ICON_R * (spec.boss ? CREEP_ICON_BOSS_SCALE : 1);
-  const op = creepSilhouettePaintOp(spec.creepId, 0, 0, r, palette.creep, 1);
-  svg.dataset.wyShape = op.shape;
-  svg.append(
-    el(doc, 'polygon', { class: 'wy-creep-body', points: pointsAttr(silhouettePoints(op)) }),
-  );
-  if (spec.domain === 'air') {
-    svg.append(
-      el(doc, 'polyline', {
-        class: 'wy-creep-chevron',
-        points: pointsAttr(chevronPoints(0, 0, r)),
-        fill: 'none',
-        'stroke-width': '1.6',
-        'stroke-linecap': 'round',
-        'stroke-linejoin': 'round',
-      }),
-    );
+  const look = creepLookFor(spec.creepId, spec.boss, spec.domain === 'air');
+  svg.dataset.wyShape = look.shape;
+  svg.dataset.wyFamily = look.family;
+  const { shapes, scale } = creepIconArt(look);
+  // Design units to icon units: the art's own strokes scale with it, as the board's do.
+  const art = el(doc, 'g', { transform: `scale(${Math.round(scale * 1e4) / 1e4})` });
+  for (const node of artSvgNodes(shapes)) {
+    art.append(el(doc, node.tag, { class: partClass(node.attrs['data-art-fill']), ...node.attrs }));
   }
+  svg.append(art);
   paintCreepIcon(svg, palette);
   return svg;
 }
 
-/** Re-ink a built creep icon for `palette` — the colour-mode repaint. Touches only the two
- *  paint attributes, so a repaint never rebuilds the strip under a reader. */
+/** Re-ink a built creep icon for `palette` — the colour-mode repaint. Touches only each part's
+ *  `fill` and `stroke`, set from the colour token it carries, so a repaint never rebuilds the
+ *  strip under a reader.
+ *
+ *  The family and the tokens are read back from the DOM, so they are CHECKED here, not cast:
+ *  an icon whose `data-wy-family` is missing or names no `CreepFamily` is left unpainted —
+ *  every colour of a creep's art is resolved for its family (`creepArtColour`), so none is
+ *  guessed, and no part reaches the family hue of no family — and so is a part whose token is
+ *  no `ArtColour`. `creepIcon` writes neither. A token that IS an `ArtColour` but not one
+ *  creep art paints in still throws, as `creepArtColour` does: that is a bug in the art, to
+ *  surface, not input to tolerate. */
 export function paintCreepIcon(svg: SVGSVGElement, palette: Palette): void {
-  svg.querySelector('.wy-creep-body')?.setAttribute('fill', hexColour(palette.creep));
-  svg.querySelector('.wy-creep-chevron')?.setAttribute('stroke', hexColour(palette.airborne));
+  const family = svg.dataset.wyFamily;
+  if (!isCreepFamily(family)) return;
+  for (const paint of ['fill', 'stroke'] as const) {
+    for (const part of svg.querySelectorAll(`[data-art-${paint}]`)) {
+      const token = part.getAttribute(`data-art-${paint}`);
+      if (isArtColour(token)) {
+        part.setAttribute(paint, hexColour(creepArtColour(token, palette, family)));
+      }
+    }
+  }
 }
 
 // --- The countdown dial ------------------------------------------------------------------------

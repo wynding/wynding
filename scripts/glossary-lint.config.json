@@ -87,8 +87,8 @@
     },
     {
       "term": "hp",
-      "pattern": "hp pips?|creep[/ ]hp|\\(hp, damage|durability = hp|\\| hp\\b|max hp|hp-fraction",
-      "why": "The glossary's own note \u2014 HP is a creep stat: its table column, its durability axis, its render fraction. Deliberately narrow, so \"the player's HP\" and \"0 HP left\" keep failing. `pips?` (not just the plural) covers the accessibility checklist's singular \"HP pip\"; `creep[/ ]hp` covers both \"creep HP\" and \"creep/HP-pip\"."
+      "pattern": "hp pips?|hp bars?|creep[/ ]hp|\\(hp, damage|durability = hp|\\| hp\\b|max hp|hp-fraction",
+      "why": "The glossary's own note \u2014 HP is a creep stat: its table column, its durability axis, its render fraction. Deliberately narrow, so \"the player's HP\" and \"0 HP left\" keep failing. `pips?` (not just the plural) covers the accessibility checklist's singular \"HP pip\"; `creep[/ ]hp` covers both \"creep HP\" and \"creep/HP-pip\"; `bars?` the HP bar that replaced the pip (C3, #181)."
     },
     {
       "term": "launch",

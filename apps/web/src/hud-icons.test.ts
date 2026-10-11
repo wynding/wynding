@@ -1,109 +1,46 @@
 // hud-icons.test.ts — the HUD's inline-SVG icons (#181 H1 + L1).
 //
-// THE CREEP ICONS' GEOMETRY. `hud-icons.ts` asks the render package which silhouette a creep
-// draws (`creepShapeFor` / `creepSilhouettePaintOp`, both exported) and translates that shape
-// into SVG vertices itself, because the package exports no painter. That translation is pinned
-// here to FIXED geometry: every shape's vertices at the icon's radius, the boss size step and
-// the airborne chevron's proportions, recorded from the board's own painters when the board art
-// was baked into its atlas (#182) and checked against them then (#181 QC round 2). This file
-// imports nothing from inside the render package — a test that reached into its source by
-// relative path broke when that source moved, and typechecks against the package's built
-// declarations, not its source. So a change to the BOARD's creep art does not fail here; the
-// render package's own tests own its painters. A new SHAPE does: the table is keyed on the
-// exported `CreepShape` union, so a sixth shape is a type error until it has geometry here.
+// THE CREEP ICONS ARE THE BOARD'S OWN CREEP ART (#181 C3/C4). `hud-icons.ts` asks the render
+// package for a creep's look (`creepLookFor`) and its art (`creepIconArt`), and has the
+// package's own SVG renderer (`artSvgNodes`) write it — no geometry lives in the app any more.
+// So what this file pins is that WIRING: every icon is exactly the renderer's elements for its
+// creep's art, at the scale the package gives it, inked from the active palette by the colour
+// tokens its parts carry — and what the strip relies on: the board's size steps, wings on an
+// air entry and none on the ground, decoration only. The art itself — its silhouettes, wings
+// and size steps — is the render package's to test (`creep-art.test.ts`). This file imports
+// only the package's public API, and typechecks against its declarations.
 
 import { describe, it, expect } from 'vitest';
 import {
+  artSvgNodes,
   COLOUR_MODES,
+  creepArtColour,
+  creepIconArt,
+  creepLookFor,
   creepShapeFor,
-  creepSilhouettePaintOp,
   resolvePalette,
-  type CreepShape,
-  type CreepSilhouettePaintOp,
+  type ArtColour,
 } from '@wynding/render';
 import { compileRuleset } from '@wynding/sim';
 import { getBundledRuleset, defaultBoardId } from '@wynding/content';
 import {
-  CHEVRON_DROP,
-  CHEVRON_GAP,
-  CHEVRON_HALF_SPAN,
-  CREEP_ICON_BOSS_SCALE,
-  CREEP_ICON_R,
   ICON_VIEWBOX,
   dialDash,
-  chevronPoints,
   chipIcon,
   countdownDial,
   creepIcon,
   hexColour,
   paintCreepIcon,
-  silhouettePoints,
   type ChipIconKind,
 } from './hud-icons';
 
 const bundle = getBundledRuleset();
 const ruleset = compileRuleset(bundle, defaultBoardId(bundle));
 /** Every creep the shipped content can preview, plus an id the catalog does not know (the
- *  board falls back to its triangle for it, and so must the icon). */
+ *  board draws its fallback look for it, and so must the icon). */
 const CREEP_IDS = [...Object.keys(ruleset.creepById), 'not-a-catalog-creep'];
 
 type Point = readonly [number, number];
-
-/** The board's silhouettes at the icon's radius (6), apex up, centred on the origin — recorded
- *  from the board's frame painter at #182 (see the header). Literal numbers, not the icon's own
- *  trigonometry restated: the regular shapes' vertices sit at 60° (hexagon) and 72° (pentagon)
- *  steps from twelve o'clock. */
-const BOARD_SILHOUETTE_AT_6: Readonly<Record<CreepShape, readonly Point[]>> = {
-  triangle: [
-    [0, -6],
-    [6, 6],
-    [-6, 6],
-  ],
-  diamond: [
-    [0, -6],
-    [6, 0],
-    [0, 6],
-    [-6, 0],
-  ],
-  square: [
-    [-6, -6],
-    [6, -6],
-    [6, 6],
-    [-6, 6],
-  ],
-  pentagon: [
-    [0, -6],
-    [5.706339, -1.854102],
-    [3.526712, 4.854102],
-    [-3.526712, 4.854102],
-    [-5.706339, -1.854102],
-  ],
-  hexagon: [
-    [0, -6],
-    [5.196152, -3],
-    [5.196152, 3],
-    [0, 6],
-    [-5.196152, 3],
-    [-5.196152, -3],
-  ],
-};
-const SHAPES = Object.keys(BOARD_SILHOUETTE_AT_6) as CreepShape[];
-
-/** The board's boss size step, recorded at #182: a boss is its silhouette at 1.5× the radius —
- *  size being the board's only boss cue. */
-const BOARD_BOSS_SCALE = 1.5;
-
-/** The board's airborne chevron at #182, as fractions of r: the wingtips' half-span and their
- *  drop below the apex. */
-const BOARD_CHEVRON = { halfSpan: 0.9, drop: 0.3 } as const;
-
-/** A vertex SET, order-free and rounded, so a polygon compares as a shape whatever vertex it
- *  starts from. */
-function vertexSet(points: readonly Point[], digits = 6): string[] {
-  const k = 10 ** digits;
-  const norm = (v: number): number => Math.round(v * k) / k + 0; // `+ 0` folds -0 into 0
-  return [...new Set(points.map(([x, y]) => `${norm(x)},${norm(y)}`))].sort();
-}
 
 function parsePoints(attr: string | null): Point[] {
   return (attr ?? '')
@@ -114,9 +51,6 @@ function parsePoints(attr: string | null): Point[] {
       return [x!, y!];
     });
 }
-
-const scaled = (pts: readonly Point[], k: number, dx = 0, dy = 0): Point[] =>
-  pts.map(([x, y]): Point => [x * k + dx, y * k + dy]);
 
 describe('hud-icons — the chip icons (#181 H1)', () => {
   const KINDS: readonly ChipIconKind[] = ['lives', 'bounty', 'stars', 'score', 'wave'];
@@ -160,117 +94,101 @@ describe('hud-icons — the chip icons (#181 H1)', () => {
   });
 });
 
-describe('hud-icons — the creep icons draw the board’s silhouettes (#181 L1)', () => {
-  it('every creep’s icon takes its SHAPE from the render package and draws that shape’s fixed geometry', () => {
-    const drawnShapes = new Set<CreepShape>();
-    for (const creepId of CREEP_IDS) {
-      const op = creepSilhouettePaintOp(creepId, 0, 0, CREEP_ICON_R, 0, 1);
-      expect(op.shape, creepId).toBe(creepShapeFor(creepId));
-      drawnShapes.add(op.shape);
-      const icon = creepIcon(
-        document,
-        { creepId, domain: 'ground', boss: false },
-        resolvePalette('default'),
-      );
-      expect(icon.dataset.wyShape, creepId).toBe(op.shape);
-      // The built icon draws the board's vertices (to its two-decimal precision).
-      const drawn = parsePoints(icon.querySelector('.wy-creep-body')!.getAttribute('points'));
-      expect(vertexSet(drawn, 2), creepId).toEqual(vertexSet(BOARD_SILHOUETTE_AT_6[op.shape], 2));
+describe('hud-icons — the creep icons draw the board’s own creep art (#181 L1, C3/C4)', () => {
+  /** A built part's art attributes: everything but its class and the paint `paintCreepIcon`
+   *  writes — what the renderer wrote. */
+  const artAttrs = (el: Element): Record<string, string> =>
+    Object.fromEntries(
+      [...el.attributes]
+        .filter((a) => !['class', 'fill', 'stroke'].includes(a.name))
+        .map((a) => [a.name, a.value]),
+    );
+  const scaleOf = (icon: SVGSVGElement): number => {
+    const m = /^scale\(([\d.]+)\)$/.exec(icon.querySelector('g')!.getAttribute('transform')!);
+    expect(m).not.toBeNull();
+    return Number(m![1]);
+  };
+  const SPECS = CREEP_IDS.flatMap((creepId) =>
+    (['ground', 'air'] as const).flatMap((domain) =>
+      [false, true].map((boss) => ({ creepId, domain, boss })),
+    ),
+  );
+
+  it('every creep’s icon is the render package’s art for its look, as its SVG renderer writes it, at the scale the package gives it', () => {
+    const drawnShapes = new Set<string>();
+    for (const spec of SPECS) {
+      const at = `${spec.creepId}/${spec.domain}${spec.boss ? '/boss' : ''}`;
+      const look = creepLookFor(spec.creepId, spec.boss, spec.domain === 'air');
+      const icon = creepIcon(document, spec, resolvePalette('default'));
+      expect(icon.dataset.wyShape, at).toBe(creepShapeFor(spec.creepId));
+      expect(icon.dataset.wyFamily, at).toBe(look.family);
+      drawnShapes.add(look.shape);
+      const { shapes, scale } = creepIconArt(look);
+      expect(scaleOf(icon), at).toBeCloseTo(scale, 4);
+      const parts = [...icon.querySelector('g')!.children];
+      expect(
+        parts.map((p) => ({ tag: p.tagName, attrs: artAttrs(p) })),
+        at,
+      ).toEqual(artSvgNodes(shapes).map((n) => ({ tag: n.tag, attrs: n.attrs })));
     }
     // The unknown id takes the board's fallback, and the shipped catalog draws every shape.
     expect(creepShapeFor('not-a-catalog-creep')).toBe('triangle');
-    expect([...drawnShapes].sort()).toEqual([...SHAPES].sort());
+    expect([...drawnShapes].sort()).toEqual([
+      'diamond',
+      'hexagon',
+      'pentagon',
+      'square',
+      'triangle',
+    ]);
   });
 
-  it('silhouettePoints draws every shape’s geometry around the plan’s own point, at its own radius', () => {
-    expect(CREEP_ICON_R).toBe(6);
-    for (const shape of SHAPES) {
-      for (const [x, y, r] of [
-        [0, 0, 6],
-        [3, -2, 6],
-        [-1.5, 4, 9],
-      ] as const) {
-        const op: CreepSilhouettePaintOp = { shape, x, y, r, colour: 0, hpFrac: 1 };
-        expect(vertexSet(silhouettePoints(op), 5), `${shape} at (${x},${y}) r${r}`).toEqual(
-          vertexSet(scaled(BOARD_SILHOUETTE_AT_6[shape], r / 6, x, y), 5),
-        );
-      }
-    }
+  it('keeps the board’s size steps: a boss drawn 1.5× the armored creep, the swarm the smallest', () => {
+    const scale = (creepId: string, boss = false): number =>
+      scaleOf(creepIcon(document, { creepId, domain: 'ground', boss }, resolvePalette('default')));
+    expect(scale('boss', true) / scale('armored')).toBeCloseTo(1.5, 3);
+    const all = ['swarm', 'normal', 'fast', 'armored', 'flying', 'resolute'].map((id) => scale(id));
+    expect(Math.min(...all)).toBe(scale('swarm'));
+    expect(Math.max(...all, scale('boss', true))).toBe(scale('boss', true));
   });
 
-  it('a boss is drawn larger by exactly the board’s boss step — size is the board’s only boss cue', () => {
-    expect(CREEP_ICON_BOSS_SCALE).toBe(BOARD_BOSS_SCALE);
-    for (const creepId of CREEP_IDS) {
-      const icon = creepIcon(
-        document,
-        { creepId, domain: 'ground', boss: true },
-        resolvePalette('default'),
-      );
-      const drawn = parsePoints(icon.querySelector('.wy-creep-body')!.getAttribute('points'));
-      expect(vertexSet(drawn, 2), creepId).toEqual(
-        vertexSet(scaled(BOARD_SILHOUETTE_AT_6[creepShapeFor(creepId)], BOARD_BOSS_SCALE), 2),
-      );
-    }
-  });
-
-  it('is inked in the palette’s creep and airborne colours, in every colour mode', () => {
+  it('is inked in the family’s hue, the airborne colour and the ink, in every colour mode', () => {
     for (const mode of COLOUR_MODES) {
       const pal = resolvePalette(mode);
-      const icon = creepIcon(document, { creepId: 'normal', domain: 'air', boss: false }, pal);
-      expect(icon.querySelector('.wy-creep-body')!.getAttribute('fill'), mode).toBe(
-        hexColour(pal.creep),
-      );
-      expect(icon.querySelector('.wy-creep-chevron')!.getAttribute('stroke'), mode).toBe(
-        hexColour(pal.airborne),
-      );
+      for (const creepId of ['normal', 'armored-flyer', 'swarm']) {
+        const icon = creepIcon(document, { creepId, domain: 'air', boss: false }, pal);
+        const family = creepLookFor(creepId, false, true).family;
+        const ink = (token: ArtColour): string => hexColour(creepArtColour(token, pal, family));
+        const body = icon.querySelector('.wy-creep-body')!;
+        expect(body.getAttribute('fill'), `${mode} ${creepId}`).toBe(ink('family'));
+        expect(body.getAttribute('stroke'), `${mode} ${creepId}`).toBe(ink('ink'));
+        for (const wing of icon.querySelectorAll('.wy-creep-wing')) {
+          expect(wing.getAttribute('fill'), `${mode} ${creepId}`).toBe(hexColour(pal.airborne));
+          expect(wing.getAttribute('stroke'), `${mode} ${creepId}`).toBe(ink('ink'));
+        }
+      }
+      // A creep's hue is its family's: normal and resolute share one, fast has its own.
+      const fill = (creepId: string): string | null =>
+        creepIcon(document, { creepId, domain: 'ground', boss: false }, pal)
+          .querySelector('.wy-creep-body')!
+          .getAttribute('fill');
+      expect(fill('resolute'), mode).toBe(fill('normal'));
+      expect(fill('fast'), mode).not.toBe(fill('normal'));
     }
   });
 
-  it('an air entry carries the board’s chevron glyph — its span and drop — just above the silhouette', () => {
-    expect(CHEVRON_HALF_SPAN).toBe(BOARD_CHEVRON.halfSpan);
-    expect(CHEVRON_DROP).toBe(BOARD_CHEVRON.drop);
-    const r = CREEP_ICON_R;
-    const [left, apex, right] = chevronPoints(0, 0, r);
-    // At the icon's radius: the tips 0.9r either side of the apex and 0.3r below it, and the
-    // whole glyph a gap above the silhouette's top (y = −6).
-    expect(vertexSet([left, apex, right], 5)).toEqual(
-      vertexSet(
-        [
-          [-5.4, -7.8],
-          [0, -9.6],
-          [5.4, -7.8],
-        ],
-        5,
-      ),
-    );
-    // The icon's own standoff: the tips sit clear ABOVE every silhouette's top — the glyph must
-    // never touch the body it flies over, whatever the shape…
-    for (const shape of SHAPES) {
-      const top = Math.min(...BOARD_SILHOUETTE_AT_6[shape].map(([, y]) => y));
-      expect(top - left[1], shape).toBeGreaterThanOrEqual(0.25 * r);
-    }
-    expect(CHEVRON_GAP).toBeGreaterThan(0);
-    // …and the whole glyph stays inside the icon's box for an ordinary creep.
-    expect(apex[1]).toBeGreaterThanOrEqual(-10);
-
-    const icon = creepIcon(
-      document,
-      { creepId: 'normal', domain: 'air', boss: false },
-      resolvePalette('default'),
-    );
-    const drawn = parsePoints(icon.querySelector('.wy-creep-chevron')!.getAttribute('points'));
-    expect(vertexSet(drawn, 2)).toEqual(vertexSet([left, apex, right], 2));
-  });
-
-  it('a ground entry has no chevron; every icon is aria-hidden decoration', () => {
+  it('an air entry carries the two wings, under its body; a ground entry none; every icon is aria-hidden decoration', () => {
     for (const domain of ['ground', 'air'] as const) {
       const icon = creepIcon(
         document,
         { creepId: 'fast', domain, boss: false },
         resolvePalette('default'),
       );
-      expect(icon.querySelector('.wy-creep-chevron') !== null).toBe(domain === 'air');
+      const parts = [...icon.querySelector('g')!.children].map((p) => p.getAttribute('class'));
+      expect(parts).toEqual(
+        domain === 'air' ? ['wy-creep-wing', 'wy-creep-wing', 'wy-creep-body'] : ['wy-creep-body'],
+      );
       expect(icon.getAttribute('class')).toBe('wy-creep-icon');
+      expect(icon.getAttribute('viewBox')).toBe(ICON_VIEWBOX);
       expect(icon.getAttribute('aria-hidden')).toBe('true');
       expect(icon.getAttribute('focusable')).toBe('false');
       expect(icon.textContent).toBe('');
@@ -281,15 +199,67 @@ describe('hud-icons — the creep icons draw the board’s silhouettes (#181 L1)
     const from = resolvePalette('default');
     const icon = creepIcon(document, { creepId: 'swarm', domain: 'air', boss: false }, from);
     const body = icon.querySelector('.wy-creep-body');
-    const chevron = icon.querySelector('.wy-creep-chevron');
+    const wings = [...icon.querySelectorAll('.wy-creep-wing')];
+    expect(wings).toHaveLength(2);
     for (const mode of COLOUR_MODES) {
       const pal = resolvePalette(mode);
       paintCreepIcon(icon, pal);
       expect(icon.querySelector('.wy-creep-body')).toBe(body);
-      expect(icon.querySelector('.wy-creep-chevron')).toBe(chevron);
-      expect(body!.getAttribute('fill')).toBe(hexColour(pal.creep));
-      expect(chevron!.getAttribute('stroke')).toBe(hexColour(pal.airborne));
+      expect([...icon.querySelectorAll('.wy-creep-wing')]).toEqual(wings);
+      expect(body!.getAttribute('fill')).toBe(hexColour(creepArtColour('family', pal, 'swarm')));
+      for (const wing of wings) expect(wing.getAttribute('fill')).toBe(hexColour(pal.airborne));
     }
+  });
+
+  it('paintCreepIcon checks what it reads back: an icon of no known family is left unpainted, and so is a part whose token is no colour', () => {
+    const pal = resolvePalette('default');
+    /** An armored flyer's icon as built — two wings and a body, each filled and outlined —
+     *  with its paint taken off again. */
+    const unpainted = (): SVGSVGElement => {
+      const icon = creepIcon(
+        document,
+        { creepId: 'armored-flyer', domain: 'air', boss: false },
+        pal,
+      );
+      const parts = [...icon.querySelectorAll('[data-art-fill][data-art-stroke]')];
+      expect(parts, 'the premise: three parts, each with both tokens').toHaveLength(3);
+      for (const part of parts) {
+        part.removeAttribute('fill');
+        part.removeAttribute('stroke');
+      }
+      return icon;
+    };
+    const paint = (el: Element): [string | null, string | null] => [
+      el.getAttribute('fill'),
+      el.getAttribute('stroke'),
+    ];
+    const ink = (token: ArtColour): string => hexColour(creepArtColour(token, pal, 'armored'));
+
+    // A family that is missing, or not one of the union's: nothing is painted, nothing throws.
+    for (const family of [undefined, '', 'dragon', 'Armored', '__proto__', 'constructor']) {
+      const icon = unpainted();
+      if (family === undefined) delete icon.dataset.wyFamily;
+      else icon.dataset.wyFamily = family;
+      paintCreepIcon(icon, pal);
+      for (const part of icon.querySelectorAll('[data-art-fill]')) {
+        expect(paint(part), `family ${String(family)}`).toEqual([null, null]);
+      }
+    }
+
+    // A token that is no colour leaves that paint off its part, and only that one.
+    const icon = unpainted();
+    const body = icon.querySelector('.wy-creep-body')!;
+    const [left, right] = [...icon.querySelectorAll('.wy-creep-wing')];
+    body.setAttribute('data-art-fill', 'not-a-colour');
+    left!.setAttribute('data-art-stroke', '');
+    paintCreepIcon(icon, pal);
+    expect(paint(body)).toEqual([null, ink('ink')]);
+    expect(paint(left!)).toEqual([ink('airborne'), null]);
+    expect(paint(right!)).toEqual([ink('airborne'), ink('ink')]);
+
+    // A token that IS a colour, but not one creep art paints in, is a bug in the art: it throws.
+    body.setAttribute('data-art-fill', 'role');
+    expect(() => paintCreepIcon(icon, pal)).toThrow(/no 'role' colour/);
   });
 
   it('hexColour writes an SVG paint value, zero-padded and masked to 24 bits', () => {

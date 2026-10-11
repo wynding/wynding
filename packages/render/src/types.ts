@@ -87,17 +87,18 @@ export interface CreepVM {
    *  max-HP join (`creepById[creepId].hp`) `hpFrac` is now derived against. */
   readonly creepId: string;
   /** Catalog domain (M2-S7) — a straight join like `warded`'s, NOT sim state (it never
-   *  changes tick-to-tick for a given creep). Drives the airborne cue (`creep-paint.ts`):
-   *  an independent shape+colour cue layered over whichever base silhouette `creepId`
-   *  already draws, so an id that is both armored AND airborne (`armored-flyer`, S10)
-   *  reads as both — a single id-keyed `CreepShape` could never express that (ADR 0003:
-   *  never colour alone). `'ground'` for a forged/unresolved `creepId` (the same
-   *  total-over-absent-definition posture `warded`'s join already takes). */
+   *  changes tick-to-tick for a given creep). Drives the airborne cue: since C4 the WINGS
+   *  (`CREEP_WINGS`, `creep-art.ts`), attached to whichever base silhouette `creepId`
+   *  already draws and baked into its body frame, so an id that is both armored AND airborne
+   *  (`armored-flyer`, S10) reads as both — a single id-keyed `CreepShape` could never
+   *  express that (ADR 0003: never colour alone). `'ground'` for a forged/unresolved
+   *  `creepId` (the same total-over-absent-definition posture `warded`'s join already
+   *  takes). */
   readonly domain: 'ground' | 'air';
   /** Fixed-point sim point (256 units = 1 cell) — projected to pixels by `projection`. */
   readonly x: number;
   readonly y: number;
-  /** Remaining-health fraction in [0,1] for the health pip (dual-encoded, not colour-only). */
+  /** Remaining-health fraction in [0,1] for the HP bar (dual-encoded, not colour-only). */
   readonly hpFrac: number;
   /** Whether an active slow status affects this creep right now (`slowMulFp !== 0`,
    *  M2-S3) — drives the slowed telegraph's shape+motion cues (`creep-paint.ts`). */
@@ -119,9 +120,9 @@ export interface CreepVM {
   readonly warded: boolean;
   /** Whether `creepId`'s catalog definition carries `role === 'boss'` (M2-S10) — a
    *  catalog JOIN, exactly like `domain`/`warded` above, NOT sim state: this never
-   *  changes tick-to-tick for a given creep. Drives the boss size cue
-   *  (`board-draw.ts`'s `BOSS_SCALE`) — role stays a pure axis rather than a fourth
-   *  `CreepShape`, so it composes if a boss variant ever appears (ruling 2). `false`
+   *  changes tick-to-tick for a given creep. Puts the creep in the boss FAMILY — its size
+   *  step and hue (`creepFamilyFor`, `creep-paint.ts`) — role stays a pure axis rather than a
+   *  sixth `CreepShape`, so it composes if a boss variant ever appears (ruling 2). `false`
    *  for a forged/unresolved `creepId` (the same total-over-absent-definition posture
    *  `warded`'s join already takes). */
   readonly boss: boolean;

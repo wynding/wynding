@@ -21,15 +21,20 @@
 //             or moved off the pixel grid, and nothing it draws may darken the footprint's
 //             edge (`placement.ts`)
 //   pending   sprites: pending builds — each one translucent picture with its dashed rim
+//   creepShadows  sprites: every creep's soft ground shadow (visual pass B3) — over the
+//             towers, rims and pending builds included, since a flyer's falls on whatever
+//             it crosses
 //   effects   live: the selection ring/outline/blast spokes, then each shot's muzzle flash
 //             or ring pulse (visual pass T3), then in-flight tracers
-//   creeps    sprites: every creep silhouette
-//   cues      live: every health pip and status cue, then the build ghost, then sparks
+//   creeps    sprites: every creep's body — ground creeps, then flyers over them
+//   cues      live: every HP bar and status cue, then the build ghost, then sparks
 //
-// Creep cues sit ABOVE every silhouette, so a creep's status cue is never hidden under a
+// Creep cues sit ABOVE every body, so a creep's status cue is never hidden under a
 // neighbour's body — the one ordering V2 changed on purpose (creeps used to draw one whole
-// stack at a time). The visual pass split a tower into a plate and a head and put scorches
-// on the floor under everything a tower draws; the rest keeps the order it had.
+// stack at a time). The visual pass split a tower into a plate and a head, put scorches on
+// the floor under everything a tower draws, and gave creeps shadows a layer below every body,
+// so no creep's shadow darkens a neighbour, and below the effects, so a shadow never dims the
+// selection cue or a tracer; the rest keeps the order it had.
 
 export const BOARD_LAYERS = [
   'board',
@@ -39,6 +44,7 @@ export const BOARD_LAYERS = [
   'heads',
   'rims',
   'pending',
+  'creepShadows',
   'effects',
   'creeps',
   'cues',

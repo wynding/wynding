@@ -1,5 +1,6 @@
-// circle-polygon.ts — a small circle drawn as a regular polygon (visual pass T3, #181; R5 reuses
-// it for tracers, sparks and pips). Phaser-free: anything with `fillPoints` and `strokePoints`
+// circle-polygon.ts — a small circle drawn as a regular polygon (visual pass T3, #181; R4's
+// `circle-path.ts` already draws the live layers' circles as polygons, and R5 decides whether to
+// unify the two side-count rules). Phaser-free: anything with `fillPoints` and `strokePoints`
 // draws one — a live layer's Phaser `Graphics`, or the tests' recording layer.
 //
 // WHY: Phaser's WebGL Graphics draws every arc as 101 points, whatever its radius
@@ -9,6 +10,9 @@
 // polygon with as many sides as its size needs reads as a circle and costs a fraction of that:
 // enough sides that none is longer than 3 CSS px, from 12 for the smallest circles up to 24,
 // where a polygon strays from its circle by under 1% of its radius.
+// Its sibling `circle-path.ts` turns every live layer's `strokeCircle` and `fillCircle` into a
+// polygon sized to its radius at the dpr — every circle drawn live but these — and leaves
+// `fillPoints`/`strokePoints` alone, so a circle drawn here is never converted twice.
 
 /** The fewest sides a circle's polygon has: the smallest circles still read as round. */
 export const MIN_CIRCLE_SIDES = 12;

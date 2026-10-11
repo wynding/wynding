@@ -7,20 +7,38 @@
 // the art painter (`art-paint.ts`), as SEPARATE frames: the plate every tower but the mine
 // sits on (the mine stands on a floor-coloured pad instead), the head (committed, or
 // boosted with its glow), a pending build's whole translucent picture, and the scorch a
-// spent mine leaves. Every tower frame is sized from its own art's bounds — shadow, glow and
-// strokes included — so nothing is clipped at any cell size. Creeps are still the board's
-// own geometry (`board-draw.ts`), unchanged.
+// spent mine leaves. Creeps (C3/C4/B3) are drawn from theirs (`creep-art.ts`) the same way,
+// as two frames: a body per look — silhouette, family hue, outline, a flyer's wings — and
+// a shadow per family's size and domain. Every frame is sized from its own art's bounds —
+// shadow, glow and strokes included — so nothing is clipped at any cell size.
 //
 // "Paint frame X into a graphics surface" is the seam later art goes through: the packing,
 // baking, placement and sprite pools never learn what is inside a frame.
 //
 // Frames are keyed by what they LOOK like, not by catalog id: a tower frame by its look —
 // head silhouette and role colour, `TowerLook` (an id the catalog has never heard of looks
-// like `basic`) — a creep frame by its silhouette shape. So every key placement can produce
-// exists in the atlas by construction, for any id, and the atlas never needs the catalog.
+// like `basic`) — a creep's body by its look — shape, family and domain, `CreepLook` — and
+// its shadow by its family and domain. So every key placement can produce exists in the
+// atlas by construction, for any id, and the atlas never needs the catalog. Each key is
+// built once per id and kept: placement asks for one per sprite per frame, and a key string
+// built afresh every time has to be hashed afresh by the atlas map it is looked up in.
 
-import { creepFillColour, creepRadius, paintCreepSilhouette, isLowHp } from './board-draw';
-import { CREEP_SHAPE_VALUES, creepShapeFor, type CreepShape } from './creep-paint';
+import {
+  CREEP_ART_R,
+  CREEP_LIFT,
+  CREEP_SHADOW,
+  creepArtColour,
+  creepBodyArt,
+  creepRadius,
+} from './creep-art';
+import {
+  CREEP_FAMILIES,
+  CREEP_LOOKS,
+  creepLookFor,
+  creepLookKey,
+  type CreepFamily,
+  type CreepLook,
+} from './creep-paint';
 import { artBounds } from './art-geometry';
 import type { ArtColourResolver, ArtGraphics } from './art-paint';
 import {
@@ -73,7 +91,8 @@ export interface FrameSpec {
   /** Where the art's CENTRE sits — a tower frame's footprint centre, a creep's or a scorch's
    *  own centre — as fractions of the frame's width and height: the point a sprite showing
    *  the frame turns about (an aiming head, `placement.ts`). A tower frame's lies `cellPx`
-   *  CSS px right of and below its anchor, the footprint corner. */
+   *  CSS px right of and below its anchor, the footprint corner; a flyer's body's, its lift
+   *  above its anchor, the true position (`CREEP_ART_CENTRE`). */
   readonly pivotX: number;
   readonly pivotY: number;
   readonly paint: FramePainter;
@@ -118,7 +137,7 @@ export const PAD_FRAME_KEY = 'tower:pad';
 /** What a committed tower of `towerId` stands on in the plates layer: its plate, or — for a
  *  plateless look — the floor-coloured pad that keeps aura shells off its footprint too. */
 export function groundFrameKey(towerId: string): string {
-  return towerHasPlate(towerId) ? PLATE_FRAME_KEY : PAD_FRAME_KEY;
+  return towerFrameKeys(towerId).ground;
 }
 
 /** The frame a spent mine's scorch shows. */
@@ -132,24 +151,109 @@ function pendingLookKey(look: TowerLook): string {
   return `tower:pending:${towerLookKey(look)}`;
 }
 
+/** A tower id's frame keys, each built once (see the header). */
+interface TowerFrameKeys {
+  readonly ground: string;
+  /** Committed, then boosted. */
+  readonly head: readonly [string, string];
+  readonly pending: string;
+}
+
+const KEYS_BY_TOWER = new Map<string, TowerFrameKeys>();
+
+function towerFrameKeys(towerId: string): TowerFrameKeys {
+  let keys = KEYS_BY_TOWER.get(towerId);
+  if (keys === undefined) {
+    const look = towerLookFor(towerId);
+    keys = {
+      ground: HEAD_ART[look.mark].plate ? PLATE_FRAME_KEY : PAD_FRAME_KEY,
+      head: [headLookKey(look, false), headLookKey(look, true)],
+      pending: pendingLookKey(look),
+    };
+    KEYS_BY_TOWER.set(towerId, keys);
+  }
+  return keys;
+}
+
 /** The head frame a committed tower of `towerId` shows — with the boost glow when a beacon
  *  boosts it (`buffed`). */
 export function headFrameKey(towerId: string, buffed: boolean): string {
-  return headLookKey(towerLookFor(towerId), buffed);
+  return towerFrameKeys(towerId).head[buffed ? 1 : 0];
 }
 
 /** The frame a pending build of `towerId` shows. */
 export function pendingFrameKey(towerId: string): string {
-  return pendingLookKey(towerLookFor(towerId));
+  return towerFrameKeys(towerId).pending;
 }
 
-/** The atlas frame a creep of `creepId` shows at `hpFrac`, boss-sized or not. */
-export function creepFrameKey(creepId: string, hpFrac: number, boss: boolean): string {
-  return creepShapeFrameKey(creepShapeFor(creepId), isLowHp(hpFrac), boss);
+function creepBodyKey(look: CreepLook): string {
+  return `creep:${creepLookKey(look)}`;
 }
 
-function creepShapeFrameKey(shape: CreepShape, lowHp: boolean, boss: boolean): string {
-  return `creep:${shape}:${lowHp ? 'low' : 'normal'}:${boss ? 'boss' : 'standard'}`;
+function creepShadowKey(family: CreepFamily, airborne: boolean): string {
+  return `creep:shadow:${family}:${airborne ? 'air' : 'ground'}`;
+}
+
+/** A creep's frames for one id, role and domain: its look, the body frame it shows and the
+ *  shadow frame under it. */
+export interface CreepFrameKeys {
+  readonly look: CreepLook;
+  readonly body: string;
+  readonly shadow: string;
+}
+
+/** A value per creep look, kept by creep id in four slots — [ground, air] × [not boss, boss] —
+ *  each set the first time its look is asked for. The one layout both caches of a creep's
+ *  frames use: its frame keys (`creepFrameKeys`, below) and, per atlas, their anchors
+ *  (`placement.ts`). */
+export class CreepLookSlots<T> {
+  private readonly byId = new Map<string, (T | undefined)[]>();
+
+  private static slot(boss: boolean, airborne: boolean): number {
+    return (boss ? 2 : 0) + (airborne ? 1 : 0);
+  }
+
+  /** The value kept for `creepId` with the boss role or not, in the air or not, if any. */
+  get(creepId: string, boss: boolean, airborne: boolean): T | undefined {
+    return this.byId.get(creepId)?.[CreepLookSlots.slot(boss, airborne)];
+  }
+
+  /** Keep `value` for `creepId` with the boss role or not, in the air or not; returns it. */
+  set(creepId: string, boss: boolean, airborne: boolean, value: T): T {
+    let slots = this.byId.get(creepId);
+    if (slots === undefined) {
+      slots = [undefined, undefined, undefined, undefined];
+      this.byId.set(creepId, slots);
+    }
+    slots[CreepLookSlots.slot(boss, airborne)] = value;
+    return value;
+  }
+}
+
+/** Each creep id's frame keys, one per look. */
+const KEYS_BY_CREEP = new CreepLookSlots<CreepFrameKeys>();
+
+/** The frames a creep of `creepId` shows, with the boss role or not, in the air or not —
+ *  built once per id, role and domain (see the header). */
+export function creepFrameKeys(creepId: string, boss: boolean, airborne: boolean): CreepFrameKeys {
+  const kept = KEYS_BY_CREEP.get(creepId, boss, airborne);
+  if (kept !== undefined) return kept;
+  const look = creepLookFor(creepId, boss, airborne);
+  return KEYS_BY_CREEP.set(creepId, boss, airborne, {
+    look,
+    body: creepBodyKey(look),
+    shadow: creepShadowKey(look.family, airborne),
+  });
+}
+
+/** The body frame a creep of `creepId` shows. */
+export function creepFrameKey(creepId: string, boss: boolean, airborne: boolean): string {
+  return creepFrameKeys(creepId, boss, airborne).body;
+}
+
+/** The shadow frame under a creep of `creepId`. */
+export function creepShadowFrameKey(creepId: string, boss: boolean, airborne: boolean): string {
+  return creepFrameKeys(creepId, boss, airborne).shadow;
 }
 
 /** Transparent texels kept around a frame's art on each side — room for the anti-aliased
@@ -169,10 +273,14 @@ type ArtDraw = (shapes: readonly ArtShape[], colour: ArtColourResolver) => void;
 type ArtPainter = (draw: ArtDraw, g: ArtGraphics, pal: Palette) => void;
 
 /**
- * A frame sized to hold `shapes` drawn at `cellPx`, anchored at the design point `anchor`
- * (a tower's footprint corner is (0, 0); its centre is (32, 32)). The anchor sits on a whole
- * texel at least `FRAME_PAD_TEXELS` in from every edge, and the frame reaches past the art's
- * bounds — strokes grown by their half-width at this scale — by that same pad.
+ * A frame sized to hold `shapes` drawn at `unit` CSS px per design unit — a tower's
+ * `artUnit(cellPx)` by default; a creep's is its radius over `CREEP_ART_R` — anchored at the
+ * design point `anchor` (a tower's footprint corner is (0, 0); its centre is (32, 32); a
+ * creep's true position is its body's centre, or `CREEP_LIFT` below a flyer's), and pivoting
+ * on the design point `centre`, the art's own centre (`FrameSpec.pivotX/Y`): a tower's
+ * footprint centre, (32, 32), by default; a creep's body centre, (0, 0). The anchor
+ * sits on a whole texel at least `FRAME_PAD_TEXELS` in from every edge, and the frame reaches
+ * past the art's bounds — strokes grown by their half-width at this scale — by that same pad.
  *
  * Every frame is packed on whole atlas texels (`atlas-pack.ts`), so the frame's texel grid
  * is the atlas's: what the frame draws — and sizes itself for — is the art with its `crisp`
@@ -185,8 +293,9 @@ function artFrame(
   scale: number,
   anchor: readonly [number, number],
   paint: ArtPainter,
+  unit: number = artUnit(cellPx),
+  centre: readonly [number, number] = [ART_BOX / 2, ART_BOX / 2],
 ): FrameSpec {
-  const unit = artUnit(cellPx);
   const [ax, ay] = anchor;
   // Design-unit (0, 0) lies `anchor` design units up and left of the anchor, which is on a
   // whole texel: that offset is all the texel grid's alignment needs to know.
@@ -206,17 +315,18 @@ function artFrame(
   const anchorY = topTexels / scale;
   const x0 = anchorX - ax * unit;
   const y0 = anchorY - ay * unit;
-  // The art's centre, design (32, 32), lies `32 - ax` design units right of the anchor (and
-  // `32 - ay` below it): in texels from the frame's corner, over the frame's size.
-  const centre = ART_BOX / 2;
+  // The art's centre, design `centre` — (32, 32) for a tower — lies `cx - ax` design units
+  // right of the anchor (and `cy - ay` below it): in texels from the frame's corner, over the
+  // frame's size.
+  const [cx, cy] = centre;
   return {
     key,
     width,
     height,
     anchorX,
     anchorY,
-    pivotX: (leftTexels + (centre - ax) * unit * scale) / width,
-    pivotY: (topTexels + (centre - ay) * unit * scale) / height,
+    pivotX: (leftTexels + (cx - ax) * unit * scale) / width,
+    pivotY: (topTexels + (cy - ay) * unit * scale) / height,
     paint: (g, pal) => paint((s, colour) => g.art(onGrid(s), colour, x0, y0, unit), g, pal),
   };
 }
@@ -451,36 +561,56 @@ export function scorchFrameSpec(cellPx: number, scale: number): FrameSpec {
   );
 }
 
-/** Every creep frame: each silhouette shape × {normal, low-HP} fill × {standard, boss}
- *  size. The anchor is the silhouette's centre, on a whole texel — which is also what puts
- *  the diamond's two triangles' shared edge exactly between two texel columns, so the bake
- *  cannot leave an anti-aliased seam down its middle. */
+/** The colour resolver for a creep of `family` in `pal`. */
+function creepColours(pal: Palette, family: CreepFamily): ArtColourResolver {
+  return (token) => creepArtColour(token, pal, family);
+}
+
+/** Where every creep frame pivots (`FrameSpec.pivotX/Y`): design (0, 0) — in a body's frame
+ *  the body's centre, a flyer's `CREEP_LIFT` above the true position the frame is anchored
+ *  at; in a shadow's, the true position it is cast from, as a plate pivots on its footprint
+ *  centre whatever its offset shadow. */
+const CREEP_ART_CENTRE = [0, 0] as const;
+
+/** Every creep frame at `cellPx` and `scale` texels per CSS px: each look's BODY — its wings
+ *  if it flies, its silhouette in its family's hue, outlined in ink — and each family's
+ *  SHADOW, on the ground and in the air. Each is drawn at its family's radius and anchored at
+ *  the creep's TRUE position — a flyer's body `CREEP_LIFT` above it — so a creep's body and
+ *  shadow sprites land on one snapped point and the lift between them is baked in. The body
+ *  keeps its family's hue at any HP; the HP bar is drawn live (`drawCreepCues`). */
 export function creepFrameSpecs(cellPx: number, scale: number): FrameSpec[] {
   const specs: FrameSpec[] = [];
-  for (const boss of [false, true]) {
-    const r = creepRadius(cellPx, boss);
-    const half = Math.ceil(r * scale) + FRAME_PAD_TEXELS;
-    const at = half / scale; // the centre, frame-local CSS px
-    for (const shape of CREEP_SHAPE_VALUES) {
-      for (const lowHp of [false, true]) {
-        specs.push({
-          key: creepShapeFrameKey(shape, lowHp, boss),
-          width: half * 2,
-          height: half * 2,
-          anchorX: at,
-          anchorY: at,
-          pivotX: 0.5, // the anchor is the centre, `half` texels in on each side
-          pivotY: 0.5,
-          paint: (g, pal) =>
-            paintCreepSilhouette(g, {
-              shape,
-              x: at,
-              y: at,
-              r,
-              colour: creepFillColour(pal, lowHp),
-            }),
-        });
-      }
+  for (const look of CREEP_LOOKS) {
+    const shapes = creepBodyArt(look);
+    const anchor = [0, look.airborne ? CREEP_LIFT : 0] as const;
+    specs.push(
+      artFrame(
+        creepBodyKey(look),
+        shapes,
+        cellPx,
+        scale,
+        anchor,
+        (draw, _g, pal) => draw(shapes, creepColours(pal, look.family)),
+        creepRadius(cellPx, look.family) / CREEP_ART_R,
+        CREEP_ART_CENTRE,
+      ),
+    );
+  }
+  for (const family of CREEP_FAMILIES) {
+    for (const airborne of [false, true]) {
+      const shapes = CREEP_SHADOW[airborne ? 'air' : 'ground'];
+      specs.push(
+        artFrame(
+          creepShadowKey(family, airborne),
+          shapes,
+          cellPx,
+          scale,
+          [0, 0],
+          (draw, _g, pal) => draw(shapes, creepColours(pal, family)),
+          creepRadius(cellPx, family) / CREEP_ART_R,
+          CREEP_ART_CENTRE,
+        ),
+      );
     }
   }
   return specs;

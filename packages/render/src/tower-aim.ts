@@ -5,8 +5,10 @@
 // WHAT A HEAD AIMS AT is the sim's own target lock, read and never decided here:
 // `TowerVM.targetId` (the sim's `towers.targetId` column, 0 for none) names the creep, and the
 // head turns toward where that creep is DRAWN this frame — its interpolated point, from the
-// same per-frame map the tracers converge on. Only the heads drawn to aim turn
-// (`towerAims`: basic, venom, stun, antiair); the rest never do.
+// same per-frame map the tracers converge on. For a flyer that is its true position, where its
+// shadow is drawn, not its body lifted above it (`CREEP_LIFT`): the head, like the tracers,
+// takes the sim's point. Only the heads drawn to aim turn (`towerAims`: basic, venom, stun,
+// antiair); the rest never do.
 //
 // HOW IT TURNS: toward that point along the shorter arc, never faster than
 // `AIM_TURN_PER_TICK` per tick of render time, so a head sweeps onto a new target rather than
@@ -86,8 +88,9 @@ export interface AimShot {
 export interface AimFrame {
   /** The towers the sim holds this frame (`curVm.towers`). */
   readonly towers: readonly TowerVM[];
-  /** Where each creep is drawn this frame, by entity id, in fixed-point sim units — the
-   *  interpolated points (`interpolateCreeps`), the map the tracers converge on. */
+  /** Where each creep truly is this frame, by entity id, in fixed-point sim units — the
+   *  interpolated points (`interpolateCreeps`), the map the tracers converge on. A flyer's body
+   *  is drawn above its point; its shadow sits on it. */
   readonly creeps: ReadonlyMap<number, { readonly x: number; readonly y: number }>;
   /** Render time, in fractional ticks (`renderTimeOf`). */
   readonly renderTick: number;

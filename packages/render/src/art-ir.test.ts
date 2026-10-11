@@ -7,8 +7,10 @@ import {
   alignArtToTexels,
   alignRectToTexels,
   dashAt,
+  isArtColour,
   rectRadius,
   strokeWidthAt,
+  type ArtColour,
   type ArtRect,
   type ArtShape,
 } from './art-ir';
@@ -242,5 +244,32 @@ describe('alignArtToTexels — the crisp rects of a list, and nothing else', () 
   it('hands back the SAME list when nothing in it is crisp', () => {
     const shapes = [ring, plain];
     expect(alignArtToTexels(shapes, 0.3125, 1)).toBe(shapes);
+  });
+});
+
+describe('isArtColour — a colour token read back as a string', () => {
+  it('knows every token of the union, and nothing else — no near miss, no name on the prototype, no non-string', () => {
+    const tokens: readonly ArtColour[] = [
+      'role',
+      'plate',
+      'floor',
+      'rim',
+      'aura',
+      'ink',
+      'bevel',
+      'shadow',
+      'gloss',
+      'scorch',
+      'crack',
+      'family',
+      'airborne',
+    ];
+    for (const token of tokens) expect(isArtColour(token), token).toBe(true);
+    for (const value of ['', 'Ink', 'ink ', 'roles', '__proto__', 'constructor', 'toString']) {
+      expect(isArtColour(value), value).toBe(false);
+    }
+    for (const value of [undefined, null, 0, {}, ['ink']]) {
+      expect(isArtColour(value), String(value)).toBe(false);
+    }
   });
 });

@@ -119,8 +119,8 @@ export interface FireFrame {
   readonly tracers: readonly TracerVM[];
   /** The towers the sim holds this frame (`curVm.towers`). */
   readonly towers: readonly TowerVM[];
-  /** Where each creep is drawn this frame, by entity id — the map the tracers converge on and
-   *  the heads turn toward (`AimFrame.creeps`). Only whether a shot's creep is in it is read. */
+  /** Where each creep truly is this frame, by entity id (a flyer's body is drawn above that
+   *  point) — the map the tracers converge on and the heads turn toward (`AimFrame.creeps`). Only whether a shot's creep is in it is read. */
   readonly creeps: ReadonlyMap<number, { readonly x: number; readonly y: number }>;
   /** Render time, in fractional ticks (`renderTimeOf`). */
   readonly renderTick: number;

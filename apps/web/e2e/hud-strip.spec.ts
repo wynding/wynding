@@ -979,3 +979,304 @@ test('a colour-vision mode re-inks the strip’s creep icons in place (tritan)',
     page.locator('.wy-wave-preview .wy-creep-body[data-probe-identity="one"]'),
   ).toHaveCount(1);
 });
+
+// ---- R4 QC (#181): an air entry's wings, where the strip draws them ----
+
+/** One strip entry as drawn, in CSS px. */
+interface StripEntry {
+  /** Its place in the strip, and its count's text. */
+  readonly entry: number;
+  readonly text: string;
+  /** Its icon's left edge. */
+  readonly iconLeft: number;
+  /** Its count's painted text: how many boxes it has — the premise of every check on it, since
+   *  the edges of no box at all are infinities that pass any bound — and its left and right
+   *  edges (`NaN` without a box). */
+  readonly count: { readonly boxes: number; readonly left: number; readonly right: number };
+  /** Each of an air entry's wings: its painted extent — its corners, grown by half its
+   *  round-joined ink outline — and what clips it, the icon's own `svg` included. */
+  readonly wings: readonly {
+    readonly left: number;
+    readonly right: number;
+    readonly clipLeft: number;
+    readonly clipRight: number;
+  }[];
+}
+
+/** Every entry of the strip, measured where it is drawn (`StripEntry`) — the ONE in-page measure
+ *  every check below on the strip's wings and counts reads, so none of them can take a wing's
+ *  extent or a clip differently from another. Given `restyle`, a stylesheet, it then measures
+ *  each entry's icon and count again with that stylesheet added — in the same task, so nothing
+ *  else can change between the two — and takes the stylesheet off again. */
+async function measureStrip(
+  page: Page,
+  restyle?: string,
+): Promise<{ entries: StripEntry[]; restyled: { iconLeft: number; countRight: number }[] }> {
+  return page.evaluate((restyle) => {
+    /** What clips `from` across: the padding box of each of `from` and its ancestors whose
+     *  overflow is not `visible`, intersected — for a wing, from its icon's `svg` up. */
+    const clipOf = (from: Element): { left: number; right: number } => {
+      let left = -Infinity;
+      let right = Infinity;
+      for (let el: Element | null = from; el; el = el.parentElement) {
+        if (getComputedStyle(el).overflowX === 'visible') continue;
+        const edge = el.getBoundingClientRect().left + el.clientLeft;
+        left = Math.max(left, edge);
+        right = Math.min(right, edge + el.clientWidth);
+      }
+      return { left, right };
+    };
+    const textBoxes = (el: Element): DOMRect[] => {
+      const range = document.createRange();
+      range.selectNodeContents(el);
+      return [...range.getClientRects()].filter((r) => r.width > 0);
+    };
+    const rows = [...document.querySelectorAll('.wy-wave-preview li')].map((li) => ({
+      icon: li.querySelector('svg.wy-creep-icon')!,
+      count: li.querySelector('.wy-preview-count')!,
+      wings: [...li.querySelectorAll<SVGPolygonElement>('svg.wy-creep-icon .wy-creep-wing')],
+    }));
+    const entries = rows.map(({ icon, count, wings }, entry) => {
+      const boxes = textBoxes(count);
+      return {
+        entry,
+        text: count.textContent ?? '',
+        iconLeft: icon.getBoundingClientRect().left,
+        count: {
+          boxes: boxes.length,
+          left: boxes.length > 0 ? Math.min(...boxes.map((r) => r.left)) : NaN,
+          right: boxes.length > 0 ? Math.max(...boxes.map((r) => r.right)) : NaN,
+        },
+        wings: wings.map((wing) => {
+          const m = wing.getScreenCTM()!;
+          const half = (parseFloat(getComputedStyle(wing).strokeWidth) * Math.hypot(m.a, m.b)) / 2;
+          const xs = Array.from({ length: wing.points.numberOfItems }, (_, i) => {
+            const p = wing.points.getItem(i);
+            return m.a * p.x + m.c * p.y + m.e;
+          });
+          const clip = clipOf(wing.ownerSVGElement!);
+          return {
+            left: Math.min(...xs) - half,
+            right: Math.max(...xs) + half,
+            clipLeft: clip.left,
+            clipRight: clip.right,
+          };
+        }),
+      };
+    });
+    if (restyle === undefined) return { entries, restyled: [] };
+    const style = document.createElement('style');
+    style.textContent = restyle;
+    document.head.append(style);
+    const restyled = rows.map(({ icon, count }) => {
+      const boxes = textBoxes(count);
+      return {
+        iconLeft: icon.getBoundingClientRect().left,
+        countRight: boxes.length > 0 ? Math.max(...boxes.map((r) => r.right)) : NaN,
+      };
+    });
+    style.remove();
+    return { entries, restyled };
+  }, restyle);
+}
+
+test('Compact: an air entry’s wings are never cut by the column — waves 6, 8 and 9, at 658×320 and 568×320 (#181 R4 QC)', async ({
+  page,
+}) => {
+  // The wings reach past the icon's box by design (`ui.css`'s `overflow: visible`), so whatever
+  // holds the icon must leave them room. In Compact the strip is a column inside the hud's
+  // scrollport, and each entry's icon starts at its edge.
+  test.setTimeout(120_000);
+  await gotoAt(page, PHONE);
+  expect(await page.evaluate((q) => matchMedia(q).matches, COMPACT_QUERY)).toBe(true);
+  const previewTitle = page.locator('.wy-wave-preview .wy-wave-preview-title');
+  await page.getByRole('button', { name: 'Start' }).click(); // Start claims wave 1 (#70)
+  await expect(previewTitle).toHaveText('Wave 2 of 10');
+  await page.getByRole('button', { name: 'Pause' }).click();
+  let measured = 0;
+  for (let waveNumber = 2; waveNumber <= 8; waveNumber++) {
+    await callWavePaced(page, titleAfterCall(waveNumber, 10));
+    const next = waveNumber + 1; // the wave the strip now previews
+    if (next !== 6 && next !== 8 && next !== 9) continue; // the flyer, the armored flyer, wave 9's flyer
+    for (const size of [PHONE, { width: 568, height: 320 }]) {
+      await page.setViewportSize(size);
+      await settle(page);
+      const at = `wave ${next} at ${size.width}×${size.height}`;
+      const wings = (await measureStrip(page)).entries.flatMap((e) =>
+        e.wings.map((w) => ({
+          entry: e.entry,
+          left: w.clipLeft - w.left,
+          right: w.right - w.clipRight,
+        })),
+      );
+      expect(wings, `${at}: the premise, one air entry's two wings`).toHaveLength(2);
+      for (const w of wings) {
+        expect(
+          w.left,
+          `${at}: entry ${w.entry}'s wing cut ${w.left.toFixed(2)}px on the left`,
+        ).toBeLessThanOrEqual(0.05);
+        expect(
+          w.right,
+          `${at}: entry ${w.entry}'s wing cut ${w.right.toFixed(2)}px on the right`,
+        ).toBeLessThanOrEqual(0.05);
+      }
+      measured++;
+    }
+    await page.setViewportSize(PHONE);
+    await settle(page);
+  }
+  expect(measured).toBe(6);
+});
+
+test('forced colors: an air entry’s wings are outlines in the user’s text colour on the background, apart from its solid body (#181 R4 QC)', async ({
+  page,
+}) => {
+  // Wave 1 is a ground creep, so the forced-colors test above never sees a wing; wave 6 is the
+  // first flyer. The wings' palette inks are presentation attributes Chromium does not force.
+  test.setTimeout(90_000);
+  await page.emulateMedia({ forcedColors: 'active' });
+  await gotoAt(page, STANDARD);
+  const previewTitle = page.locator('.wy-wave-preview .wy-wave-preview-title');
+  await page.getByRole('button', { name: 'Start' }).click(); // Start claims wave 1 (#70)
+  await expect(previewTitle).toHaveText('Wave 2 of 10');
+  await page.getByRole('button', { name: 'Pause' }).click();
+  for (let waveNumber = 2; waveNumber <= 5; waveNumber++) {
+    await callWavePaced(page, titleAfterCall(waveNumber, 10));
+  }
+  await expect(previewTitle).toHaveText('Wave 6 of 10');
+  const inks = await page.evaluate(() => {
+    const system = (value: string): string => {
+      const probe = document.createElement('span');
+      probe.style.color = value;
+      document.body.append(probe);
+      const out = getComputedStyle(probe).color;
+      probe.remove();
+      return out;
+    };
+    const paint = (sel: string): { fill: string; stroke: string }[] =>
+      [...document.querySelectorAll(sel)].map((el) => {
+        const cs = getComputedStyle(el);
+        return { fill: cs.fill, stroke: cs.stroke };
+      });
+    return {
+      canvas: system('Canvas'),
+      canvasText: system('CanvasText'),
+      wings: paint('.wy-wave-preview .wy-creep-wing'),
+      bodies: paint('.wy-wave-preview .wy-creep-body'),
+    };
+  });
+  expect(inks.canvasText).not.toBe(inks.canvas);
+  expect(inks.wings, 'the premise: the flyer’s two wings').toHaveLength(2);
+  for (const wing of inks.wings)
+    expect(wing).toEqual({ fill: inks.canvas, stroke: inks.canvasText });
+  expect(inks.bodies).toEqual([{ fill: inks.canvasText, stroke: inks.canvasText }]);
+});
+
+// ---- R4 QC round 2 (#181): the room the wings take moves no count ----
+
+/** Sets the page's text size — `:root`'s font size, as a browser's text-size setting scales it —
+ *  in place of any this set before. */
+async function setTextSize(page: Page, percent: number): Promise<void> {
+  await page.evaluate((percent) => {
+    let style = document.getElementById('wy-test-text-size');
+    if (style === null) {
+      style = document.createElement('style');
+      style.id = 'wy-test-text-size';
+      document.head.append(style);
+    }
+    style.textContent = percent === 100 ? '' : `:root { font-size: ${percent}% }`;
+  }, percent);
+}
+
+/** The strip WITHOUT R4's two Compact rules (`ui.css`, the icon's `margin-inline-start` and the
+ *  glance's `gap`), as main draws it: main has no Compact rule for either, so the icon takes no
+ *  margin and the glance the gap of its base rule. That gap is read off a glance outside the
+ *  strip, where only the base rule reaches it, so this baseline follows the base rule. */
+async function withoutWingRoom(page: Page): Promise<string> {
+  const gapEm = await page.evaluate(() => {
+    const probe = document.createElement('span');
+    probe.className = 'wy-preview-glance';
+    document.body.append(probe);
+    const style = getComputedStyle(probe);
+    const em = parseFloat(style.columnGap) / parseFloat(style.fontSize);
+    probe.remove();
+    return em;
+  });
+  expect(gapEm, 'the premise: the glance’s base gap, read off the page').toBeGreaterThan(0);
+  return (
+    `.wy-wave-preview-list .wy-creep-icon { margin-inline-start: 0 !important; }\n` +
+    `.wy-wave-preview-list .wy-preview-glance { gap: ${gapEm}em !important; }`
+  );
+}
+
+test('Compact: the room the wings take moves no count, and no wing runs onto one — every entry of every wave, at 658×320 and 568×320, at 100, 125, 150 and 200% text (#181 R4 QC round 2)', async ({
+  page,
+}) => {
+  // R4 gives the icon a margin for its left wing and takes the same length back from the gap
+  // after it, so each count stays exactly where main draws it. That is what this pins, as a
+  // difference: each count's right edge with R4's two rules, and again without them, in the
+  // same layout. Whether a count fits the column at all is not R4's: at 568×320 a count already
+  // runs past it on CI's font (the checklist's Compact residual), and on macOS's from 105% text.
+  test.setTimeout(360_000); // ten previews, two windows and four text sizes; generous for slow cores
+  await gotoAt(page, PHONE);
+  expect(await page.evaluate((q) => matchMedia(q).matches, COMPACT_QUERY)).toBe(true);
+  const previewTitle = page.locator('.wy-wave-preview .wy-wave-preview-title');
+  const baseline = await withoutWingRoom(page);
+  /** The largest shift, in px, by window and text size. */
+  const worst = new Map<string, number>();
+  let measured = 0;
+  const check = async (wave: string): Promise<void> => {
+    for (const size of [PHONE, { width: 568, height: 320 }]) {
+      await page.setViewportSize(size);
+      for (const percent of [100, 125, 150, 200]) {
+        await setTextSize(page, percent);
+        await settle(page);
+        const where = `${size.width}×${size.height} at ${percent}%`;
+        const { entries, restyled } = await measureStrip(page, baseline);
+        expect(entries.length, `${wave}, ${where}: the premise, a strip entry`).toBeGreaterThan(0);
+        for (const e of entries) {
+          const at = `${wave}, ${where}: ${e.text}`;
+          const without = restyled[e.entry]!;
+          expect(e.count.boxes, `${at}: the premise, a painted count`).toBeGreaterThan(0);
+          expect(
+            e.iconLeft - without.iconLeft,
+            `${at}: the premise, R4's margin moves the icon`,
+          ).toBeGreaterThan(0.5);
+          const shift = e.count.right - without.countRight;
+          expect(
+            Math.abs(shift),
+            `${at}: the wings' room moved the count ${shift.toFixed(3)}px`,
+          ).toBeLessThanOrEqual(0.05);
+          const wingRight = Math.max(-Infinity, ...e.wings.map((w) => w.right));
+          expect(
+            wingRight - e.count.left,
+            `${at}: a wing ${(wingRight - e.count.left).toFixed(2)}px over the count`,
+          ).toBeLessThanOrEqual(0);
+          worst.set(where, Math.max(worst.get(where) ?? 0, Math.abs(shift)));
+          measured++;
+        }
+      }
+    }
+    await setTextSize(page, 100);
+    await page.setViewportSize(PHONE);
+    await settle(page);
+  };
+  await check('wave 1');
+  await page.getByRole('button', { name: 'Start' }).click(); // Start claims wave 1 (#70)
+  await expect(previewTitle).toHaveText('Wave 2 of 10');
+  await page.getByRole('button', { name: 'Pause' }).click();
+  await check('wave 2');
+  for (let waveNumber = 2; waveNumber <= 9; waveNumber++) {
+    await callWavePaced(page, titleAfterCall(waveNumber, 10));
+    await check(`wave ${waveNumber + 1}`);
+  }
+  console.log(
+    `[hud-strip] the wings' room, each count's largest shift against main's strip: ${[...worst]
+      .map(([where, px]) => `${where} ${px.toFixed(4)}px`)
+      .join(', ')}`,
+  );
+  expect(
+    measured,
+    'the premise: every entry of every preview, at both windows and every text size',
+  ).toBeGreaterThan(80);
+});

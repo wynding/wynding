@@ -490,6 +490,15 @@ test('stress scene: fps / heap / input latency', async ({ page }, testInfo) => {
   for (let i = 0; i < INPUT_LATENCY_SAMPLES; i++) {
     await armToggle.click();
   }
+  // Every click's response is measured before the samples are read, as the catalog spec
+  // waits for it (PR #93): the live region is written by the HUD refresh of the frame
+  // AFTER a click, so a read straight after the last click can beat that frame. Once this
+  // scene drew at the display's cadence (#181), it did in about a third of mid-range runs:
+  // 19 samples read, the 20th landing a few ms later. A starved or stalled stream still
+  // never reaches the count, so the poll times out and fails as the length check did.
+  await expect
+    .poll(async () => (await page.evaluate(() => window.wyndingPerf!.inputLatencies)).length)
+    .toBe(INPUT_LATENCY_SAMPLES);
   const inputLatencies = await page.evaluate(() => window.wyndingPerf!.inputLatencies);
   // QC (the shared-scalar click/mutation race): with the ORIGINAL shared-scalar bug,
   // mutations could resolve MORE than once per click (a stray live-region write
