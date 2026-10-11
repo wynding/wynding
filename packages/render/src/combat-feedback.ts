@@ -3,14 +3,14 @@
 // Phaser-free: `board-frame.ts` feeds the tracker once a frame and draws what it plans; the
 // lives chip's shake is the web shell's (`apps/web`).
 //
-// WHAT TRIGGERS EACH. A HIT is a targeted shot reaching its impact while its target is still
-// drawn: the tracker takes in each shot the first frame it is listed (the controller lists every
-// shot a tick fires together, from the first frame after that tick until each lands — the fire
-// tracker's rule, `tower-fire.ts`), and on the first frame whose render time reaches the shot's
-// impact tick the creep it was aimed at flashes, if it is still drawn. One it killed is not
-// drawn by then — the step that landed the shot has removed it — and its burst shows instead. A
-// KILL and a LEAK come from the controller (`RenderOverlay.kills` and `leaks`), which takes them
-// from each step's own report of the creeps it killed and leaked.
+// WHAT TRIGGERS EACH. A HIT is a targeted impact the step reports on a creep that is still drawn:
+// the frame's newly drained impact points (`RenderOverlay.sparks`) each name the creep a targeted
+// shot struck (`SparkPoint.targetId`), and that creep flashes in the frame that takes the point
+// in. The controller drains every tick's points, so a frame that catches up several ticks, in
+// which a shot launches and lands, still flashes its creep, however briefly the shot's tracer
+// lived. One the impact killed is not drawn — the step that landed it has removed it — and its
+// burst shows instead. A KILL and a LEAK come from the controller as well (`RenderOverlay.kills`
+// and `leaks`), which takes them from each step's own report of the creeps it killed and leaked.
 //
 // THE CLOCK is the wall clock the impact sparks fade on (`sparks.ts`), not render time: the
 // frame's durations are wall-clock ones, and the rate bounds below are what a viewer sees in a
@@ -47,7 +47,7 @@ import {
 import { GEM_FRAME_KEY, glyphFrameKey } from './art-frames';
 import { anchorOf, type FrameAnchor, type SpritePlacement } from './placement';
 import { MAX_FLASHES_PER_SECOND } from './tower-fire';
-import type { KillVM, TracerVM } from './types';
+import type { KillVM, SparkPoint } from './types';
 
 /** How long a hit flash lasts, ms: the frame's 80 ms white overlay. */
 export const HIT_FLASH_MS = 80;
@@ -95,10 +95,9 @@ export function hitFlashAlpha(sinceMs: number): number {
 export interface FeedbackFrame {
   /** The wall clock, ms (the clock the impact sparks fade on). */
   readonly nowMs: number;
-  /** Render time, in fractional ticks (`renderTimeOf`). */
-  readonly renderTick: number;
-  /** The shots in flight this frame (`RenderOverlay.tracers`). */
-  readonly tracers: readonly TracerVM[];
+  /** The impact points drained since the last frame (`RenderOverlay.sparks`): a targeted one
+   *  names the creep it struck. */
+  readonly sparks: readonly SparkPoint[];
   /** The creeps drawn this frame, by entity id. */
   readonly drawn: { has(id: number): boolean };
   /** The kills and leaks since the last frame (`RenderOverlay.kills`, `.leaks`). */
@@ -113,7 +112,7 @@ export interface LiveKill {
 }
 
 export interface FeedbackTracker {
-  /** Take in one frame: land the hits now due, note the kills and leaks, and forget what has
+  /** Take in one frame: flash the creeps its impacts struck, note the kills and leaks, and forget what has
    *  played out. */
   update(frame: FeedbackFrame): void;
   /** Creep `id`'s hit flash opacity as of the last update — 0 when it is not flashing. */
@@ -127,18 +126,7 @@ export interface FeedbackTracker {
   reset(): void;
 }
 
-/** A targeted shot taken in and not yet landed: the creep it is aimed at, and when it lands. */
-interface PendingHit {
-  readonly targetId: number;
-  readonly impactTick: number;
-}
-
 export function createFeedbackTracker(): FeedbackTracker {
-  /** The shots taken in and not yet landed, in the order they were seen. */
-  const pending: PendingHit[] = [];
-  /** The latest launch tick taken in: a shot launched no later has been (the header). */
-  let takenThrough = -Infinity;
-  let lastTick = -Infinity;
   let now = -Infinity;
   /** When each creep's latest hit flash began, ms. */
   const flashedAt = new Map<number, number>();
@@ -153,32 +141,10 @@ export function createFeedbackTracker(): FeedbackTracker {
   };
 
   return {
-    update({ nowMs, renderTick, tracers, drawn, kills, leaks }) {
-      // Render time never runs backwards within a run: a frame earlier than the last is a run
-      // gone by, and no shot it noted will land in this one.
-      if (renderTick < lastTick) {
-        pending.length = 0;
-        takenThrough = -Infinity;
-      }
-      lastTick = renderTick;
+    update({ nowMs, sparks, drawn, kills, leaks }) {
       now = nowMs;
-      let latest = takenThrough;
-      for (const t of tracers) {
-        if (t.launchTick <= takenThrough) continue;
-        if (t.launchTick > latest) latest = t.launchTick;
-        if (t.kind === 'targeted') pending.push({ targetId: t.targetId, impactTick: t.impactTick });
-      }
-      takenThrough = latest;
-      if (pending.length > 0) {
-        let kept = 0;
-        for (const hit of pending) {
-          if (renderTick >= hit.impactTick) {
-            if (drawn.has(hit.targetId)) flash(hit.targetId);
-          } else {
-            pending[kept++] = hit;
-          }
-        }
-        pending.length = kept;
+      for (const s of sparks) {
+        if (s.targetId !== undefined && drawn.has(s.targetId)) flash(s.targetId);
       }
       // A flash's record is needed only as long as it bounds the next one.
       for (const [id, at] of flashedAt) if (now - at >= MIN_FLASH_GAP_MS) flashedAt.delete(id);
@@ -203,9 +169,6 @@ export function createFeedbackTracker(): FeedbackTracker {
       return since < LEAK_PULSE_MS ? since : null;
     },
     reset() {
-      pending.length = 0;
-      takenThrough = -Infinity;
-      lastTick = -Infinity;
       now = -Infinity;
       flashedAt.clear();
       shown = [];

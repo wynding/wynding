@@ -327,6 +327,10 @@ export interface SparkPoint {
    *  controller knows the creep by the id the sim names on the impact's point. Absent on every
    *  other spark. */
   readonly flyer?: Pick<CreepVM, 'creepId' | 'boss'>;
+  /** Set on a targeted impact: the entity id of the creep it struck, as the sim names it on the
+   *  impact's point (`StepEvents.impactPoints`). Absent on a blast's point. The hit flash
+   *  (`combat-feedback.ts`) follows it, and the spark store keeps only what it draws. */
+  readonly targetId?: number;
 }
 
 /** A creep killed since the last frame (visual pass C1, #181): its look, the bounty its kill

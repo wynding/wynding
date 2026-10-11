@@ -274,8 +274,7 @@ export function drawBoardFrame(t: BoardTargets, input: BoardFrameInput): void {
   const feedback = input.feedback;
   feedback.update({
     nowMs: input.nowMs,
-    renderTick: renderTimeTicks,
-    tracers: overlay.tracers,
+    sparks: overlay.sparks,
     drawn: drawnIds,
     kills: overlay.kills,
     leaks: overlay.leaks,
