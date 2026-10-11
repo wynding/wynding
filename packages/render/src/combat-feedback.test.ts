@@ -36,19 +36,12 @@ import { snapToDevicePx } from './device-px';
 import { fxUnit, KILL_BURST, LEAK_RINGS } from './effect-art';
 import { creepColour, resolvePalette } from './palette';
 import { MAX_FLASHES_PER_SECOND } from './tower-fire';
-import type { KillVM, TracerVM } from './types';
+import type { KillVM, SparkPoint } from './types';
 
 const PAL = resolvePalette('default');
 
-/** A shot at creep `targetId`, launched at `launchTick`, landing `flight` ticks later. */
-const shot = (targetId: number, launchTick: number, flight = 2): TracerVM => ({
-  kind: 'targeted',
-  originX: 0,
-  originY: 0,
-  targetId,
-  launchTick,
-  impactTick: launchTick + flight,
-});
+/** A targeted impact on creep `targetId`, as the frame's drained points report it. */
+const hit = (targetId: number): SparkPoint => ({ x: 0, y: 0, radiusFp: 0, targetId });
 
 const kill = (opts: Partial<KillVM> = {}): KillVM => ({
   id: 7,
@@ -64,8 +57,7 @@ const kill = (opts: Partial<KillVM> = {}): KillVM => ({
 /** A frame for the tracker: nothing in it but what `opts` says. */
 const frame = (opts: Partial<FeedbackFrame> = {}): FeedbackFrame => ({
   nowMs: 0,
-  renderTick: 0,
-  tracers: [],
+  sparks: [],
   drawn: new Set<number>(),
   kills: [],
   leaks: 0,
@@ -91,87 +83,59 @@ function mostInAnySecond(starts: readonly number[]): number {
 }
 
 describe('createFeedbackTracker — a hit flashes its creep', () => {
-  it('flashes a targeted shot’s creep on the first frame its render time reaches the impact, fading over the flash’s span on the wall clock', () => {
+  it('flashes the creep a targeted impact struck in the frame that takes it in, fading over the flash’s span on the wall clock', () => {
     const fb = createFeedbackTracker();
     const drawn = new Set([7]);
-    const tracers = [shot(7, 10, 2)];
-    fb.update(frame({ nowMs: 1000, renderTick: 11, tracers, drawn }));
-    expect(fb.flashOf(7)).toBe(0); // in flight
-    fb.update(frame({ nowMs: 1050, renderTick: 11.9, tracers, drawn }));
-    expect(fb.flashOf(7)).toBe(0);
-    fb.update(frame({ nowMs: 1100, renderTick: 12, tracers, drawn })); // lands
+    fb.update(frame({ nowMs: 1000, drawn }));
+    expect(fb.flashOf(7)).toBe(0); // nothing has struck it
+    fb.update(frame({ nowMs: 1100, sparks: [hit(7)], drawn })); // lands
     expect(fb.flashOf(7)).toBe(HIT_FLASH_ALPHA);
-    fb.update(frame({ nowMs: 1140, renderTick: 12.5, tracers: [], drawn }));
+    fb.update(frame({ nowMs: 1140, drawn }));
     expect(fb.flashOf(7)).toBeCloseTo(HIT_FLASH_ALPHA / 2, 12);
-    fb.update(frame({ nowMs: 1100 + HIT_FLASH_MS, renderTick: 13, tracers: [], drawn }));
+    fb.update(frame({ nowMs: 1100 + HIT_FLASH_MS, drawn }));
     expect(fb.flashOf(7)).toBe(0); // over
     expect(fb.flashOf(8)).toBe(0); // never hit
   });
 
-  it('flashes nothing for a shot whose creep is not drawn when it lands — its kill shows instead', () => {
+  it('flashes nothing for an impact whose creep is not drawn — its kill shows instead', () => {
     const fb = createFeedbackTracker();
-    fb.update(frame({ nowMs: 0, renderTick: 10, tracers: [shot(7, 10, 1)], drawn: new Set([7]) }));
-    fb.update(frame({ nowMs: 50, renderTick: 11, tracers: [shot(7, 10, 1)], drawn: new Set() }));
+    fb.update(frame({ nowMs: 50, sparks: [hit(7)], drawn: new Set() }));
     expect(fb.flashOf(7)).toBe(0);
-    // Nor once the creep is drawn again: the shot has landed, and is forgotten.
-    fb.update(frame({ nowMs: 60, renderTick: 11.2, tracers: [], drawn: new Set([7]) }));
+    // Nor once the creep is drawn again: the impact has been taken in, and is forgotten.
+    fb.update(frame({ nowMs: 60, drawn: new Set([7]) }));
     expect(fb.flashOf(7)).toBe(0);
   });
 
   it('flashes nothing for a blast — a lob or a mine lands on the ground, not on a creep', () => {
     const fb = createFeedbackTracker();
-    const blast: TracerVM = {
-      kind: 'blast',
-      originX: 0,
-      originY: 0,
-      destX: 512,
-      destY: 512,
-      launchTick: 10,
-      impactTick: 11,
-    };
+    const blast: SparkPoint = { x: 512, y: 512, radiusFp: 640, detonation: true };
     const drawn = new Set([0, 7]);
-    fb.update(frame({ nowMs: 0, renderTick: 10, tracers: [blast], drawn }));
-    fb.update(frame({ nowMs: 50, renderTick: 11, tracers: [blast], drawn }));
+    fb.update(frame({ nowMs: 50, sparks: [blast, { x: 512, y: 512, radiusFp: 640 }], drawn }));
     expect(fb.flashOf(0)).toBe(0);
     expect(fb.flashOf(7)).toBe(0);
   });
 
-  it('takes each shot in once, however many frames list it: one landing, one flash', () => {
+  it('a frame drawn twice from the same overlay starts no second flash', () => {
     const fb = createFeedbackTracker();
     const drawn = new Set([7]);
-    const tracers = [shot(7, 10, 1)];
-    for (let i = 0; i < 5; i++) fb.update(frame({ nowMs: i, renderTick: 10.1, tracers, drawn }));
-    fb.update(frame({ nowMs: 400, renderTick: 11, tracers, drawn }));
+    const sparks = [hit(7)];
+    fb.update(frame({ nowMs: 400, sparks, drawn }));
     expect(fb.flashOf(7)).toBe(HIT_FLASH_ALPHA);
-    // Listed still (the controller prunes a shot only once render time is past it): not again.
-    fb.update(frame({ nowMs: 800, renderTick: 11, tracers, drawn }));
+    // The same points again, a moment on (the scene draws the overlay it was handed twice): the
+    // flash has begun once and plays on, not again.
+    fb.update(frame({ nowMs: 440, sparks, drawn }));
+    expect(fb.flashOf(7)).toBeCloseTo(HIT_FLASH_ALPHA / 2, 12);
+    fb.update(frame({ nowMs: 400 + HIT_FLASH_MS, sparks, drawn }));
     expect(fb.flashOf(7)).toBe(0);
   });
 
-  it('holds a flash’s shots while render time does — a paused hit lands when play resumes', () => {
+  it('flashes once for several impacts on one creep in one frame', () => {
     const fb = createFeedbackTracker();
     const drawn = new Set([7]);
-    const tracers = [shot(7, 10, 2)];
-    for (let ms = 0; ms <= 2000; ms += 100) {
-      fb.update(frame({ nowMs: ms, renderTick: 11, tracers, drawn })); // paused before landing
-      expect(fb.flashOf(7)).toBe(0);
-    }
-    fb.update(frame({ nowMs: 2100, renderTick: 12, tracers, drawn }));
+    fb.update(frame({ nowMs: 0, sparks: [hit(7), hit(7), hit(7)], drawn }));
     expect(fb.flashOf(7)).toBe(HIT_FLASH_ALPHA);
-  });
-
-  it('a frame earlier in render time than the last is a run gone by: its shots in flight are forgotten', () => {
-    const fb = createFeedbackTracker();
-    const drawn = new Set([7]);
-    fb.update(frame({ nowMs: 0, renderTick: 50, tracers: [shot(7, 50, 4)], drawn }));
-    // A new run begins at tick 0, without a reset: the old shot never lands in it...
-    fb.update(frame({ nowMs: 100, renderTick: 0, tracers: [], drawn }));
-    fb.update(frame({ nowMs: 2000, renderTick: 60, tracers: [], drawn }));
-    expect(fb.flashOf(7)).toBe(0);
-    // ...and its own first shots are taken in, though launched earlier than the old one.
-    fb.update(frame({ nowMs: 2100, renderTick: 0, tracers: [shot(7, 1, 1)], drawn }));
-    fb.update(frame({ nowMs: 2200, renderTick: 2, tracers: [shot(7, 1, 1)], drawn }));
-    expect(fb.flashOf(7)).toBe(HIT_FLASH_ALPHA);
+    fb.update(frame({ nowMs: 40, drawn }));
+    expect(fb.flashOf(7)).toBeCloseTo(HIT_FLASH_ALPHA / 2, 12);
   });
 
   it('hitFlashAlpha: the flash’s opacity at its start, falling linearly to nothing over its span', () => {
@@ -193,20 +157,16 @@ describe('createFeedbackTracker — photosensitivity (ADR 0003, WCAG 2.3.1)', ()
     const drawn = new Set([7]);
     const starts: number[] = [];
     let landed = 0;
-    // Five seconds at 60 frames a second, render time at 20 ticks a second: every tick, four
-    // towers each fire a shot that lands on the next — 80 hits a second on one creep.
+    // Five seconds at 60 frames a second, the sim at 20 ticks a second: every tick, four towers
+    // each land a shot on one creep — 80 hits a second.
     for (let i = 0; i <= 300; i++) {
       const nowMs = (i * 1000) / 60;
-      const renderTick = i / 3;
-      const tick = Math.floor(renderTick);
-      const tracers: TracerVM[] = [];
-      for (let launch = Math.max(0, tick - 1); launch <= tick; launch++) {
-        for (let tower = 0; tower < 4; tower++) {
-          tracers.push({ ...shot(7, launch, 1), originX: tower * 512 });
-        }
+      const sparks: SparkPoint[] = [];
+      if (i % 3 === 0 && i > 0) {
+        for (let tower = 0; tower < 4; tower++) sparks.push(hit(7));
+        landed += 4;
       }
-      if (renderTick >= 1 && Number.isInteger(renderTick)) landed += 4;
-      fb.update(frame({ nowMs, renderTick, tracers, drawn }));
+      fb.update(frame({ nowMs, sparks, drawn }));
       if (fb.flashOf(7) === HIT_FLASH_ALPHA) starts.push(nowMs);
     }
     expect(landed).toBeGreaterThan(50 * 4); // the hits are there to strobe with
@@ -222,25 +182,18 @@ describe('createFeedbackTracker — photosensitivity (ADR 0003, WCAG 2.3.1)', ()
   it('bounds each creep on its own: two creeps hit together flash together', () => {
     const fb = createFeedbackTracker();
     const drawn = new Set([7, 8]);
-    const tracers = [shot(7, 10, 1), shot(8, 10, 1)];
-    fb.update(frame({ nowMs: 0, renderTick: 10, tracers, drawn }));
-    fb.update(frame({ nowMs: 50, renderTick: 11, tracers, drawn }));
+    fb.update(frame({ nowMs: 50, sparks: [hit(7), hit(8)], drawn }));
     expect([fb.flashOf(7), fb.flashOf(8)]).toEqual([HIT_FLASH_ALPHA, HIT_FLASH_ALPHA]);
   });
 
   it('a hit inside the gap shows nothing new; the first after it flashes again', () => {
     const fb = createFeedbackTracker();
     const drawn = new Set([7]);
-    const t1 = [shot(7, 10, 1)];
-    fb.update(frame({ nowMs: 0, renderTick: 10, tracers: t1, drawn }));
-    fb.update(frame({ nowMs: 50, renderTick: 11, tracers: t1, drawn })); // flash at 50
-    const t2 = [shot(7, 11, 1)];
-    fb.update(frame({ nowMs: 100, renderTick: 11.5, tracers: t2, drawn }));
-    fb.update(frame({ nowMs: 50 + MIN_FLASH_GAP_MS - 1, renderTick: 12, tracers: t2, drawn }));
+    fb.update(frame({ nowMs: 50, sparks: [hit(7)], drawn })); // flash at 50
+    fb.update(frame({ nowMs: 100, sparks: [hit(7)], drawn }));
+    fb.update(frame({ nowMs: 50 + MIN_FLASH_GAP_MS - 1, sparks: [hit(7)], drawn }));
     expect(fb.flashOf(7)).toBe(0); // inside the gap: the old flash is over, and no new one
-    const t3 = [shot(7, 12, 1)];
-    fb.update(frame({ nowMs: 50 + MIN_FLASH_GAP_MS, renderTick: 12.5, tracers: t3, drawn }));
-    fb.update(frame({ nowMs: 50 + MIN_FLASH_GAP_MS, renderTick: 13, tracers: t3, drawn }));
+    fb.update(frame({ nowMs: 50 + MIN_FLASH_GAP_MS, sparks: [hit(7)], drawn }));
     expect(fb.flashOf(7)).toBe(HIT_FLASH_ALPHA);
   });
 
@@ -253,7 +206,7 @@ describe('createFeedbackTracker — photosensitivity (ADR 0003, WCAG 2.3.1)', ()
     const pulses: number[] = [];
     for (let i = 0; i <= 600; i++) {
       const nowMs = (i * 1000) / 60;
-      fb.update(frame({ nowMs, renderTick: i / 3, leaks: 1 }));
+      fb.update(frame({ nowMs, leaks: 1 }));
       if (fb.pulseSinceMs() === 0) {
         // One pulse begins, and the rest of its pulses follow at their spacing.
         for (let p = 0; p < LEAK_PULSES; p++)
@@ -289,8 +242,8 @@ describe('createFeedbackTracker — kills and leaks', () => {
 
   it('a pause lets a kill play out: its clock is the wall clock, not render time', () => {
     const fb = createFeedbackTracker();
-    fb.update(frame({ nowMs: 0, renderTick: 10, kills: [kill()] }));
-    fb.update(frame({ nowMs: BOUNTY_POP_MS, renderTick: 10 })); // paused
+    fb.update(frame({ nowMs: 0, kills: [kill()] }));
+    fb.update(frame({ nowMs: BOUNTY_POP_MS })); // paused
     expect(fb.kills()).toEqual([]);
   });
 
@@ -310,31 +263,17 @@ describe('createFeedbackTracker — kills and leaks', () => {
     expect(fb.pulseSinceMs()).toBe(0); // a second on: another
   });
 
-  it('reset forgets everything: no flash, no kill, no pulse, no shot still to land', () => {
+  it('reset forgets everything: no flash, no kill, no pulse', () => {
     const fb = createFeedbackTracker();
     const drawn = new Set([7]);
-    fb.update(frame({ nowMs: 0, renderTick: 10, tracers: [shot(7, 10, 1)], drawn }));
-    fb.update(
-      frame({
-        nowMs: 50,
-        renderTick: 11,
-        tracers: [shot(7, 9, 5)],
-        drawn,
-        kills: [kill()],
-        leaks: 1,
-      }),
-    );
+    fb.update(frame({ nowMs: 50, sparks: [hit(7)], drawn, kills: [kill()], leaks: 1 }));
     expect(fb.flashOf(7)).toBe(HIT_FLASH_ALPHA);
     fb.reset();
     expect(fb.flashOf(7)).toBe(0);
     expect(fb.kills()).toEqual([]);
     expect(fb.pulseSinceMs()).toBeNull();
-    // The new run's first frames: nothing the old one had in flight lands, and its own shots
-    // are taken in from the start.
-    fb.update(frame({ nowMs: 60, renderTick: 14, tracers: [], drawn }));
-    expect(fb.flashOf(7)).toBe(0);
-    fb.update(frame({ nowMs: 70, renderTick: 0, tracers: [shot(7, 0, 1)], drawn }));
-    fb.update(frame({ nowMs: 120, renderTick: 1, tracers: [shot(7, 0, 1)], drawn }));
+    // The new run's first hit flashes at once, though the clock starts over: no gap carries on.
+    fb.update(frame({ nowMs: 0, sparks: [hit(7)], drawn }));
     expect(fb.flashOf(7)).toBe(HIT_FLASH_ALPHA);
   });
 });

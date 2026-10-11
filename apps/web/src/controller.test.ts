@@ -2357,6 +2357,40 @@ describe('controller — combat feedback wiring the tests above could not tell a
     ).toBeGreaterThan(0);
   });
 
+  it('names the creep every targeted impact struck, through a catch-up that also prunes its tracer unseen (Codex, PR #189)', () => {
+    const c = createController(1);
+    startAndCall(c);
+    c.armTower('basic');
+    c.aimAt(2, 10);
+    expect(c.confirm()).toBe(true);
+    let onLivingCreep = 0;
+    let unseenShots = 0;
+    for (let n = 0; n < 40; n++) {
+      const seen = new Set(c.frame().tracers.map((t) => t.launchTick));
+      // Eight ticks on one drain, as a frame that hitches or runs at 2× catches up.
+      tick(c, 8);
+      c.drainFeedback();
+      const alive = new Set(c.frame().curVm.creeps.map((cr) => cr.id));
+      const kept = c.frame().tracers.filter((t) => t.kind === 'targeted');
+      for (const p of c.drainSparks()) {
+        if (p.radiusFp !== 0) {
+          expect(p.targetId, 'a blast names no creep').toBeUndefined();
+          continue;
+        }
+        expect(typeof p.targetId, 'a targeted impact names the creep it struck').toBe('number');
+        if (!alive.has(p.targetId!)) continue; // a kill: its burst shows instead
+        onLivingCreep++;
+        // The shot that struck it launched and landed within this catch-up: no frame listed it.
+        if (!kept.some((t) => t.targetId === p.targetId && !seen.has(t.launchTick))) unseenShots++;
+      }
+    }
+    expect(onLivingCreep, 'the premise: shots struck creeps that lived').toBeGreaterThan(0);
+    expect(
+      unseenShots,
+      'the premise: some landed before any frame listed their tracer',
+    ).toBeGreaterThan(0);
+  });
+
   it('a creep a step spawned and killed, in no view model and so never drawn, still bursts and pops its bounty, where the step left it (Codex, PR #189)', () => {
     // Wave 1 spawns a normal at the entrance every 20 ticks from tick 0. A mine beside the
     // entrance, built on tick 19, is set off that tick by the first normal; its blast lands on

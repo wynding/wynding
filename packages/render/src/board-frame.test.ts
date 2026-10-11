@@ -561,21 +561,13 @@ describe('drawBoardFrame — combat feedback: a hit’s flash, a kill’s burst 
     bounty: 4,
   };
 
-  it('a shot reaching a creep still drawn flashes it: its look’s silhouette in the flashes layer, over its body, fading on the wall clock', () => {
+  it('a targeted impact on a creep still drawn flashes it: its look’s silhouette in the flashes layer, over its body, fading on the wall clock', () => {
     const { t, draw } = feed();
     const target = creep({ creepId: 'swarm' });
-    // From no tower: the shot's look does not matter here, only where and when it lands.
-    const arriving: TracerVM = {
-      kind: 'targeted',
-      originX: 2 * 256,
-      originY: 2 * 256,
-      targetId: 7,
-      launchTick: 10,
-      impactTick: 11,
-    };
-    draw(1000, 10.5, [target], { tracers: [arriving] });
-    expect(t.flashes.syncs.at(-1)).toEqual([]); // in flight
-    draw(1025, 11, [target], { tracers: [arriving] }); // lands
+    const struck = { x: 0, y: 0, radiusFp: 0, targetId: target.id };
+    draw(1000, 10.5, [target]);
+    expect(t.flashes.syncs.at(-1)).toEqual([]); // nothing has struck it
+    draw(1025, 11, [target], { sparks: [struck] }); // lands
     const [flash] = t.flashes.syncs.at(-1)!;
     expect(flash!.frame).toBe(creepFrameKeys('swarm', false, false).flash);
     expect(flash!.alpha).toBe(HIT_FLASH_ALPHA);
@@ -583,6 +575,40 @@ describe('drawBoardFrame — combat feedback: a hit’s flash, a kill’s burst 
     expect(t.flashes.syncs.at(-1)![0]!.alpha).toBeCloseTo(HIT_FLASH_ALPHA / 2, 12);
     draw(1025 + HIT_FLASH_MS, 12, [target]);
     expect(t.flashes.syncs.at(-1)).toEqual([]); // over
+  });
+
+  it('flashes the creep a catch-up frame’s impact struck though no tracer for the shot was ever drawn (Codex, PR #189)', () => {
+    // A frame that catches up several ticks launches a two-tick shot and lands it on a creep
+    // that lives: the controller has pruned the tracer, and the frame's overlay lists only the
+    // impact. The creep still flashes. (The controller half: `controller.test.ts`, which pins
+    // that the drained impact names its creep.)
+    const { t, draw } = feed();
+    const target = creep({ creepId: 'swarm' });
+    draw(1000, 10, [target]);
+    draw(1100, 14, [target], { tracers: [], sparks: [{ x: 0, y: 0, radiusFp: 0, targetId: 7 }] });
+    expect(t.flashes.syncs.at(-1)!.map((f) => f.alpha)).toEqual([HIT_FLASH_ALPHA]);
+  });
+
+  it('flashes nothing for an impact on a creep the step killed — not drawn — nor for a blast', () => {
+    const { t, draw } = feed();
+    const other = creep({ id: 8 });
+    draw(1000, 10, [other]);
+    draw(1100, 11, [other], {
+      sparks: [
+        { x: 0, y: 0, radiusFp: 0, targetId: 7 }, // killed: gone from the frame
+        { x: 3 * 256, y: 3 * 256, radiusFp: 640, detonation: true },
+      ],
+    });
+    expect(t.flashes.syncs.at(-1)).toEqual([]);
+  });
+
+  it('a frame drawn twice from the same overlay starts no second flash', () => {
+    const { t, draw } = feed();
+    const target = creep({ creepId: 'swarm' });
+    const over = { sparks: [{ x: 0, y: 0, radiusFp: 0, targetId: 7 }] };
+    draw(1000, 11, [target], over);
+    draw(1000 + HIT_FLASH_MS, 11, [target], over); // the same points, a flash span on
+    expect(t.flashes.syncs.at(-1)).toEqual([]);
   });
 
   it('a kill bursts in the cues — after the sparks — about its body’s centre, and pops its bounty in the pops layer', () => {
@@ -1635,23 +1661,16 @@ describe('drawBoardFrame — a hit’s flash under Reduce motion (C1)', () => {
       drawnPoints: new Map(),
     };
     const target = creep({ creepId: 'swarm' });
-    const arriving: TracerVM = {
-      kind: 'targeted',
-      originX: 2 * 256,
-      originY: 2 * 256,
-      targetId: target.id,
-      launchTick: 10,
-      impactTick: 11,
-    };
-    for (const [nowMs, renderTick] of [
-      [1000, 10.5],
-      [1025, 11],
+    const struck = { x: 0, y: 0, radiusFp: 0, targetId: target.id };
+    for (const [nowMs, renderTick, sparks] of [
+      [1000, 10.5, []],
+      [1025, 11, [struck]],
     ] as const) {
       fedFrame(t, {
         prevVm: { ...vm([], [target]), tick: Math.floor(renderTick) },
         curVm: { ...vm([], [target]), tick: Math.floor(renderTick) + 1 },
         alpha: renderTick - Math.floor(renderTick),
-        overlay: { ...OVERLAY, tracers: [arriving], reducedMotion: true },
+        overlay: { ...OVERLAY, sparks, reducedMotion: true },
         projection: PROJECTION,
         frames: framesFor(PROJECTION),
         exit: EXIT,
