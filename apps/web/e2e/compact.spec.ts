@@ -1275,9 +1275,11 @@ test.describe('M2-S12a: the condensed Panel and the Rail affordance', () => {
     });
   });
 
-  // Compact PINS the Panel at every text size (ui.css's Compact fork), but the condensed form
-  // follows the Rail's width — and above 125% text a Compact Rail's content box can pass
-  // 160px (658×320 from 126% to 151%; 740×360 and wider through 200%). A pinned Panel must still show the armed tower's whole name, never scrolling it
+  // Compact PINS the Panel at every text size (ui.css's Compact fork), and a pinned Panel is
+  // always the condensed one: the shed keys on `.wy-rail-panel-pinned`, not on the Rail's width.
+  // That matters because above 125% text a Compact Rail's content box can pass 160px (658×320
+  // from 126% to 151%; 740×360 and wider through 200%), where a width-keyed shed would show the
+  // wide form. A pinned Panel must still show the armed tower's whole name, never scrolling it
   // sideways out of a box too narrow for the wide form's head art beside it.
   for (const [label, size, zoom] of [
     ['658×320', PHONE, 150],
