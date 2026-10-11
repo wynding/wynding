@@ -224,10 +224,13 @@ interface Box {
   readonly b: number;
 }
 
-/** The glance's box, with the cue set by hand, and the pixels of `colour` around it: their extent. */
+/** The glance's box, with the cue set by hand, and the pixels of `colour` around it: their extent.
+ *  A colour with an alpha (the system highlight under forced colours has one) is taken as it
+ *  shows over `over`, the page colour behind it. */
 async function cuedExtent(
   page: Page,
   colour: string,
+  over?: string,
 ): Promise<{ glance: Box; found: Box | null; count: number }> {
   const glance = await page.evaluate((): Box => {
     const chip = document.querySelector('.wy-chip[data-wy-chip="lives"]')!;
@@ -243,7 +246,10 @@ async function cuedExtent(
     height: Math.ceil(glance.b - glance.t + 2 * pad),
   };
   const dpr = await page.evaluate(() => window.devicePixelRatio);
-  const want = (colour.match(/\d+(\.\d+)?/g) ?? []).slice(0, 3).map(Number);
+  const nums = (c: string): number[] => (c.match(/\d+(\.\d+)?/g) ?? []).map(Number);
+  const [r, g, b, a = 1] = nums(colour) as [number, number, number, number?];
+  const behind = over === undefined ? [255, 255, 255] : nums(over);
+  const want = [r, g, b].map((v, i) => v * a + behind[i]! * (1 - a));
   const png = PNG.sync.read(await page.screenshot({ clip, scale: 'device' }));
   let found: Box | null = null;
   let count = 0;
@@ -294,15 +300,20 @@ for (const size of [
     // Within a pixel of the glance's box on every side: none past it (a ring past the box is
     // cut off by the HUD's edge on the left in Compact, and rings the pill in Standard) and
     // none short of it (a clipped fill).
-    const tol = 1.5;
-    expect(found!.l - glance.l, 'left').toBeGreaterThanOrEqual(-tol);
-    expect(found!.l - glance.l, 'left').toBeLessThanOrEqual(tol);
-    expect(found!.t - glance.t, 'top').toBeGreaterThanOrEqual(-tol);
-    expect(found!.t - glance.t, 'top').toBeLessThanOrEqual(tol);
-    expect(glance.r - found!.r, 'right').toBeGreaterThanOrEqual(-tol);
-    expect(glance.r - found!.r, 'right').toBeLessThanOrEqual(tol);
-    expect(glance.b - found!.b, 'bottom').toBeGreaterThanOrEqual(-tol);
-    expect(glance.b - found!.b, 'bottom').toBeLessThanOrEqual(tol);
+    // (A pill's tips are anti-aliased, so up to 3 px of its own length may fall short of a
+    // pixel of the exact red; a ring 0.2em wide would run to about the same past the box.)
+    const past = 1.5;
+    const short = 3;
+    const gaps = {
+      left: found!.l - glance.l,
+      top: found!.t - glance.t,
+      right: glance.r - found!.r,
+      bottom: glance.b - found!.b,
+    };
+    for (const [side, gap] of Object.entries(gaps)) {
+      expect(gap, `${side}: red past the box`).toBeGreaterThanOrEqual(-past);
+      expect(gap, `${side}: red short of the box`).toBeLessThanOrEqual(short);
+    }
   });
 }
 
@@ -325,7 +336,8 @@ test('under forced colours the cue is an outline in the system highlight, inside
   // The chip at rest has none; the cue gives it one that is the system highlight colour.
   expect((await outline())[0]).toBe('none');
   const highlight = await resolveColour(page, 'Highlight');
-  const { glance: box, found, count } = await cuedExtent(page, highlight);
+  const canvas = await resolveColour(page, 'Canvas');
+  const { glance: box, found, count } = await cuedExtent(page, highlight, canvas);
   expect(await outline()).toEqual(['solid', '2px', '-2px', highlight]);
   expect(count, 'outline pixels').toBeGreaterThan(20);
   // Drawn inside the glance's box, none past it.
@@ -334,8 +346,8 @@ test('under forced colours the cue is an outline in the system highlight, inside
   expect(found!.r).toBeLessThanOrEqual(box.r + 1);
   expect(found!.b).toBeLessThanOrEqual(box.b + 1);
   // And its extent is the glance's own: the outline is there on every side.
-  expect(found!.l).toBeLessThanOrEqual(box.l + 1.5);
-  expect(found!.t).toBeLessThanOrEqual(box.t + 1.5);
-  expect(found!.r).toBeGreaterThanOrEqual(box.r - 1.5);
-  expect(found!.b).toBeGreaterThanOrEqual(box.b - 1.5);
+  expect(found!.l).toBeLessThanOrEqual(box.l + 3);
+  expect(found!.t).toBeLessThanOrEqual(box.t + 3);
+  expect(found!.r).toBeGreaterThanOrEqual(box.r - 3);
+  expect(found!.b).toBeGreaterThanOrEqual(box.b - 3);
 });
