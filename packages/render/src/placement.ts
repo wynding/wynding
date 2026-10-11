@@ -346,23 +346,55 @@ export function creepBodyCentre(
   return { x: b.sx, y: b.sy - creepLiftPx(b.r, airborne) + b.down };
 }
 
+/** A creep's drawn point as `creepAimPoints` keeps it from frame to frame: the point, in sim
+ *  units, and the call that last wrote it. */
+export interface KeptAimPoint {
+  x: number;
+  y: number;
+  call: number;
+}
+
+/** How many times `creepAimPoints` has run: each call stamps the points it writes. */
+let aimPointCalls = 0;
+
 /**
  * Where each creep in `bodies` is drawn, by entity id, in fixed-point sim units: its body's
  * centre (`CreepPlacement.cx/cy`) taken back through the projection. What the heads aim at and
  * the shots land on (visual pass C2, #181) — so for a flyer its lifted body, where the player
  * sees it, not the true point under it — in the units the trackers and `positionTracers` work
  * in. A ground creep's is its true point snapped to a whole device pixel, where its body is.
+ *
+ * Written into `into` — a new map unless the caller keeps one across frames, as the board frame
+ * does: each body's point is rewritten in place, and a creep no longer drawn loses its entry, so
+ * the map holds exactly this frame's points and a frame makes no object per creep.
  */
 export function creepAimPoints(
   bodies: readonly CreepPlacement[],
   projection: Projection,
-): Map<number, { readonly x: number; readonly y: number }> {
+  into: Map<number, KeptAimPoint> = new Map(),
+): ReadonlyMap<number, { readonly x: number; readonly y: number }> {
+  const call = ++aimPointCalls;
   const k = FP_ONE / projection.cellPx;
-  const out = new Map<number, { readonly x: number; readonly y: number }>();
+  let written = 0;
   for (const b of bodies) {
-    out.set(b.id, { x: (b.cx - projection.originX) * k, y: (b.cy - projection.originY) * k });
+    const x = (b.cx - projection.originX) * k;
+    const y = (b.cy - projection.originY) * k;
+    const kept = into.get(b.id);
+    if (kept === undefined) {
+      into.set(b.id, { x, y, call });
+      written += 1;
+    } else {
+      if (kept.call !== call) written += 1;
+      kept.x = x;
+      kept.y = y;
+      kept.call = call;
+    }
   }
-  return out;
+  // An entry this call did not write is a creep an earlier frame drew and this one does not.
+  if (into.size > written) {
+    for (const [id, p] of into) if (p.call !== call) into.delete(id);
+  }
+  return into;
 }
 
 /**

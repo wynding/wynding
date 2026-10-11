@@ -10,6 +10,7 @@ import { describe, it, expect } from 'vitest';
 import {
   HEAD_AT_REST,
   creepAimPoints,
+  type KeptAimPoint,
   creepBodyCentre,
   placeCreeps,
   placeScorches,
@@ -876,6 +877,45 @@ describe('creepAimPoints — where each creep is drawn, in sim units (C2)', () =
       // A flyer's point is its lifted body, above its true one: smaller y.
       expect(points.get(9)!.y).toBeLessThan(900);
     }
+  });
+
+  it('rewrites a map kept across frames in place: each body’s entry, the same object, and none for a creep no longer drawn', () => {
+    const projection = projectionAt(1.5, 130, 130);
+    const frames = framesFor(projection);
+    const bodiesOf = (creeps: Partial<CreepVM>[]) =>
+      placeCreeps(
+        creeps.map((c) => creep(c)),
+        PAL,
+        projection,
+        frames,
+      ).bodies;
+    const kept = new Map<number, KeptAimPoint>();
+    const first = bodiesOf([
+      { id: 4, x: 600, y: 700 },
+      { id: 9, creepId: 'flying', domain: 'air', x: 900, y: 300 },
+    ]);
+    expect(creepAimPoints(first, projection, kept)).toBe(kept);
+    const four = kept.get(4);
+    const next = bodiesOf([
+      { id: 11, x: 100, y: 100 },
+      { id: 4, x: 650, y: 720 },
+    ]);
+    creepAimPoints(next, projection, kept);
+    expect([...kept.keys()].sort((a, b) => a - b)).toEqual([4, 11]);
+    expect(kept.get(4)).toBe(four);
+    // Exactly the points a fresh map holds for the same bodies.
+    const fresh = creepAimPoints(next, projection);
+    const xy = (p: { x: number; y: number } | undefined) => p && { x: p.x, y: p.y };
+    for (const id of [4, 11]) expect(xy(kept.get(id))).toEqual(xy(fresh.get(id)));
+    // A body listed twice (a forged state's) keeps one entry, the later point, as a fresh map
+    // does — and a creep no longer drawn still loses its own.
+    const twice = bodiesOf([
+      { id: 11, x: 100, y: 100 },
+      { id: 11, x: 300, y: 500 },
+    ]);
+    creepAimPoints(twice, projection, kept);
+    expect([...kept.keys()]).toEqual([11]);
+    expect(xy(kept.get(11))).toEqual(xy(creepAimPoints(twice, projection).get(11)));
   });
 
   it('is a ground creep’s own point when that point is on a whole pixel', () => {

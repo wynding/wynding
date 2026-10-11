@@ -50,6 +50,7 @@ import {
   placeScorches,
   placeTowers,
   type FrameAnchor,
+  type KeptAimPoint,
   type SpritePlacement,
 } from './placement';
 import type { Projection } from './projection';
@@ -234,6 +235,11 @@ export interface BoardFrameTrackers {
   readonly feedback: Pick<FeedbackTracker, 'reset'>;
 }
 
+/** Where each creep is drawn, in sim units (`creepAimPoints`): one map for every frame, each
+ *  rewriting it in place, so a frame makes no object per creep. Read only while a frame is drawn
+ *  — nothing a frame feeds it to keeps it, or a point in it, past that frame. */
+const drawnPoints = new Map<number, KeptAimPoint>();
+
 /** Draw one frame into `t`. */
 export function drawBoardFrame(t: BoardTargets, input: BoardFrameInput): void {
   const { prevVm, curVm, alpha, overlay, projection, frames } = input;
@@ -276,7 +282,7 @@ export function drawBoardFrame(t: BoardTargets, input: BoardFrameInput): void {
   const creeps = placeCreeps(interpolated, pal, projection, frames, (id) => feedback.flashOf(id));
   // Where each creep is DRAWN — its body's centre, a flyer's lifted one — in sim units: what the
   // heads turn toward and the shots land on.
-  const drawnAt = creepAimPoints(creeps.bodies, projection);
+  const drawnAt = creepAimPoints(creeps.bodies, projection, drawnPoints);
   // The towers whose shots just appeared are noted, then the heads turn toward where their
   // targets are drawn, each that just fired onto its shot's bearing — before a head is placed.
   const shots = input.fire.update({
@@ -388,6 +394,7 @@ export function resetBoardFrame(t: BoardTargets, state: BoardFrameTrackers): voi
   state.aim.reset();
   state.fire.reset();
   state.feedback.reset();
+  drawnPoints.clear();
   t.layers.shells.clear();
   t.layers.effects.clear();
   t.layers.cues.clear();
