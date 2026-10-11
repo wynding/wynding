@@ -1568,3 +1568,87 @@ describe('createPolygonLiveLayers — every live layer draws its circles as poly
     }
   });
 });
+
+describe('drawBoardFrame — a flyer’s kill bursts and pops on its lifted body (C1/C2)', () => {
+  it('centres the burst’s ring and the pop over the body the flyer was last drawn with — not the point under it', () => {
+    const { t } = targets();
+    // Between device pixels, and in the air: the snap and the lift both do work here.
+    const kill: KillVM = {
+      id: 9,
+      x: 10 * 256 + 37,
+      y: 6 * 256 + 101,
+      creepId: 'flying',
+      domain: 'air',
+      boss: false,
+      bounty: 2,
+    };
+    fedFrame(t, {
+      prevVm: { ...vm([], []), tick: 10 },
+      curVm: { ...vm([], []), tick: 11 },
+      alpha: 0,
+      overlay: { ...OVERLAY, kills: [kill] },
+      projection: PROJECTION,
+      frames: framesFor(PROJECTION),
+      exit: EXIT,
+      nowMs: 500,
+      sparks: [],
+      scorches: createScorchTracker(),
+      aim: createAimTracker(),
+      fire: createFireTracker(),
+      feedback: createFeedbackTracker(),
+    });
+    const at = creepBodyCentre(kill.x, kill.y, kill, PROJECTION, framesFor(PROJECTION));
+    const under = PROJECTION.fpToPixel(kill.x, kill.y);
+    expect(at.y, 'the premise: a flyer is drawn lifted').toBeLessThan(under.y - 1);
+    const [ring] = t.layers.cues.calls.filter((c) => c.method === 'strokeCircle');
+    expect(ring!.args.slice(0, 2)).toEqual([at.x, at.y]);
+    // The pop's row is centred over the same body.
+    const pops = t.pops.syncs.at(-1)!;
+    const frames = framesFor(PROJECTION);
+    const left = pops[0]!.x;
+    const last = pops.at(-1)!;
+    const right = last.x + frames.get(last.frame)!.width;
+    expect(Math.abs((left + right) / 2 - at.x)).toBeLessThan(1);
+  });
+});
+
+describe('drawBoardFrame — a hit’s flash under Reduce motion (C1)', () => {
+  it('still flashes a hit creep: the flash has no motion to remove (the checklist: unchanged)', () => {
+    const { t } = targets();
+    const trackers = {
+      scorches: createScorchTracker(),
+      aim: createAimTracker(),
+      fire: createFireTracker(),
+      feedback: createFeedbackTracker(),
+    };
+    const target = creep({ creepId: 'swarm' });
+    const arriving: TracerVM = {
+      kind: 'targeted',
+      originX: 2 * 256,
+      originY: 2 * 256,
+      targetId: target.id,
+      launchTick: 10,
+      impactTick: 11,
+    };
+    for (const [nowMs, renderTick] of [
+      [1000, 10.5],
+      [1025, 11],
+    ] as const) {
+      fedFrame(t, {
+        prevVm: { ...vm([], [target]), tick: Math.floor(renderTick) },
+        curVm: { ...vm([], [target]), tick: Math.floor(renderTick) + 1 },
+        alpha: renderTick - Math.floor(renderTick),
+        overlay: { ...OVERLAY, tracers: [arriving], reducedMotion: true },
+        projection: PROJECTION,
+        frames: framesFor(PROJECTION),
+        exit: EXIT,
+        nowMs,
+        sparks: [],
+        ...trackers,
+      });
+    }
+    const [flash] = t.flashes.syncs.at(-1)!;
+    expect(flash?.frame).toBe(creepFrameKeys('swarm', false, false).flash);
+    expect(flash?.alpha).toBe(HIT_FLASH_ALPHA);
+  });
+});

@@ -284,3 +284,44 @@ describe('stunArcPoints — the stun arc’s zigzag', () => {
     expect(stunArcPoints({ x: 3, y: 4 }, { x: NaN, y: 4 }, 1)).toBeNull();
   });
 });
+
+describe('planShots — a lob’s arc off the level (what the level lob above could not tell apart)', () => {
+  it('lifts a lob by its flight’s true length whatever its heading — straight down the board too — and by its own place along it', () => {
+    const down = { x: FROM.x, y: FROM.y + 4 * 256 }; // four cells straight down
+    const from = PROJECTION.fpToPixel(FROM.x, FROM.y);
+    const lands = PROJECTION.fpToPixel(down.x, down.y);
+    const length = Math.hypot(lands.x - from.x, lands.y - from.y);
+    expect(length).toBeGreaterThan(0);
+    for (const frac of [0.25, 0.5]) {
+      const shot = positioned(FROM, down, frac, {
+        kind: 'blast',
+        destX: down.x,
+        destY: down.y,
+      } as Partial<TracerVM>);
+      const key = shotFrameKeys('splash').tracer!;
+      const ball = plan([shot], 'splash').sprites.find((s) => s.frame === key)!;
+      const ground = PROJECTION.fpToPixel(shot.x, shot.y);
+      const rise = lobRise(frac, length, PROJECTION.cellPx);
+      expect(rise, `${frac}`).toBeGreaterThan(0);
+      expect(ball.y + FRAMES.get(key)!.anchorY, `${frac}`).toBeCloseTo(ground.y - rise, 9);
+    }
+  });
+});
+
+describe('planShots — the dot keeps the colour every shot had before C2 (the pin tracers.test.ts held)', () => {
+  it('draws an unknown tower’s dot in the tower body’s colour before the visual pass, in every mode', () => {
+    const before = { default: 0x009e73, protan: 0x0072b2, deutan: 0x0072b2, tritan: 0x009e73 };
+    expect(COLOUR_MODES).toEqual(Object.keys(before));
+    for (const mode of COLOUR_MODES) {
+      const { dots } = planShots(
+        [positioned(FROM, RIGHT, 0.5)],
+        () => undefined,
+        false,
+        resolvePalette(mode),
+        PROJECTION,
+        FRAMES,
+      );
+      expect(dots[0]!.colour, mode).toBe(before[mode]);
+    }
+  });
+});

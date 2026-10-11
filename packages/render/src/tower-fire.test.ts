@@ -744,3 +744,15 @@ describe('fireFeedbackPaintOps — the muzzle flash and the ring pulse', () => {
     expect(ring!.y).toBe(snapToDevicePx(raw.y, 1.25) + frac.cellPx);
   });
 });
+
+describe('createFireTracker — each shot’s tower, told apart by its whole centre (C2)', () => {
+  it('keeps two towers apart whose footprint centres’ coordinates sum alike', () => {
+    const fire = createFireTracker();
+    const across = tower(1, 'basic', 2, 6); // centre (3, 7) cells
+    const down = tower(2, 'slow', 6, 2); // centre (7, 3) cells: the same sum
+    const a = shot(across, 10);
+    const b = shot(down, 10);
+    fire.update(frame({ towers: [across, down], tracers: [a, b], renderTick: 10 }));
+    expect([fire.towerIdOf(a), fire.towerIdOf(b)]).toEqual(['basic', 'slow']);
+  });
+});

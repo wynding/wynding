@@ -1117,13 +1117,14 @@ describe('controller — kills and leaks for the board’s combat feedback (#181
     const c = createController(1);
     c.start();
     let n = 0;
-    // Several ticks, no drain between — a catch-up frame — until creeps have leaked.
-    while (c.runStats().leaks === 0 && !c.isTerminal() && n < 6000) {
+    // Several ticks, no drain between — a catch-up frame — until creeps have leaked on two
+    // different ticks (wave 1's spacing is 20 ticks), so a drain keeping only the last tick fails.
+    while (c.runStats().leaks < 2 && !c.isTerminal() && n < 6000) {
       c.advance(TICK);
       n++;
     }
     const fed = c.drainFeedback();
-    expect(fed.leaks).toBeGreaterThan(0);
+    expect(fed.leaks).toBe(2);
     expect(fed.leaks).toBe(c.runStats().leaks);
     expect(c.drainFeedback()).toEqual({ kills: [], leaks: 0 }); // drained, not re-reported
     // More leaks pending, then Play again: none carries over.
@@ -2202,5 +2203,121 @@ describe('controller — run stats for the results panel (#181 H2)', () => {
 
     c.startRun(2);
     expect(c.runStats()).toEqual(zero);
+  });
+});
+
+describe('controller — combat feedback wiring the tests above could not tell apart (#181 C1/C2)', () => {
+  it('credits each kill its OWN creep’s bounty while creeps of other bounties share the board', () => {
+    const c = createController(1);
+    startAndCall(c);
+    for (const [col, row] of [
+      [2, 8],
+      [2, 13],
+      [6, 8],
+      [6, 13],
+    ] as const) {
+      c.armTower('basic');
+      c.aimAt(col, row);
+      expect(c.confirm(), `basic at ${col},${row}`).toBe(true);
+    }
+    tick(c);
+    // Normals and swarms (1 each) on the board with fasts (2) and armoured (3) behind them.
+    for (let i = 0; i < 3; i++) {
+      expect(c.callWaveEarly()).toBe(true);
+      tick(c);
+    }
+    const bounties = new Set<number>();
+    let kills = 0;
+    for (let n = 0; n < 6000 && !c.isTerminal(); n++) {
+      tick(c);
+      for (const k of c.drainFeedback().kills) {
+        kills++;
+        bounties.add(k.bounty);
+        expect(k.bounty, `${k.creepId} #${k.id}`).toBe(c.ruleset.creepById[k.creepId]!.bounty);
+      }
+    }
+    expect(kills).toBeGreaterThan(0);
+    expect(bounties.size, 'the premise: kills of more than one bounty').toBeGreaterThan(1);
+  });
+
+  it('a new run drops the last run’s kills still pending, not drained', () => {
+    const c = createController(1);
+    startAndCall(c);
+    c.armTower('basic');
+    c.aimAt(2, 10);
+    c.confirm();
+    let n = 0;
+    while (c.runStats().creepsStopped === 0 && !c.isTerminal() && n < 6000) {
+      c.advance(TICK); // never drained
+      n++;
+    }
+    expect(c.runStats().creepsStopped, 'the premise: a kill is pending').toBeGreaterThan(0);
+    c.startRun(2);
+    expect(c.drainFeedback()).toEqual({ kills: [], leaks: 0 });
+  });
+
+  it('a tower built where one was sold, in the same tick, fires shots of its own: only the sold tower’s shots carry its id (C2)', () => {
+    const c = createController(1);
+    startAndCall(c);
+    c.armTower('basic');
+    c.aimAt(2, 10);
+    c.confirm();
+    let n = 0;
+    while (c.frame().tracers.length === 0 && !c.isTerminal() && n < 300) {
+      c.advance(TICK);
+      n++;
+    }
+    const seen = new Set(c.frame().tracers.map((t) => t.launchTick));
+    expect(c.aimAt(2, 10).kind).toBe('tower');
+    expect(c.sellSelected()).toBe(true);
+    c.armTower('venom');
+    c.aimAt(2, 10);
+    expect(c.confirm(), 'venom queued on the sold footprint').toBe(true);
+    tick(c); // the sell and the build commit together; venom may fire at once (no warm-up)
+    const [venom] = c.frame().curVm.towers;
+    expect(venom?.towerId).toBe('venom');
+    const fresh = c.frame().tracers.filter((t) => !seen.has(t.launchTick));
+    expect(
+      fresh.length,
+      'the premise: the new tower fired on the tick it was built',
+    ).toBeGreaterThan(0);
+    for (const t of fresh)
+      expect(t.towerId, 'its tower stands: the renderer finds it').toBeUndefined();
+    for (const t of c.frame().tracers.filter((t) => seen.has(t.launchTick))) {
+      expect(t.towerId).toBe('basic');
+    }
+  });
+
+  it('marks every targeted impact on a flyer that lives through it with that flyer’s look, end to end (C2)', () => {
+    const c = createController(1);
+    c.start();
+    c.armTower('antiair');
+    c.aimAt(13, 8); // two rows above the flyers' straight line along row 11
+    expect(c.confirm()).toBe(true);
+    for (let i = 0; i < 6; i++) {
+      expect(c.callWaveEarly()).toBe(true); // wave 6 is the flyers'
+      tick(c);
+    }
+    let onFlyer = 0;
+    let onWalker = 0;
+    for (let n = 0; n < 3000 && !c.isTerminal(); n++) {
+      tick(c);
+      c.drainFeedback();
+      const at = new Map(c.frame().curVm.creeps.map((cr) => [`${cr.x},${cr.y}`, cr] as const));
+      for (const s of c.drainSparks()) {
+        if (s.radiusFp !== 0) continue;
+        const struck = at.get(`${s.x},${s.y}`);
+        if (struck === undefined) continue; // a kill: `combat-events.test.ts` matches those
+        if (struck.domain === 'air') {
+          onFlyer++;
+          expect(s.flyer).toEqual({ creepId: struck.creepId, boss: struck.boss });
+        } else {
+          onWalker++;
+          expect(s.flyer).toBeUndefined();
+        }
+      }
+    }
+    expect(onFlyer, 'the premise: shots struck flyers that lived').toBeGreaterThan(0);
+    expect(onWalker).toBe(0); // antiair fires at flyers only
   });
 });
