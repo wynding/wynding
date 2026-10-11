@@ -202,25 +202,48 @@ export interface CreepFrameKeys {
   readonly shadow: string;
 }
 
-/** Each creep id's frame keys, in four slots: [ground, air] × [not boss, boss]. */
-const KEYS_BY_CREEP = new Map<string, (CreepFrameKeys | undefined)[]>();
+/** A value per creep look, kept by creep id in four slots — [ground, air] × [not boss, boss] —
+ *  each set the first time its look is asked for. The one layout both caches of a creep's
+ *  frames use: its frame keys (`creepFrameKeys`, below) and, per atlas, their anchors
+ *  (`placement.ts`). */
+export class CreepLookSlots<T> {
+  private readonly byId = new Map<string, (T | undefined)[]>();
+
+  private static slot(boss: boolean, airborne: boolean): number {
+    return (boss ? 2 : 0) + (airborne ? 1 : 0);
+  }
+
+  /** The value kept for `creepId` with the boss role or not, in the air or not, if any. */
+  get(creepId: string, boss: boolean, airborne: boolean): T | undefined {
+    return this.byId.get(creepId)?.[CreepLookSlots.slot(boss, airborne)];
+  }
+
+  /** Keep `value` for `creepId` with the boss role or not, in the air or not; returns it. */
+  set(creepId: string, boss: boolean, airborne: boolean, value: T): T {
+    let slots = this.byId.get(creepId);
+    if (slots === undefined) {
+      slots = [undefined, undefined, undefined, undefined];
+      this.byId.set(creepId, slots);
+    }
+    slots[CreepLookSlots.slot(boss, airborne)] = value;
+    return value;
+  }
+}
+
+/** Each creep id's frame keys, one per look. */
+const KEYS_BY_CREEP = new CreepLookSlots<CreepFrameKeys>();
 
 /** The frames a creep of `creepId` shows, with the boss role or not, in the air or not —
  *  built once per id, role and domain (see the header). */
 export function creepFrameKeys(creepId: string, boss: boolean, airborne: boolean): CreepFrameKeys {
-  let slots = KEYS_BY_CREEP.get(creepId);
-  if (slots === undefined) {
-    slots = [undefined, undefined, undefined, undefined];
-    KEYS_BY_CREEP.set(creepId, slots);
-  }
-  const slot = (boss ? 2 : 0) + (airborne ? 1 : 0);
-  let keys = slots[slot];
-  if (keys === undefined) {
-    const look = creepLookFor(creepId, boss, airborne);
-    keys = { look, body: creepBodyKey(look), shadow: creepShadowKey(look.family, airborne) };
-    slots[slot] = keys;
-  }
-  return keys;
+  const kept = KEYS_BY_CREEP.get(creepId, boss, airborne);
+  if (kept !== undefined) return kept;
+  const look = creepLookFor(creepId, boss, airborne);
+  return KEYS_BY_CREEP.set(creepId, boss, airborne, {
+    look,
+    body: creepBodyKey(look),
+    shadow: creepShadowKey(look.family, airborne),
+  });
 }
 
 /** The body frame a creep of `creepId` shows. */

@@ -20,6 +20,7 @@
 import { visibleTowers, type CreepCueInput } from './board-draw';
 import {
   creepFrameKeys,
+  CreepLookSlots,
   groundFrameKey,
   headFrameKey,
   pendingFrameKey,
@@ -27,7 +28,7 @@ import {
   SCORCH_FRAME_KEY,
   towerHasPlate,
 } from './art-frames';
-import { creepBaseRadius, creepLiftPx, CREEP_SIZE } from './creep-art';
+import { creepLiftPx, creepRadius } from './creep-art';
 import type { CreepFamily } from './creep-paint';
 import { snapToDevicePx } from './device-px';
 import type { Projection } from './projection';
@@ -239,24 +240,24 @@ export type CreepPlacementInput = Pick<
 >;
 
 /** What placement needs of one creep look in one atlas: its two frames and their anchors,
- *  and its family's size step. */
+ *  and its family. */
 interface CreepLookPlacement {
   readonly body: string;
   readonly bodyAnchor: FrameAnchor;
   readonly shadow: string;
   readonly shadowAnchor: FrameAnchor;
   readonly family: CreepFamily;
-  readonly size: number;
 }
 
-/** Per atlas, per creep id, four slots — [ground, air] × [not boss, boss] — each filled the
- *  first time a frame asks for it and kept for as long as the atlas lives: a rebake brings a
- *  new frame map, and with it a new table. So a creep's look, its frame keys and their
- *  anchors are found once per look, never once per creep per frame (#181: R3's profile found
- *  a fifth of the board frame's JavaScript going to frame keys built and looked up afresh). */
+/** Per atlas, a creep id's looks in the slots its frame keys are kept in (`CreepLookSlots`),
+ *  each filled the first time a frame asks for it and kept for as long as the atlas lives: a
+ *  rebake brings a new frame map, and with it a new table. So a creep's look, its frame keys
+ *  and their anchors are found once per look, never once per creep per frame (#181: R3's
+ *  profile found a fifth of the board frame's JavaScript going to frame keys built and looked
+ *  up afresh). */
 const CREEP_TABLES = new WeakMap<
   ReadonlyMap<string, FrameAnchor>,
-  Map<string, (CreepLookPlacement | undefined)[]>
+  CreepLookSlots<CreepLookPlacement>
 >();
 
 function creepLookPlacement(
@@ -267,29 +268,19 @@ function creepLookPlacement(
 ): CreepLookPlacement {
   let table = CREEP_TABLES.get(frames);
   if (table === undefined) {
-    table = new Map();
+    table = new CreepLookSlots();
     CREEP_TABLES.set(frames, table);
   }
-  let slots = table.get(creepId);
-  if (slots === undefined) {
-    slots = [undefined, undefined, undefined, undefined];
-    table.set(creepId, slots);
-  }
-  const slot = (boss ? 2 : 0) + (airborne ? 1 : 0);
-  let look = slots[slot];
-  if (look === undefined) {
-    const keys = creepFrameKeys(creepId, boss, airborne);
-    look = {
-      body: keys.body,
-      bodyAnchor: anchorOf(frames, keys.body),
-      shadow: keys.shadow,
-      shadowAnchor: anchorOf(frames, keys.shadow),
-      family: keys.look.family,
-      size: CREEP_SIZE[keys.look.family],
-    };
-    slots[slot] = look;
-  }
-  return look;
+  const kept = table.get(creepId, boss, airborne);
+  if (kept !== undefined) return kept;
+  const keys = creepFrameKeys(creepId, boss, airborne);
+  return table.set(creepId, boss, airborne, {
+    body: keys.body,
+    bodyAnchor: anchorOf(frames, keys.body),
+    shadow: keys.shadow,
+    shadowAnchor: anchorOf(frames, keys.shadow),
+    family: keys.look.family,
+  });
 }
 
 /** The canvas's top edge, world CSS px: no flyer's body is drawn above it. */
@@ -322,7 +313,7 @@ export function placeCreeps(
   frames: ReadonlyMap<string, FrameAnchor>,
 ): CreepPlacements {
   const dpr = projection.dpr;
-  const base = creepBaseRadius(projection.cellPx);
+  const cellPx = projection.cellPx;
   const shadows: SpritePlacement[] = [];
   const ground: CreepPlacement[] = [];
   const air: CreepPlacement[] = [];
@@ -337,7 +328,7 @@ export function placeCreeps(
       x: x - look.shadowAnchor.anchorX,
       y: y - look.shadowAnchor.anchorY,
     });
-    const r = base * look.size;
+    const r = creepRadius(cellPx, look.family);
     const top = y - look.bodyAnchor.anchorY;
     // Whole device pixels (the body stays on the texel grid); the epsilon keeps a float's
     // error on an exact edge from costing a pixel.
