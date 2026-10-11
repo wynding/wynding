@@ -400,8 +400,10 @@ describe('overlay — the wave preview surface (M2-S2, PLAN.md P3 steps 16-17/19
     boss: false,
   };
 
+  // A count's text carries a zero-width space beside its number: Compact's column may wrap the
+  // count there and nowhere else (#181, `countText`).
   it('omits every baseline-valued clause — an all-default creep glances as count and name alone', () => {
-    expect(glanceOf(baseline)).toEqual({ count: '×10', name: 'Creep', clause: null });
+    expect(glanceOf(baseline)).toEqual({ count: '×\u200b10', name: 'Creep', clause: null });
   });
 
   it.each([
@@ -414,7 +416,7 @@ describe('overlay — the wave preview surface (M2-S2, PLAN.md P3 steps 16-17/19
     'surfaces %s when it deviates — and that clause ALONE, so the deviation is what is read',
     (_axis, over, expected) => {
       expect(glanceOf({ ...baseline, ...over })).toEqual({
-        count: '×10',
+        count: '×\u200b10',
         name: 'Creep',
         clause: expected,
       });
@@ -433,7 +435,7 @@ describe('overlay — the wave preview surface (M2-S2, PLAN.md P3 steps 16-17/19
         boss: true,
       }),
     ).toEqual({
-      count: '×1',
+      count: '×\u200b1',
       name: 'Boss',
       clause: 'boss · air · armor −8 direct · leak cost 3 · immune to slow, stun',
     });
@@ -468,7 +470,7 @@ describe('overlay — the wave preview surface (M2-S2, PLAN.md P3 steps 16-17/19
     const sentence =
       '10 × Creep — air, armor 4 (subtracted from each direct hit; damage over time ignores it), leak cost 1, no immunities';
     expect(full.textContent).toBe(sentence);
-    expect(glance.textContent).toBe('×10Creepair · armor −4 direct'); // icon, count, name, clause
+    expect(glance.textContent).toBe('×\u200b10Creepair · armor −4 direct'); // icon, count, name, clause
     // #181: the same sentence is the visible row's tooltip — on the aria-hidden glance, never
     // the row, where a `title` would become an accessible name or description and have
     // assistive tech read the sentence a second time.
@@ -3893,20 +3895,39 @@ describe('overlay — the wave strip (#181 L1)', () => {
         'wy-preview-count',
       ]);
     }
-    expect(glances.map((g) => g.textContent)).toEqual(['×8', '×6']);
+    expect(glances.map((g) => g.textContent)).toEqual(['×\u200b8', '×\u200b6']);
     // The deviation is still in each row's full sentence — the strip drops nothing for AT.
     expect(shell.preview.list.querySelectorAll('.wy-preview-full')[1]!.textContent).toContain(
       'armor 2',
     );
   });
 
+  it('a count carries a zero-width space beside its number — "×", the space, "16" — the one place Compact’s column may wrap it, never inside the number, in ONE text node (#181)', () => {
+    const { overlay, shell } = setup();
+    show(overlay, [entry({ count: 16 }), entry({ creepId: 'fast', count: 6 })]);
+    const counts = [...shell.preview.list.querySelectorAll('.wy-preview-count')];
+    // One node: a `<wbr>` would split it in two, which Chromium measures 1/64px wider than one,
+    // moving what follows the count on Standard's one-line strip.
+    expect(counts.map((c) => [...c.childNodes].map((n) => n.nodeName))).toEqual([
+      ['#text'],
+      ['#text'],
+    ]);
+    expect(counts.map((c) => c.textContent)).toEqual(['×\u200b16', '×\u200b6']);
+    // Without the space, the catalog's message exactly.
+    expect(counts.map((c) => c.textContent!.replaceAll('\u200b', ''))).toEqual(['×16', '×6']);
+  });
+
   it("the locale sentinel's glance text is exactly what the glance writes — an unchanged strip is never rebuilt, so a scrolled strip keeps its place", () => {
     // `previewEntryGlanceText` and `buildEntryGlance` share `glanceParts`; if they drift, the
     // memo guard sees a mismatch on every HUD refresh and rebuilds the list.
     const shapes: ReadonlyArray<readonly [string, readonly PreviewEntryVM[], string]> = [
-      ['a single entry with notes', [entry({ armor: 2 })], '×10Creeparmor −2 direct'],
-      ['a single entry without notes', [entry()], '×10Creep'],
-      ['a multi-entry wave', [entry({ count: 8 }), entry({ creepId: 'fast', count: 6 })], '×8'],
+      ['a single entry with notes', [entry({ armor: 2 })], '×\u200b10Creeparmor −2 direct'],
+      ['a single entry without notes', [entry()], '×\u200b10Creep'],
+      [
+        'a multi-entry wave',
+        [entry({ count: 8 }), entry({ creepId: 'fast', count: 6 })],
+        '×\u200b8',
+      ],
     ];
     for (const [label, entries, glanceText] of shapes) {
       const { overlay, shell } = setup();

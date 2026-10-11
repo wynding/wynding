@@ -3239,8 +3239,9 @@ a.wy-home:focus-visible {
   }
 
   /* The wave strip's Compact form (#181 L1): an in-flow block in the column — the title, then
-     one icon + count row per entry. The column is too narrow for names, so the single-entry
-     detail never renders here; each row's full sentence is still its accessible text. */
+     one icon + count row per entry, which wraps where the column is too narrow (below). The
+     column is too narrow for names, so the single-entry detail never renders here; each row's
+     full sentence is still its accessible text. */
   .wy-wave-preview-list {
     display: flex;
     flex-direction: column;
@@ -3251,14 +3252,35 @@ a.wy-home:focus-visible {
   /* An air entry's wings reach 0.1287em past the icon's box on each side (the armored flyer's,
      the widest that ships), and the column's scrollport has no gap to give them on the left:
      this margin does. 0.15em, not the reach, for a little room. The glance gives the same
-     0.15em back from its gap, so every count stays where it was: at 568×320 the column has
-     under a pixel to spare for one, and the right wing still clears it. */
+     0.15em back from its gap, so every count stays where it was: beside its icon, where at
+     568×320 the column has under a pixel to spare for one on macOS's fonts and the right wing
+     still clears it, or on the line under it (below), which the margin does not reach. */
   .wy-wave-preview-list .wy-creep-icon {
     margin-inline-start: 0.15em;
   }
 
+  /* A ROW WRAPS, ICON ABOVE COUNT (#181), as the chips' glances do (above) and for their reason:
+     the column does not grow with the text, so a one-line row ran its count past the column's
+     edge, where the scrollport cut it — on macOS's fonts from 105% text at 568×320 and from 120%
+     at 658×320, and at 568×320 from 100% on CI's Linux font. Wrapped, the count starts the line
+     under its icon, at the column's edge (the wings' margin is the icon's alone), and the two
+     lines sit tight, as the chips' do; the gap is the wings' (above). Where even the count is
+     wider than the column (on macOS's fonts 568×320 at 175–200% text and 658×320 at 200%, and
+     from smaller sizes on CI's), it wraps once more, at the zero-width space beside its number
+     (`overlay.ts`), never inside it: the × above the digits. To do that it may narrow (it is
+     `flex: none` in the base rule), and it must not keep the glance's `nowrap`, under which
+     neither WebKit nor Chromium breaks at that space. The DOM, the reading order and each row's
+     accessible text are unchanged. Taller rows change no rule of the cut: `hud-cut.ts` measures
+     the real boxes. */
   .wy-wave-preview-list .wy-preview-glance {
+    flex-wrap: wrap;
     gap: 0.15em;
+    row-gap: 0;
+  }
+
+  .wy-wave-preview-list .wy-preview-count {
+    flex-shrink: 1;
+    white-space: normal;
   }
 
   .wy-preview-detail {

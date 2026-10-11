@@ -94,11 +94,12 @@ describe('syncHudCut (#181 QC round 2)', () => {
   /** A Compact chips column whose border box starts at y = 40 and is `room` px tall — or less,
    *  where the cut bounds it, as the stylesheet makes it. Its chips end `bottoms` px into its
    *  content (below the padding box's top), each 20px tall; `strip` adds the wave strip's title
-   *  and lines the same way. Its scroll position clamps to its range like a browser's. */
+   *  and lines the same way, each line 12px tall or as tall as `[bottom, height]` gives it (a row
+   *  wrapped onto two lines, #181). Its scroll position clamps to its range like a browser's. */
   function column(opts: {
     room: number;
     bottoms: number[];
-    strip?: { title: number; lines: number[] };
+    strip?: { title: number; lines: (number | readonly [number, number])[] };
     zeroBox?: number[];
     boxSizing?: 'content-box' | 'border-box';
     pad?: [number, number];
@@ -114,7 +115,8 @@ describe('syncHudCut (#181 QC round 2)', () => {
     hud.style.paddingTop = `${padTop}px`;
     hud.style.paddingBottom = `${padBottom}px`;
     document.body.append(hud);
-    const all = [...opts.bottoms, ...(opts.strip ? [opts.strip.title, ...opts.strip.lines] : [])];
+    const lineBottoms = (opts.strip?.lines ?? []).map((l) => (typeof l === 'number' ? l : l[0]));
+    const all = [...opts.bottoms, ...(opts.strip ? [opts.strip.title, ...lineBottoms] : [])];
     const contentEnd = Math.max(0, ...all) + padBottom;
     /** The padding box's visible height: the room, or the cut where it bounds it. */
     const visible = (): number => {
@@ -148,10 +150,10 @@ describe('syncHudCut (#181 QC round 2)', () => {
       title.className = 'wy-wave-preview-title';
       const list = document.createElement('ul');
       list.className = 'wy-wave-preview-list';
-      for (const bottom of opts.strip.lines) {
+      for (const line of opts.strip.lines) {
         const li = document.createElement('li');
         li.className = 'wy-preview-entry';
-        list.append(item(li, bottom, 12));
+        list.append(typeof line === 'number' ? item(li, line, 12) : item(li, line[0], line[1]));
       }
       strip.append(item(title, opts.strip.title, 14), list);
       hud.append(strip);
@@ -182,6 +184,32 @@ describe('syncHudCut (#181 QC round 2)', () => {
     });
     syncHudCut(hud, true);
     expect(cut(hud)).toBe('125px');
+  });
+
+  it('a strip row wrapped onto two lines is one item: where the room holds its icon’s line but not its count’s, the column stops above the row, never after its icon (#181)', () => {
+    // The row runs 86–116: its icon's line ends at 100, inside the room; its count's does not.
+    const hud = column({
+      room: 100,
+      bottoms: [20, 45, 70],
+      strip: { title: 84, lines: [[116, 30]] },
+    });
+    syncHudCut(hud, true);
+    expect(cut(hud)).toBe('84px');
+    // Held whole, it is shown whole.
+    document.body.replaceChildren();
+    const whole = column({
+      room: 120,
+      bottoms: [20, 45, 70],
+      strip: {
+        title: 84,
+        lines: [
+          [116, 30],
+          [146, 30],
+        ],
+      },
+    });
+    syncHudCut(whole, true);
+    expect(cut(whole)).toBe('116px');
   });
 
   it('skips an item with no box — a hidden chip', () => {

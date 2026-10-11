@@ -546,7 +546,11 @@ async function compactColumn(page: Page): Promise<{
     hud.scrollTop = 0; // at rest
     const h = hud.getBoundingClientRect();
     const top = h.top + hud.clientTop;
-    const bottom = top + hud.clientHeight;
+    // The visible bottom edge to the fraction, as `hud-cut.ts` measures its room. `clientHeight`
+    // rounds to a whole px, which put this edge up to half a pixel high: added to the half pixel
+    // an item may overhang the room and still count as whole, that read as an item cut by the
+    // edge — the strip's title at 568×450 and 115% text on CI's font (#181).
+    const bottom = h.bottom - parseFloat(getComputedStyle(hud).borderBottomWidth);
     const items = [
       ...hud.querySelectorAll<HTMLElement>(
         ':scope > .wy-chip, :scope > .wy-wave-preview .wy-wave-preview-title, :scope > .wy-wave-preview .wy-preview-entry',
@@ -989,29 +993,63 @@ interface StripEntry {
   readonly text: string;
   /** Its icon's left edge. */
   readonly iconLeft: number;
+  /** Its icon's other edges, and whether it is painted: a box, neither hidden nor undisplayed. */
+  readonly icon: {
+    readonly right: number;
+    readonly top: number;
+    readonly bottom: number;
+    readonly painted: boolean;
+  };
   /** Its count's painted text: how many boxes it has — the premise of every check on it, since
-   *  the edges of no box at all are infinities that pass any bound — and its left and right
-   *  edges (`NaN` without a box). */
-  readonly count: { readonly boxes: number; readonly left: number; readonly right: number };
+   *  the edges of no box at all are infinities that pass any bound — and their extent (`NaN`
+   *  without a box), the lines they take, and their widths summed: the count's width on one
+   *  line (#181: a row wraps, and so may a count). */
+  readonly count: {
+    readonly boxes: number;
+    readonly left: number;
+    readonly right: number;
+    readonly top: number;
+    readonly bottom: number;
+    readonly lines: number;
+    readonly width: number;
+  };
+  /** The lines each run of digits in its count takes: one apiece where no number is split. */
+  readonly digitLines: readonly number[];
   /** Each of an air entry's wings: its painted extent — its corners, grown by half its
    *  round-joined ink outline — and what clips it, the icon's own `svg` included. */
   readonly wings: readonly {
     readonly left: number;
     readonly right: number;
+    readonly top: number;
+    readonly bottom: number;
     readonly clipLeft: number;
     readonly clipRight: number;
   }[];
 }
 
+/** Where one entry's count is drawn, measured again under `measureStrip`'s `restyle`. */
+interface RestyledEntry {
+  readonly iconLeft: number;
+  readonly countLeft: number;
+  readonly countRight: number;
+  readonly countTop: number;
+}
+
 /** Every entry of the strip, measured where it is drawn (`StripEntry`) — the ONE in-page measure
  *  every check below on the strip's wings and counts reads, so none of them can take a wing's
- *  extent or a clip differently from another. Given `restyle`, a stylesheet, it then measures
- *  each entry's icon and count again with that stylesheet added — in the same task, so nothing
- *  else can change between the two — and takes the stylesheet off again. */
+ *  extent or a clip differently from another — and the column it sits in: the chips
+ *  scrollport's content box, whose clip cuts whatever runs past it. Given `restyle`, a
+ *  stylesheet, it then measures each entry's icon and count again with that stylesheet added —
+ *  in the same task, so nothing else can change between the two — and takes the stylesheet off
+ *  again. */
 async function measureStrip(
   page: Page,
   restyle?: string,
-): Promise<{ entries: StripEntry[]; restyled: { iconLeft: number; countRight: number }[] }> {
+): Promise<{
+  column: { left: number; right: number };
+  entries: StripEntry[];
+  restyled: RestyledEntry[];
+}> {
   return page.evaluate((restyle) => {
     /** What clips `from` across: the padding box of each of `from` and its ancestors whose
      *  overflow is not `visible`, intersected — for a wing, from its icon's `svg` up. */
@@ -1026,11 +1064,28 @@ async function measureStrip(
       }
       return { left, right };
     };
+    const nonEmpty = (rects: DOMRectList): DOMRect[] => [...rects].filter((r) => r.width > 0);
     const textBoxes = (el: Element): DOMRect[] => {
       const range = document.createRange();
       range.selectNodeContents(el);
-      return [...range.getClientRects()].filter((r) => r.width > 0);
+      return nonEmpty(range.getClientRects());
     };
+    /** The boxes of `el`'s text from character `from` to `to`, across its text nodes. */
+    const runBoxes = (el: Element, from: number, to: number): DOMRect[] => {
+      const range = document.createRange();
+      const walker = document.createTreeWalker(el, NodeFilter.SHOW_TEXT);
+      let at = 0;
+      for (let n = walker.nextNode(); n; n = walker.nextNode()) {
+        const end = at + (n.textContent ?? '').length;
+        if (from >= at && from < end) range.setStart(n, from - at);
+        if (to > at && to <= end) range.setEnd(n, to - at);
+        at = end;
+      }
+      return nonEmpty(range.getClientRects());
+    };
+    const lines = (boxes: DOMRect[]): number => new Set(boxes.map((r) => Math.round(r.top))).size;
+    const extent = (boxes: DOMRect[], edge: (r: DOMRect) => number, pick: typeof Math.min) =>
+      boxes.length > 0 ? pick(...boxes.map(edge)) : NaN;
     const rows = [...document.querySelectorAll('.wy-wave-preview li')].map((li) => ({
       icon: li.querySelector('svg.wy-creep-icon')!,
       count: li.querySelector('.wy-preview-count')!,
@@ -1038,33 +1093,60 @@ async function measureStrip(
     }));
     const entries = rows.map(({ icon, count, wings }, entry) => {
       const boxes = textBoxes(count);
+      const iconBox = icon.getBoundingClientRect();
+      const shown = getComputedStyle(icon);
+      const text = count.textContent ?? '';
       return {
         entry,
-        text: count.textContent ?? '',
-        iconLeft: icon.getBoundingClientRect().left,
+        text,
+        iconLeft: iconBox.left,
+        icon: {
+          right: iconBox.right,
+          top: iconBox.top,
+          bottom: iconBox.bottom,
+          painted:
+            iconBox.width > 0 &&
+            iconBox.height > 0 &&
+            shown.display !== 'none' &&
+            shown.visibility === 'visible',
+        },
         count: {
           boxes: boxes.length,
-          left: boxes.length > 0 ? Math.min(...boxes.map((r) => r.left)) : NaN,
-          right: boxes.length > 0 ? Math.max(...boxes.map((r) => r.right)) : NaN,
+          left: extent(boxes, (r) => r.left, Math.min),
+          right: extent(boxes, (r) => r.right, Math.max),
+          top: extent(boxes, (r) => r.top, Math.min),
+          bottom: extent(boxes, (r) => r.bottom, Math.max),
+          lines: lines(boxes),
+          width: boxes.reduce((sum, r) => sum + r.width, 0),
         },
+        digitLines: [...text.matchAll(/\d+/g)].map((m) =>
+          lines(runBoxes(count, m.index, m.index + m[0].length)),
+        ),
         wings: wings.map((wing) => {
           const m = wing.getScreenCTM()!;
           const half = (parseFloat(getComputedStyle(wing).strokeWidth) * Math.hypot(m.a, m.b)) / 2;
-          const xs = Array.from({ length: wing.points.numberOfItems }, (_, i) => {
+          const corners = Array.from({ length: wing.points.numberOfItems }, (_, i) => {
             const p = wing.points.getItem(i);
-            return m.a * p.x + m.c * p.y + m.e;
+            return { x: m.a * p.x + m.c * p.y + m.e, y: m.b * p.x + m.d * p.y + m.f };
           });
+          const xs = corners.map((c) => c.x);
+          const ys = corners.map((c) => c.y);
           const clip = clipOf(wing.ownerSVGElement!);
           return {
             left: Math.min(...xs) - half,
             right: Math.max(...xs) + half,
+            top: Math.min(...ys) - half,
+            bottom: Math.max(...ys) + half,
             clipLeft: clip.left,
             clipRight: clip.right,
           };
         }),
       };
     });
-    if (restyle === undefined) return { entries, restyled: [] };
+    const hud = document.querySelector<HTMLElement>('.wy-hud')!;
+    const columnLeft = hud.getBoundingClientRect().left + hud.clientLeft;
+    const column = { left: columnLeft, right: columnLeft + hud.clientWidth };
+    if (restyle === undefined) return { column, entries, restyled: [] };
     const style = document.createElement('style');
     style.textContent = restyle;
     document.head.append(style);
@@ -1072,11 +1154,13 @@ async function measureStrip(
       const boxes = textBoxes(count);
       return {
         iconLeft: icon.getBoundingClientRect().left,
-        countRight: boxes.length > 0 ? Math.max(...boxes.map((r) => r.right)) : NaN,
+        countLeft: extent(boxes, (r) => r.left, Math.min),
+        countRight: extent(boxes, (r) => r.right, Math.max),
+        countTop: extent(boxes, (r) => r.top, Math.min),
       };
     });
     style.remove();
-    return { entries, restyled };
+    return { column, entries, restyled };
   }, restyle);
 }
 
@@ -1191,7 +1275,10 @@ async function setTextSize(page: Page, percent: number): Promise<void> {
 /** The strip WITHOUT R4's two Compact rules (`ui.css`, the icon's `margin-inline-start` and the
  *  glance's `gap`), as main draws it: main has no Compact rule for either, so the icon takes no
  *  margin and the glance the gap of its base rule. That gap is read off a glance outside the
- *  strip, where only the base rule reaches it, so this baseline follows the base rule. */
+ *  strip, where only the base rule reaches it, so this baseline follows the base rule. It sets
+ *  the COLUMN gap alone — the gap beside the icon, the one R4 spends: since #181 a row may wrap,
+ *  and the gap between its lines is the wrap's (`row-gap: 0`), which `gap` would set as well,
+ *  moving every wrapped count down for a reason that is not the wings'. */
 async function withoutWingRoom(page: Page): Promise<string> {
   const gapEm = await page.evaluate(() => {
     const probe = document.createElement('span');
@@ -1205,7 +1292,7 @@ async function withoutWingRoom(page: Page): Promise<string> {
   expect(gapEm, 'the premise: the glance’s base gap, read off the page').toBeGreaterThan(0);
   return (
     `.wy-wave-preview-list .wy-creep-icon { margin-inline-start: 0 !important; }\n` +
-    `.wy-wave-preview-list .wy-preview-glance { gap: ${gapEm}em !important; }`
+    `.wy-wave-preview-list .wy-preview-glance { column-gap: ${gapEm}em !important; }`
   );
 }
 
@@ -1214,9 +1301,13 @@ test('Compact: the room the wings take moves no count, and no wing runs onto one
 }) => {
   // R4 gives the icon a margin for its left wing and takes the same length back from the gap
   // after it, so each count stays exactly where main draws it. That is what this pins, as a
-  // difference: each count's right edge with R4's two rules, and again without them, in the
-  // same layout. Whether a count fits the column at all is not R4's: at 568×320 a count already
-  // runs past it on CI's font (the checklist's Compact residual), and on macOS's from 105% text.
+  // difference: each count's place with R4's two rules, and again without them, in the same
+  // layout. Since #181 a row too narrow for its icon and count wraps, the count on the line
+  // under its icon, so the difference is taken on both axes: room that pushed a count onto the
+  // next line would move it on both. And a wing runs onto a count only where the two meet on
+  // the page — beside the icon, the old check exactly; a count on the line under it sits below
+  // the wings, whatever their reach across. Both forms are measured (the premises at the end).
+  // Whether a count fits the column at all is the wrap's, pinned by the per-phone tests below.
   test.setTimeout(360_000); // ten previews, two windows and four text sizes; generous for slow cores
   await gotoAt(page, PHONE);
   expect(await page.evaluate((q) => matchMedia(q).matches, COMPACT_QUERY)).toBe(true);
@@ -1225,6 +1316,9 @@ test('Compact: the room the wings take moves no count, and no wing runs onto one
   /** The largest shift, in px, by window and text size. */
   const worst = new Map<string, number>();
   let measured = 0;
+  /** Counts measured beside their icon, and on the line under it. */
+  let beside = 0;
+  let under = 0;
   const check = async (wave: string): Promise<void> => {
     for (const size of [PHONE, { width: 568, height: 320 }]) {
       await page.setViewportSize(size);
@@ -1242,17 +1336,31 @@ test('Compact: the room the wings take moves no count, and no wing runs onto one
             e.iconLeft - without.iconLeft,
             `${at}: the premise, R4's margin moves the icon`,
           ).toBeGreaterThan(0.5);
-          const shift = e.count.right - without.countRight;
-          expect(
-            Math.abs(shift),
-            `${at}: the wings' room moved the count ${shift.toFixed(3)}px`,
-          ).toBeLessThanOrEqual(0.05);
-          const wingRight = Math.max(-Infinity, ...e.wings.map((w) => w.right));
-          expect(
-            wingRight - e.count.left,
-            `${at}: a wing ${(wingRight - e.count.left).toFixed(2)}px over the count`,
-          ).toBeLessThanOrEqual(0);
-          worst.set(where, Math.max(worst.get(where) ?? 0, Math.abs(shift)));
+          const shifts = [
+            ['left', e.count.left - without.countLeft],
+            ['right', e.count.right - without.countRight],
+            ['top', e.count.top - without.countTop],
+          ] as const;
+          for (const [edge, shift] of shifts) {
+            expect(
+              Math.abs(shift),
+              `${at}: the wings' room moved the count's ${edge} edge ${shift.toFixed(3)}px`,
+            ).toBeLessThanOrEqual(0.05);
+          }
+          for (const w of e.wings) {
+            const across = Math.min(w.right, e.count.right) - Math.max(w.left, e.count.left);
+            const down = Math.min(w.bottom, e.count.bottom) - Math.max(w.top, e.count.top);
+            expect(
+              down > 0 ? across : 0,
+              `${at}: a wing ${across.toFixed(2)}px over the count`,
+            ).toBeLessThanOrEqual(0);
+          }
+          if (e.count.top >= e.icon.bottom - 0.5) under++;
+          else beside++;
+          worst.set(
+            where,
+            Math.max(worst.get(where) ?? 0, ...shifts.map(([, shift]) => Math.abs(shift))),
+          );
           measured++;
         }
       }
@@ -1279,4 +1387,369 @@ test('Compact: the room the wings take moves no count, and no wing runs onto one
     measured,
     'the premise: every entry of every preview, at both windows and every text size',
   ).toBeGreaterThan(80);
+  // Both forms, so neither half of the difference is vacuous: a count beside its icon, where R4
+  // gives its margin back from the gap (658×320 at 100%), and one under it.
+  expect(beside, 'the premise: a count beside its icon').toBeGreaterThan(0);
+  expect(under, 'the premise: a count on the line under its icon').toBeGreaterThan(0);
+});
+
+// ---- #181: a strip row too narrow for the Compact column wraps, as the chips' glances do ----
+
+/** Each strip row as assistive tech meets it: its text outside `aria-hidden` subtrees — what is
+ *  read — and its glance's `aria-hidden` and the classes of its children, in DOM order. */
+async function stripRowsRead(
+  page: Page,
+): Promise<{ text: string; glanceHidden: string | null; glance: (string | null)[] }[]> {
+  return page.evaluate(() =>
+    [...document.querySelectorAll<HTMLElement>('.wy-wave-preview li')].map((li) => {
+      const walker = document.createTreeWalker(li, NodeFilter.SHOW_TEXT);
+      let text = '';
+      for (let n = walker.nextNode(); n; n = walker.nextNode()) {
+        if (n.parentElement?.closest('[aria-hidden="true"]') === null) text += n.nodeValue ?? '';
+      }
+      const glance = li.querySelector('.wy-preview-glance')!;
+      return {
+        text: text.trim(),
+        glanceHidden: glance.getAttribute('aria-hidden'),
+        glance: [...glance.children].map((c) => c.getAttribute('class')),
+      };
+    }),
+  );
+}
+
+/** What each phase's strip reads aloud: wave 1 before Start, wave 2 once Start claims wave 1. */
+const SPOKEN = {
+  'pre-start': ['10 × Creep — ground, armor 0, leak cost 1, no immunities'],
+  started: ['16 × Swarm Creep — ground, armor 0, leak cost 1, no immunities'],
+} as const;
+
+// The column's track is vw-capped and does not grow with the text, so a one-line row ran its
+// count past the column's edge, where the scrollport cut it: on macOS's fonts from 105% text at
+// 568×320 and from 120% at 658×320, and at 100% at 568×320 on CI's. A row wraps instead, as the
+// chips' glances do: its count on the line under its icon, and where even the count is wider
+// than the column (on macOS's fonts 568×320 at 175–200% and 658×320 at 200%) its × above its
+// digits, at the zero-width space beside its number — never inside it.
+
+/** Every row of one measured strip (`measureStrip`): its icon painted, its icon and count inside
+ *  the column, no number split across lines, and its count with its own icon — after it on its
+ *  line, or on the line under it and above the next entry's icon, so that it never reads as the
+ *  next creep's. A count takes a second line only where one line is too narrow for it. Returns
+ *  how many counts sat under their icon, how many of those had an entry after them, and how many
+ *  counts took two lines: the callers' premises. */
+function expectRowsInColumn(
+  what: string,
+  column: { left: number; right: number },
+  entries: readonly StripEntry[],
+): { under: number; underAboveNext: number; countWrapped: number } {
+  let under = 0;
+  let underAboveNext = 0;
+  let countWrapped = 0;
+  entries.forEach((e, i) => {
+    const at = `${what}: ${e.text}`;
+    expect(e.count.boxes, `${at}: the premise, a painted count`).toBeGreaterThan(0);
+    expect(e.digitLines.length, `${at}: the premise, a number in the count`).toBeGreaterThan(0);
+    expect(e.icon.painted, `${at}: its icon is painted`).toBe(true);
+    for (const [part, left, right] of [
+      ['icon', e.iconLeft, e.icon.right],
+      ['count', e.count.left, e.count.right],
+    ] as const) {
+      expect(left, `${at}: its ${part} starts inside the column`).toBeGreaterThanOrEqual(
+        column.left - 0.5,
+      );
+      expect(right, `${at}: its ${part} ends inside the column`).toBeLessThanOrEqual(
+        column.right + 0.5,
+      );
+    }
+    expect(e.digitLines, `${at}: a number split across lines`).toEqual(e.digitLines.map(() => 1));
+    const next = entries[i + 1];
+    if (e.count.top >= e.icon.bottom - 0.5) {
+      under++;
+      if (next !== undefined) {
+        expect(e.count.bottom, `${at}: above the next entry's icon`).toBeLessThanOrEqual(
+          next.icon.top + 0.5,
+        );
+        underAboveNext++;
+      }
+    } else {
+      expect(e.count.left, `${at}: beside its icon, after it`).toBeGreaterThanOrEqual(
+        e.icon.right - 0.5,
+      );
+      expect(e.count.top, `${at}: beside its icon, on its line`).toBeGreaterThanOrEqual(
+        e.icon.top - 0.5,
+      );
+    }
+    if (e.count.lines > 1) {
+      countWrapped++;
+      expect(
+        e.count.width,
+        `${at}: a count wrapped though it fits the column on one line`,
+      ).toBeGreaterThan(column.right - column.left - 0.5);
+    }
+  });
+  return { under, underAboveNext, countWrapped };
+}
+
+/** The four Compact phones the strip's rows are measured on. */
+const STRIP_PHONES = [
+  PHONE,
+  { width: 568, height: 320 },
+  { width: 740, height: 360 },
+  { width: 900, height: 480 },
+] as const;
+
+// One test per phone, so they run side by side.
+for (const size of STRIP_PHONES) {
+  test(`Compact ${size.width}×${size.height}: every strip row’s icon and count stay inside the column — the count under its icon where the two do not fit side by side, its × above its digits where even it does not — and no number is split, 100–200% text, before and after Start (#181)`, async ({
+    page,
+  }) => {
+    test.setTimeout(240_000); // five page loads, each started, and two audits; generous for slow cores
+    let under = 0;
+    let countWrapped = 0;
+    for (const zoom of [100, 125, 150, 175, 200]) {
+      await gotoAt(page, size);
+      expect(await page.evaluate((q) => matchMedia(q).matches, COMPACT_QUERY)).toBe(true);
+      if (zoom !== 100) await page.addStyleTag({ content: `:root { font-size: ${zoom}% }` });
+      await settle(page);
+      for (const phase of ['pre-start', 'started'] as const) {
+        if (phase === 'started') {
+          await page.getByRole('button', { name: 'Start', exact: true }).click();
+          await expect(page.getByRole('button', { name: 'Call wave' })).toBeVisible();
+          await settle(page);
+        }
+        const what = `${size.width}×${size.height} at ${zoom}%, ${phase}`;
+        const { column, entries } = await measureStrip(page);
+        expect(entries.length, `${what}: the premise, a strip entry`).toBeGreaterThan(0);
+        const checked = expectRowsInColumn(what, column, entries);
+        under += checked.under;
+        countWrapped += checked.countWrapped;
+        if (zoom === 200) {
+          // Presentation only: each row's accessible text is its full sentence, exactly as
+          // before, and its glance — the icon, then the count, in the DOM — is hidden from it.
+          const rows = await stripRowsRead(page);
+          expect(
+            rows.map((r) => r.text),
+            `${what}: the accessible text`,
+          ).toEqual(SPOKEN[phase]);
+          for (const row of rows) {
+            expect(row.glanceHidden, `${what}: the glance is hidden from AT`).toBe('true');
+            expect(row.glance.slice(0, 2), `${what}: the glance's DOM order`).toEqual([
+              'wy-creep-icon',
+              'wy-preview-count',
+            ]);
+          }
+          const audit = await new AxeBuilder({ page }).include('#app').analyze();
+          expect(audit.violations, JSON.stringify(audit.violations, null, 2)).toEqual([]);
+        }
+      }
+    }
+    // The premises: a row wrapped on this phone, and on the 320px-tall ones a count wrapped
+    // beside its number.
+    expect(under, 'the premise: a row wrapped, its count under its icon').toBeGreaterThan(0);
+    if (size.height === 320) {
+      expect(countWrapped, 'the premise: a count wrapped beside its number').toBeGreaterThan(0);
+    }
+  });
+}
+
+test('Compact: in a wave of several creeps each count stays with its own icon — under it and above the next entry’s — at the four phones and 100–200% text (#181)', async ({
+  page,
+}) => {
+  // Waves 1 and 2, which the per-phone tests read, have one entry each, so no wrapped count
+  // there has another entry's icon under it. Wave 9 has four, the last of them airborne.
+  test.setTimeout(240_000); // seven paced calls, then four windows at five text sizes
+  await gotoAt(page, PHONE);
+  expect(await page.evaluate((q) => matchMedia(q).matches, COMPACT_QUERY)).toBe(true);
+  const previewTitle = page.locator('.wy-wave-preview .wy-wave-preview-title');
+  await page.getByRole('button', { name: 'Start', exact: true }).click(); // Start claims wave 1 (#70)
+  await expect(previewTitle).toHaveText('Wave 2 of 10');
+  await page.getByRole('button', { name: 'Pause' }).click();
+  for (let waveNumber = 2; waveNumber <= 8; waveNumber++) {
+    await callWavePaced(page, titleAfterCall(waveNumber, 10));
+  }
+  await expect(previewTitle).toHaveText('Wave 9 of 10');
+  let underAboveNext = 0;
+  for (const size of STRIP_PHONES) {
+    await page.setViewportSize(size);
+    for (const percent of [100, 125, 150, 175, 200]) {
+      await setTextSize(page, percent);
+      await settle(page);
+      const what = `wave 9, ${size.width}×${size.height} at ${percent}%`;
+      expect(
+        await page.evaluate((q) => matchMedia(q).matches, COMPACT_QUERY),
+        `${what}: Compact`,
+      ).toBe(true);
+      const { column, entries } = await measureStrip(page);
+      expect(entries.length, `${what}: the premise, several entries`).toBeGreaterThan(1);
+      underAboveNext += expectRowsInColumn(what, column, entries).underAboveNext;
+    }
+    await setTextSize(page, 100);
+  }
+  expect(
+    underAboveNext,
+    'the premise: a count under its icon with another entry after it',
+  ).toBeGreaterThan(0);
+});
+
+/** The strip's rows against the chips column's bottom edge, at rest: each row's box, and whether
+ *  it is wrapped — its count on the line under its icon. */
+async function stripRowsAgainstEdge(
+  page: Page,
+): Promise<{ edge: number; rows: { top: number; bottom: number; wrapped: boolean }[] }> {
+  return page.evaluate(() => {
+    const hud = document.querySelector<HTMLElement>('.wy-hud')!;
+    hud.scrollTop = 0; // at rest
+    // To the fraction, as `compactColumn` takes it.
+    const edge =
+      hud.getBoundingClientRect().bottom - parseFloat(getComputedStyle(hud).borderBottomWidth);
+    const rows = [
+      ...hud.querySelectorAll<HTMLElement>(':scope > .wy-wave-preview .wy-preview-entry'),
+    ].map((li) => {
+      const box = li.getBoundingClientRect();
+      const icon = li.querySelector('svg.wy-creep-icon')!.getBoundingClientRect();
+      const range = document.createRange();
+      range.selectNodeContents(li.querySelector('.wy-preview-count')!);
+      const tops = [...range.getClientRects()].filter((r) => r.width > 0).map((r) => r.top);
+      return { top: box.top, bottom: box.bottom, wrapped: Math.min(...tops) >= icon.bottom - 0.5 };
+    });
+    return { edge, rows };
+  });
+}
+
+test('Compact: a wrapped strip row is one item to the cut — at rest the column shows it whole or leaves it wholly below its edge, never its icon without its count (#181)', async ({
+  page,
+}) => {
+  // A wrapped row is two lines tall, and `hud-cut.ts` stops the column at the last WHOLE item,
+  // so a row the room cannot hold whole is left out whole. On the four phones above, the strip
+  // sits below the column's room at rest; these taller Compact windows bring it into the room,
+  // and the text size is walked until a wrapped row is shown whole at rest and one is run through
+  // by the room's edge (the premises at the end).
+  test.setTimeout(240_000); // four windows, each started, sixteen text sizes; generous for slow cores
+  let shownWhole = 0;
+  let leftBelow = 0;
+  for (const size of [
+    { width: 568, height: 500 },
+    { width: 640, height: 500 },
+    { width: 600, height: 480 },
+    { width: 568, height: 450 },
+  ]) {
+    await gotoAt(page, size);
+    expect(await page.evaluate((q) => matchMedia(q).matches, COMPACT_QUERY)).toBe(true);
+    for (const phase of ['pre-start', 'started'] as const) {
+      if (phase === 'started') {
+        await setTextSize(page, 100);
+        await settle(page);
+        await page.getByRole('button', { name: 'Start', exact: true }).click();
+        await expect(page.getByRole('button', { name: 'Call wave' })).toBeVisible();
+        // Paused: the walk below reads one wave's strip, and no run ends under it.
+        await page.getByRole('button', { name: 'Pause' }).click();
+      }
+      for (const percent of [100, 105, 110, 115, 120, 125, 135, 150]) {
+        await setTextSize(page, percent);
+        await settle(page);
+        const what = `${size.width}×${size.height} at ${percent}%, ${phase}`;
+        const rest = await compactColumn(page);
+        expect(rest.shownWhole, `${what}: the premise, an item shown whole`).toBeGreaterThan(0);
+        expect(rest.straddling, `${what}: no item cut by the column's edge at rest`).toEqual([]);
+        expect(rest.straddlingLines, `${what}: no line cut by the column's edge at rest`).toEqual(
+          [],
+        );
+        const atRest = await stripRowsAgainstEdge(page);
+        shownWhole += atRest.rows.filter((r) => r.wrapped && r.bottom <= atRest.edge + 0.5).length;
+        // Lifted, the room's edge falls where the column's room ends: a wrapped row it runs
+        // through must be left wholly below the cut at rest.
+        await page.evaluate(() =>
+          document.querySelector<HTMLElement>('.wy-hud')!.style.removeProperty('--wy-hud-cut'),
+        );
+        await settle(page);
+        const lifted = await stripRowsAgainstEdge(page);
+        lifted.rows.forEach((r, i) => {
+          if (!r.wrapped || r.top >= lifted.edge - 0.5 || r.bottom <= lifted.edge + 0.5) return;
+          expect(
+            atRest.rows[i]!.top,
+            `${what}: a wrapped row the room's edge runs through is left wholly below the cut`,
+          ).toBeGreaterThanOrEqual(atRest.edge - 0.5);
+          leftBelow++;
+        });
+        await page.evaluate((cut) => {
+          if (cut !== '')
+            document.querySelector<HTMLElement>('.wy-hud')!.style.setProperty('--wy-hud-cut', cut);
+        }, rest.cut);
+      }
+    }
+  }
+  expect(shownWhole, 'the premise: a wrapped row shown whole at rest').toBeGreaterThan(0);
+  expect(leftBelow, 'the premise: a wrapped row the room’s edge runs through').toBeGreaterThan(0);
+});
+
+/** Compact's strip as main draws it: each row one line, its count beside its icon and running
+ *  past the column where the two do not fit — the wrap's declarations undone (`ui.css`). Under
+ *  `nowrap` the count's zero-width space is no break, and the count reads as main's does. */
+const UNWRAPPED =
+  '.wy-wave-preview-list .wy-preview-glance { flex-wrap: nowrap !important; }\n' +
+  '.wy-wave-preview-list .wy-preview-count { flex-shrink: 0 !important; white-space: nowrap !important; }';
+
+test('Compact at 100% text: a row’s wrap moves nothing else — the Dock, its controls, the chips, the home mark and the board stay where the unwrapped strip leaves them, before and after Start (#181)', async ({
+  page,
+}) => {
+  // At 100% text a row wraps at 568×320 on CI's font, and at 480×320 on both (a column narrower
+  // than any row): the strip grows taller under the chips, and nothing else in the column, nor
+  // the board beside it, may move for that. An A/B in the rendered page against the unwrapped
+  // strip, as main draws it.
+  test.setTimeout(120_000);
+  let wrapped = 0;
+  for (const size of [
+    PHONE,
+    { width: 568, height: 320 },
+    { width: 740, height: 360 },
+    { width: 900, height: 480 },
+    { width: 480, height: 320 },
+  ]) {
+    await gotoAt(page, size);
+    expect(await page.evaluate((q) => matchMedia(q).matches, COMPACT_QUERY)).toBe(true);
+    await settle(page);
+    for (const phase of ['pre-start', 'started'] as const) {
+      if (phase === 'started') {
+        await page.getByRole('button', { name: 'Start', exact: true }).click();
+        await expect(page.getByRole('button', { name: 'Call wave' })).toBeVisible();
+        await page.getByRole('button', { name: 'Pause' }).click(); // nothing moves between reads
+        await settle(page);
+      }
+      const what = `${size.width}×${size.height}, ${phase}`;
+      const read = (): Promise<{ others: string; rows: string }> =>
+        page.evaluate(() => {
+          const box = (el: Element): string => {
+            const b = el.getBoundingClientRect();
+            return [b.x, b.y, b.width, b.height].map((v) => v.toFixed(3)).join(',');
+          };
+          const all = (sel: string): string =>
+            [...document.querySelectorAll(sel)].map(box).join(' | ');
+          return {
+            others: all(
+              '.wy-dock, .wy-dock .wy-btn, .wy-hud > .wy-chip, .wy-home, .wy-mark, .wy-board',
+            ),
+            rows: all('.wy-wave-preview .wy-preview-entry'),
+          };
+        });
+      const withWrap = await read();
+      const grid = await projectedGrid(page);
+      await page.evaluate((css) => {
+        const style = document.createElement('style');
+        style.id = 'wy-test-unwrapped';
+        style.textContent = css;
+        document.head.append(style);
+      }, UNWRAPPED);
+      await settle(page);
+      const unwrapped = await read();
+      const unwrappedGrid = await projectedGrid(page);
+      await page.evaluate(() => document.getElementById('wy-test-unwrapped')?.remove());
+      await settle(page);
+      expect(
+        withWrap.others,
+        `${what}: the wrap moved the Dock, a control, a chip, the mark or the board`,
+      ).toBe(unwrapped.others);
+      expect(grid, `${what}: the wrap moved the board's grid`).toEqual(unwrappedGrid);
+      if (withWrap.rows !== unwrapped.rows) wrapped++;
+    }
+  }
+  expect(wrapped, 'the premise: a row wrapped at 100% text').toBeGreaterThan(0);
 });
