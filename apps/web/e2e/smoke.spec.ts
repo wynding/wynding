@@ -947,10 +947,14 @@ test('supports player-started runs, pause / speed controls, launches wave 1 on S
   // march, not just its tail.
   await page.getByRole('button', { name: 'Resume' }).click();
 
-  // The run resolves; the results dialog appears with a Play-again + Verify affordance.
+  // The run resolves; the results dialog appears with Play again and the Run data disclosure,
+  // COLLAPSED: Verify waits behind it until the player opens it (#181 H2).
   const results = page.getByRole('dialog');
   await expect(results).toBeVisible({ timeout: 60_000 });
-  await expect(page.getByRole('button', { name: 'Verify this run' })).toBeVisible();
+  const runData = results.getByRole('button', { name: 'Run data', exact: true });
+  await expect(runData).toBeVisible();
+  await expect(runData).toHaveAttribute('aria-expanded', 'false');
+  await expect(page.getByRole('button', { name: 'Verify this run' })).toBeHidden();
 
   // axe audit of the results-dialog state — the settings-panel state is covered by the
   // other test; this closes the gap where the dialog was never scanned. The wave preview
@@ -1008,6 +1012,13 @@ test('supports player-started runs, pause / speed controls, launches wave 1 on S
   // Dock's Start button shares `.wy-primary` (deduplicated — one primary class), so the
   // selector is scoped to `.wy-results` to sample Play-again specifically, never the Dock.
   await assertRenderedContrast(page, '.wy-results .wy-primary', 4.5);
+
+  // Open Run data: Verify shows, and the open dialog is axe-clean too.
+  await runData.click();
+  await expect(runData).toHaveAttribute('aria-expanded', 'true');
+  await expect(page.getByRole('button', { name: 'Verify this run' })).toBeVisible();
+  const openResults = await new AxeBuilder({ page }).include('#app').analyze();
+  expect(openResults.violations, JSON.stringify(openResults.violations, null, 2)).toEqual([]);
 
   // Dev-verify re-simulates the recorded replay and confirms it matches.
   await page.getByRole('button', { name: 'Verify this run' }).click();

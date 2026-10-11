@@ -10,13 +10,14 @@ import { describe, it, expect } from 'vitest';
 import { BOARD_LAYERS, layerDepth } from './layers';
 
 describe('BOARD_LAYERS — the board draw order', () => {
-  it('is exactly: board, scorches, shells, plates, heads, pending, creepShadows, effects, creeps, cues', () => {
+  it('is exactly: board, scorches, shells, plates, heads, rims, pending, creepShadows, effects, creeps, cues', () => {
     expect(BOARD_LAYERS).toEqual([
       'board',
       'scorches',
       'shells',
       'plates',
       'heads',
+      'rims',
       'pending',
       'creepShadows',
       'effects',
@@ -47,13 +48,21 @@ describe('BOARD_LAYERS — the board draw order', () => {
     expect(layerDepth('plates')).toBeLessThan(layerDepth('heads'));
   });
 
+  it('paints a posed head’s plate rim over every head — and under a shot’s flash and pulse (T3)', () => {
+    // A turned head is resampled, and nothing it draws may darken the footprint's edge; the
+    // shot's muzzle flash and ring pulse, lighter than the rim, still show over it.
+    expect(layerDepth('heads')).toBeLessThan(layerDepth('rims'));
+    expect(layerDepth('rims')).toBeLessThan(layerDepth('effects'));
+  });
+
   it('draws a creep cue over EVERY creep body, so a neighbour can never hide it (the V2 reorder)', () => {
     expect(layerDepth('creeps')).toBeLessThan(layerDepth('cues'));
   });
 
   it('lays every creep shadow over every tower surface a flyer can cross, and under every creep body, cue and effect (B3)', () => {
-    // Over the towers — a flyer's shadow falls on what it crosses…
-    for (const layer of ['plates', 'heads', 'pending'] as const) {
+    // Over the towers, a posed head's repainted rim included — a flyer's shadow falls on
+    // what it crosses…
+    for (const layer of ['plates', 'heads', 'rims', 'pending'] as const) {
       expect(layerDepth(layer), layer).toBeLessThan(layerDepth('creepShadows'));
     }
     // …under every body, so one creep's shadow never darkens a neighbour, and under the

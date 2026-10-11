@@ -184,6 +184,7 @@ const tower = (towerId: string, opts: Partial<TowerVM> = {}): TowerVM => ({
   towerId,
   support: towerId === 'beacon',
   buffed: false,
+  targetId: 0,
   ...opts,
 });
 

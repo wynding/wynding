@@ -17,6 +17,7 @@ const mine = (col: number, row: number, id = 1): TowerVM => ({
   towerId: 'mine',
   support: false,
   buffed: false,
+  targetId: 0,
 });
 const centreOf = (t: TowerVM): { x: number; y: number } => ({
   x: (t.col + 1) * FP_ONE,

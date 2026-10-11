@@ -145,6 +145,12 @@ export interface TowerVM {
    *  as buffed — a visual chaining lie the sim never enacts (support effects are
    *  dropped from the fire-time snapshot, and a support tower never fires at all). */
   readonly buffed: boolean;
+  /** The creep this tower is locked on — the creep's entity id, or 0 for no lock. The sim's
+   *  own `towers.targetId` column, read and never decided here: unlike `support` and
+   *  `buffed` this IS sim state, and it changes tick to tick as creeps come into range, die
+   *  and leak (a support tower never holds one; the sim zeroes it). An aiming head turns
+   *  toward the creep it names (visual pass T3, `tower-aim.ts`). */
+  readonly targetId: number;
 }
 
 /** The compact per-tick render snapshot (the "view-model"). Two of these + an alpha

@@ -242,9 +242,18 @@ describe('main — createApp wiring & frame loop', () => {
     const shellEl = root.querySelector<HTMLElement>('.wy-shell')!;
     expect(shellEl.hasAttribute('inert')).toBe(true);
 
+    // #181 H2: Play again is still the dialog's first control; Verify moved behind the Run
+    // data disclosure, so it is found by name and must be DISCLOSED before it is pressed —
+    // jsdom would click a hidden button, a player cannot.
     const resBtns = [...results.querySelectorAll<HTMLButtonElement>('.wy-btn')];
+    const named = (label: string): HTMLButtonElement =>
+      resBtns.find((b) => b.textContent === label)!;
     const playAgain = resBtns[0]!;
-    const verify = resBtns[1]!;
+    expect(playAgain.textContent).toBe('Play again');
+    const verify = named('Verify this run');
+    expect(verify.closest('[hidden]'), 'Verify waits behind Run data').not.toBeNull();
+    named('Run data').click();
+    expect(verify.closest('[hidden]')).toBeNull();
     verify.click();
     expect(root.querySelector('.wy-verify')!.textContent).toContain('Verified');
 
@@ -260,6 +269,191 @@ describe('main — createApp wiring & frame loop', () => {
     expect(primaryBtn.hidden).toBe(false);
     expect(dockText(primaryBtn)).toBe('Start');
     app.destroy();
+  });
+});
+
+describe('main — the results panel reads the finished run (#181 H2)', () => {
+  it('fills the tiles and subtitle from the controller’s own run stats at the terminal edge', () => {
+    const root = document.createElement('div');
+    document.body.appendChild(root);
+    const sched = manualSchedule();
+    let clock = 0;
+    let controller: Controller | null = null;
+    const app = createApp(document, root, {
+      sceneFactory: () => fakeHandle,
+      schedule: sched.schedule,
+      now: () => clock,
+      seed: 7,
+      controllerFactory: (seed) => (controller = createController(seed)),
+    });
+    openApps.push(app);
+    sched.frame((clock += 16));
+    dockButton(root, 'Start').click();
+    const results = root.querySelector<HTMLElement>('.wy-results')!;
+    for (let i = 0; i < 4000 && results.hidden; i++) sched.frame((clock += 300));
+    expect(results.hidden).toBe(false);
+
+    const stats = controller!.runStats();
+    // An undefended run: nothing can stop a creep and nothing was built — known without
+    // reading the stats back — and it lost, so creeps leaked.
+    expect(stats.creepsStopped).toBe(0);
+    expect(stats.towersBuilt).toBe(0);
+    expect(stats.leaks).toBeGreaterThan(0);
+    const tiles = [...results.querySelectorAll('.wy-results-stat')].map(
+      (tile) => tile.querySelector('dd')!.textContent,
+    );
+    expect(tiles).toEqual([
+      `${String(stats.wavesCleared)} / ${String(stats.waveCount)}`,
+      '0',
+      String(stats.leaks),
+      '0',
+    ]);
+    expect(results.querySelector('.wy-results-subtitle')!.textContent).toBe(
+      `Lost with ${String(stats.wavesLaunched)} of ${String(stats.waveCount)} waves launched`,
+    );
+    expect(results.querySelector('.wy-results-panel')!.getAttribute('data-outcome')).toBe('lost');
+  });
+});
+
+describe('main — the terminal edge captures each run once, even when it throws (#181 H2)', () => {
+  /** An undefended run whose terminal edge throws ONCE: reading the run stats, the playtrace
+   *  capture itself, or — after the capture — the survey's ask refresh, which the edge reaches
+   *  once the dialog is showing. The survey is offered where its refresh is the step that
+   *  breaks, and wherever `options.survey` asks for it. */
+  function brokenEdgeApp(
+    step: 'runStats' | 'capture' | 'afterCapture',
+    options: { readonly survey?: boolean } = {},
+  ) {
+    const root = document.createElement('div');
+    document.body.appendChild(root);
+    const sched = manualSchedule();
+    let clock = 0;
+    const copied: string[] = [];
+    let armed = true;
+    let captures = 0;
+    const fail = (): never => {
+      armed = false;
+      throw new Error('the terminal edge broke');
+    };
+    const survey: SurveyAsk = {
+      offered: () => true,
+      refresh: () => (armed ? fail() : Promise.resolve()),
+      commit: async () => {},
+    };
+    const app = createApp(document, root, {
+      sceneFactory: () => fakeHandle,
+      schedule: sched.schedule,
+      now: () => clock,
+      seed: 1,
+      controllerFactory: (seed) => {
+        const controller = createController(seed);
+        const read = controller.runStats;
+        // The terminal edge's capture is the controller's only `capture()` call (`main.ts`).
+        const capture = controller.capture;
+        return Object.assign(controller, {
+          runStats: () => (step === 'runStats' && armed ? fail() : read()),
+          capture: () => {
+            captures++;
+            return step === 'capture' && armed ? fail() : capture();
+          },
+        });
+      },
+      playtraceDelivery: { copy: async (text: string) => void copied.push(text), save: () => {} },
+      ...(step === 'afterCapture' || options.survey === true
+        ? {
+            gameVersion: 'fedcba9876543210fedcba9876543210fedcba98',
+            surveyTransport: { send: async () => 'accepted' as const },
+            surveyAsk: survey,
+          }
+        : {}),
+    });
+    openApps.push(app);
+    const results = root.querySelector<HTMLElement>('.wy-results')!;
+    /** Play the run out; the frame that reaches the terminal edge throws, once. */
+    const runToBrokenEdge = (): void => {
+      sched.frame((clock += 16));
+      dockButton(root, 'Start').click();
+      let thrown: unknown = null;
+      for (let i = 0; i < 4000 && thrown === null; i++) {
+        try {
+          sched.frame((clock += 300));
+        } catch (error) {
+          thrown = error;
+        }
+      }
+      expect((thrown as Error | null)?.message).toBe('the terminal edge broke');
+    };
+    /** The runs the playtrace ring holds, read through Copy run data. */
+    const capturedRuns = async (): Promise<number> => {
+      const press = (label: string): void =>
+        [...results.querySelectorAll<HTMLButtonElement>('button')]
+          .find((b) => b.textContent === label)!
+          .click();
+      press('Run data');
+      press('Copy run data');
+      await vi.waitFor(() => expect(copied).toHaveLength(1));
+      return (JSON.parse(copied[0]!) as { runs: unknown[] }).runs.length;
+    };
+    return {
+      root,
+      results,
+      runToBrokenEdge,
+      capturedRuns,
+      captures: (): number => captures,
+      /** Give feedback's slot in the action row, and the form's below it (#181 H2). */
+      surveySlots: (): HTMLElement[] => [
+        results.querySelector<HTMLElement>('.wy-survey-opener')!,
+        results.querySelector<HTMLElement>('.wy-survey')!,
+      ],
+    };
+  }
+
+  it('a throw reading the run stats opens nothing; the next refresh opens the dialog with the run captured once', async () => {
+    const h = brokenEdgeApp('runStats');
+    h.runToBrokenEdge();
+    expect(h.results.hidden, 'the broken edge opened nothing').toBe(true);
+    // The frame loop's HUD key has not moved, so only an input handler refreshes the HUD now:
+    // the Dock's Pause, which a player can still press, since no dialog opened.
+    dockButton(h.root, 'Pause').click();
+    expect(h.results.hidden).toBe(false);
+    expect(h.captures(), 'one capture attempt, made by the walk that opened the dialog').toBe(1);
+    expect(await h.capturedRuns()).toBe(1);
+  });
+
+  it('a capture that THROWS is not retried: the next refresh opens the dialog without it', () => {
+    const h = brokenEdgeApp('capture');
+    h.runToBrokenEdge();
+    expect(h.results.hidden, 'the broken edge opened nothing').toBe(true);
+    dockButton(h.root, 'Pause').click(); // as above: no dialog opened, so the Dock is live
+    expect(h.results.hidden, 'the dialog still opens').toBe(false);
+    expect(h.captures(), 'the failed capture was attempted once and never again').toBe(1);
+  });
+
+  it('a capture that THROWS leaves no run for the survey to describe: Give feedback is never offered', async () => {
+    const h = brokenEdgeApp('capture', { survey: true });
+    h.runToBrokenEdge();
+    dockButton(h.root, 'Pause').click(); // as above: no dialog opened, so the Dock is live
+    expect(h.results.hidden, 'the dialog still opens').toBe(false);
+    // Offering the survey waits on the ask refresh a dialog opening starts. A macrotask boundary
+    // drains every pending microtask, however deep the offer's chain, so the assertion below
+    // cannot run before an offer would have landed.
+    await new Promise<void>((resolve) => setTimeout(resolve, 0));
+    for (const slot of h.surveySlots()) {
+      expect(slot.childElementCount, 'the survey rendered into its slots').toBeGreaterThan(0);
+      expect(slot.hidden, `${slot.className}: nothing to Send about`).toBe(true);
+    }
+  });
+
+  it('a throw AFTER the capture (the survey’s ask refresh) still leaves the run captured once', async () => {
+    const h = brokenEdgeApp('afterCapture');
+    h.runToBrokenEdge();
+    // Any later `refreshHud` walks the edge again and retries the dialog's open. The Dock's
+    // Pause handler is invoked directly as one such caller: with the dialog shown the Shell is
+    // inert, so no player could press it, but the frame loop's next HUD change would do the same.
+    dockButton(h.root, 'Pause').click();
+    expect(h.results.hidden).toBe(false);
+    expect(h.captures(), 'the retried walk did not capture again').toBe(1);
+    expect(await h.capturedRuns()).toBe(1);
   });
 });
 
@@ -2156,6 +2350,9 @@ describe('main — the playtrace capture and its export actions (#133)', () => {
         (b) => b.textContent === label,
       );
       if (btn === undefined) throw new Error(`no results button named ${label}`);
+      // #181 H2: Copy, Save and Verify sit behind the Run data disclosure. jsdom clicks a
+      // hidden button as readily as a shown one, so this refuses any a player could not reach.
+      if (btn.closest('[hidden]') !== null) throw new Error(`results button ${label} is hidden`);
       return btn;
     };
     return {
@@ -2175,12 +2372,14 @@ describe('main — the playtrace capture and its export actions (#133)', () => {
       /** Jump the frame clock without driving frames — `deps.now` is what the playtrace
        *  ring measures its six-hour bound against. */
       advance: (ms: number): void => void (clock += ms),
-      /** Drive the run to its terminal state so the results dialog opens. */
+      /** Drive the run to its terminal state so the results dialog opens, then disclose its
+       *  Run data group, where the export actions live (#181 H2). */
       resolve(): void {
         this.frame();
         dockButton(root, 'Start').click();
         for (let i = 0; i < 4000 && results.hidden; i++) this.frame();
         expect(results.hidden, 'the run must actually have resolved').toBe(false);
+        resultsButton('Run data').click();
       },
     };
   }
@@ -2606,6 +2805,18 @@ describe('main — the end-of-run survey (#158, ADR 0014)', () => {
         (b) => b.textContent === label,
       );
       if (btn === undefined) throw new Error(`no results button named ${label}`);
+      // The same reachability rule as the playtrace harness above (#181 H2): a button behind
+      // a collapsed Run data disclosure, or in a hidden survey slot, is not pressable.
+      if (btn.closest('[hidden]') !== null) throw new Error(`results button ${label} is hidden`);
+      return btn;
+    };
+    /** A results control for READING its state, wherever it is — the one escape from
+     *  `button`'s reachability rule, for asserting on a control the player cannot see. */
+    const buttonState = (label: string): HTMLButtonElement => {
+      const btn = [...results.querySelectorAll<HTMLButtonElement>('button')].find(
+        (b) => b.textContent === label,
+      );
+      if (btn === undefined) throw new Error(`no results button named ${label}`);
       return btn;
     };
     return {
@@ -2614,8 +2825,12 @@ describe('main — the end-of-run survey (#158, ADR 0014)', () => {
       sent,
       commits,
       button,
+      buttonState,
       status: (): string => results.querySelector('.wy-verify')!.textContent ?? '',
+      /** The FORM's slot, below the action row (#181 H2). */
       slot: (): HTMLElement => results.querySelector<HTMLElement>('.wy-survey')!,
+      /** Give feedback's own slot, in the action row (#181 H2). */
+      opener: (): HTMLElement => results.querySelector<HTMLElement>('.wy-survey-opener')!,
       frame: (): void => sched.frame((clock += 16)),
       resolve(): void {
         this.frame();
@@ -2634,8 +2849,11 @@ describe('main — the end-of-run survey (#158, ADR 0014)', () => {
     const h = surveyApp({ transport: false });
     h.resolve();
     await settle();
+    // Both slots (#181 H2): no form below the row, and no Give feedback in it.
     expect(h.slot().hidden).toBe(true);
     expect(h.slot().childElementCount).toBe(0);
+    expect(h.opener().hidden).toBe(true);
+    expect(h.opener().childElementCount).toBe(0);
   });
 
   it('sends a payload describing the finished run, holding the region and locking its other writers', async () => {
@@ -2660,6 +2878,9 @@ describe('main — the end-of-run survey (#158, ADR 0014)', () => {
     expect(payload.answers.rating).toBe(4);
 
     expect(h.status()).toBe('Sending your feedback…');
+    // #181 H2: the region's other writers sit behind Run data; disclosing them mid-send must
+    // not release the lock (the overlay suite pins the lock both open and closed).
+    h.button('Run data').click();
     for (const label of ['Verify this run', 'Copy run data', 'Save run data']) {
       expect(h.button(label).getAttribute('aria-disabled'), label).toBe('true');
     }
@@ -2673,7 +2894,9 @@ describe('main — the end-of-run survey (#158, ADR 0014)', () => {
     );
     expect(h.button('Verify this run').getAttribute('aria-disabled')).toBe('false');
     expect(document.activeElement).toBe(h.button('Play again'));
-    expect(h.slot().hidden, 'Give feedback is retired').toBe(true);
+    // Retired with the form (#181 H2): Give feedback lives in its own slot in the action row.
+    expect(h.opener().hidden, 'Give feedback is retired').toBe(true);
+    expect(h.slot().hidden, 'the form is retired').toBe(true);
     await settle();
     expect(h.commits).toEqual([false]);
     // A released region belongs to the next owner.
@@ -2714,7 +2937,8 @@ describe('main — the end-of-run survey (#158, ADR 0014)', () => {
 
     expect(h.sent[0]!.signal.aborted).toBe(true);
     expect(h.status()).toBe('');
-    expect(h.button('Verify this run').getAttribute('aria-disabled')).toBe('false');
+    // The dialog is gone, so this reads the control's STATE rather than pressing it.
+    expect(h.buttonState('Verify this run').getAttribute('aria-disabled')).toBe('false');
     h.sent[0]!.resolve('accepted'); // a late answer to the aborted request
     await settle();
     expect(h.status(), 'no result from the last run lands on this one').toBe('');
@@ -2728,6 +2952,30 @@ describe('main — the end-of-run survey (#158, ADR 0014)', () => {
       h.results.querySelectorAll<HTMLInputElement>('input:checked'),
       'nothing of the last draft carries over',
     ).toHaveLength(0);
+  });
+
+  it('an accepted Send moves focus to Play again: scrolled into view after a keyboard press, held still after a pointer press (#181 H2)', async () => {
+    // The glue from the survey's Send to the overlay: what kind of press it was travels with the
+    // accepted result. A keyboard press is `detail` 0; a pointer press counts its clicks.
+    for (const [detail, options] of [
+      [0, undefined],
+      [1, { preventScroll: true }],
+    ] as const) {
+      const h = surveyApp();
+      h.resolve();
+      await vi.waitFor(() => expect(h.slot().hidden).toBe(false));
+      h.button('Give feedback').click();
+      h.results.querySelector<HTMLInputElement>('fieldset input[value="4"]')!.click();
+      const send = h.button('Send');
+      send.focus();
+      const focus = vi.spyOn(h.button('Play again'), 'focus');
+      send.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true, detail }));
+      h.sent[0]!.resolve('accepted');
+      await settle();
+      expect(focus, `Send pressed with detail ${String(detail)}`).toHaveBeenCalledExactlyOnceWith(
+        options,
+      );
+    }
   });
 });
 

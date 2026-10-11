@@ -183,7 +183,19 @@ describe('paintAtlas', () => {
     // creeps are art now and no atlas painter draws one, so a frame that does is built here.
     const frame = (key: string, x: number, paint: FrameSpec['paint']): [string, AtlasFrame] => [
       key,
-      { key, x, y: 0, width: 12, height: 12, anchorX: 6, anchorY: 6, paint },
+      // Anchored at its centre, so it pivots there too (`FrameSpec.pivotX/Y`).
+      {
+        key,
+        x,
+        y: 0,
+        width: 12,
+        height: 12,
+        anchorX: 6,
+        anchorY: 6,
+        pivotX: 0.5,
+        pivotY: 0.5,
+        paint,
+      },
     ];
     const layout: AtlasLayout = {
       scale: 1,

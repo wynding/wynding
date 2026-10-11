@@ -14,7 +14,7 @@ import { createShell, dockButtonParts } from './shell';
 import { dialDash, hexColour } from './hud-icons';
 import { createSettings } from './settings';
 import { createKeymap, GAME_ACTIONS } from './keymap';
-import { createController, type UiState } from './controller';
+import { createController, type RunStats, type UiState } from './controller';
 import { attachInput } from './input';
 import { createInstall, type InstallHandle, type StorageAdapter } from './install';
 import {
@@ -63,6 +63,20 @@ function hud(over: Partial<HudVM> = {}): HudVM {
     // pre-existing HUD-readout tests aren't affected by the pollable board summary; the
     // dedicated describe block below overrides this explicitly.
     statuses: { slowed: 0, poisoned: 0, armored: 0, stunned: 0, airborne: 0 },
+    ...over,
+  };
+}
+
+/** A finished run's numbers for the results panel (#181 H2) — a clean ten-wave win by
+ *  default; the results tests override what they read. */
+function runStats(over: Partial<RunStats> = {}): RunStats {
+  return {
+    waveCount: 10,
+    wavesLaunched: 10,
+    wavesCleared: 10,
+    creepsStopped: 117,
+    leaks: 0,
+    towersBuilt: 40,
     ...over,
   };
 }
@@ -2596,18 +2610,73 @@ describe('overlay — accessibility semantics', () => {
 
   it('showResults traps focus in the dialog and makes the Shell inert', () => {
     const { overlay, shell } = setup();
-    overlay.showResults(hud({ won: true }));
+    overlay.showResults(hud({ won: true }), runStats());
     expect(shell.root.hasAttribute('inert')).toBe(true);
     const playAgain = overlay.resultsEl.querySelector<HTMLButtonElement>('.wy-btn')!;
+    expect(playAgain.textContent).toBe('Play again'); // still the dialog's first control
     expect(document.activeElement).toBe(playAgain); // focus moved into the dialog
     overlay.hideResults();
     expect(shell.root.hasAttribute('inert')).toBe(false); // restored on close
   });
 
+  it('the dialog’s own first focus holds Play again’s Enter and Space for a moment: a double press on the board as the run ends starts no run (#181 H2)', () => {
+    const { overlay } = setup();
+    const now = vi.spyOn(document.defaultView!.performance, 'now').mockReturnValue(7000);
+    overlay.showResults(hud({ won: true }), runStats());
+    const playAgain = overlay.resultsEl.querySelector<HTMLButtonElement>('.wy-primary')!;
+    expect(document.activeElement).toBe(playAgain);
+    const press = (key: string): KeyboardEvent => {
+      const event = new KeyboardEvent('keydown', { key, bubbles: true, cancelable: true });
+      playAgain.dispatchEvent(event);
+      return event;
+    };
+    now.mockReturnValue(7499);
+    expect(press('Enter').defaultPrevented, 'Enter, 499 ms after the dialog took focus').toBe(true);
+    expect(press(' ').defaultPrevented, 'Space').toBe(true);
+    now.mockReturnValue(7500);
+    expect(press('Enter').defaultPrevented, 'at 500 ms Play again takes its key').toBe(false);
+  });
+
+  it('opens on the HEADING where Play again is not wholly in view at the top of the panel (#181 H2)', () => {
+    // A short window at heavy text zoom puts Play again below the panel's fold, where focusing
+    // it would scroll the outcome out of view: the ARIA dialog pattern focuses a static element
+    // at the top instead. jsdom has no layout, so the geometry is stubbed: a 300px scrollport
+    // starting at y=100, and Play again at y=450.
+    const { overlay } = setup();
+    const body = overlay.resultsEl.querySelector<HTMLElement>('.wy-results-body')!;
+    const heading = overlay.resultsEl.querySelector<HTMLElement>('h2')!;
+    const playAgain = overlay.resultsEl.querySelector<HTMLButtonElement>('.wy-btn')!;
+    Object.defineProperty(body, 'clientHeight', { configurable: true, value: 300 });
+    body.getBoundingClientRect = () => new DOMRect(0, 100, 400, 300);
+    playAgain.getBoundingClientRect = () => new DOMRect(0, 450, 200, 48);
+    overlay.showResults(hud({ won: true }), runStats());
+    expect(document.activeElement).toBe(heading);
+    expect(heading.tabIndex, 'focusable by script, never a Tab stop').toBe(-1);
+    overlay.hideResults();
+
+    // ...and back in view, Play again keeps initial focus (ADR 0014 §1).
+    playAgain.getBoundingClientRect = () => new DOMRect(0, 340, 200, 48);
+    overlay.showResults(hud({ won: true }), runStats());
+    expect(document.activeElement).toBe(playAgain);
+  });
+
+  it('a Play again STRADDLING the fold is not wholly in view: the heading takes focus (#181 H2)', () => {
+    const { overlay } = setup();
+    const body = overlay.resultsEl.querySelector<HTMLElement>('.wy-results-body')!;
+    const heading = overlay.resultsEl.querySelector<HTMLElement>('h2')!;
+    const playAgain = overlay.resultsEl.querySelector<HTMLButtonElement>('.wy-btn')!;
+    Object.defineProperty(body, 'clientHeight', { configurable: true, value: 300 });
+    body.getBoundingClientRect = () => new DOMRect(0, 100, 400, 300);
+    // Its top inside the 100–400 scrollport, its bottom 28px past the fold.
+    playAgain.getBoundingClientRect = () => new DOMRect(0, 380, 200, 48);
+    overlay.showResults(hud({ won: true }), runStats());
+    expect(document.activeElement).toBe(heading);
+  });
+
   it('restores focus to the pre-modal element when the results dialog closes', () => {
     const { overlay, settingsBtn } = setup();
     settingsBtn.focus();
-    overlay.showResults(hud({ won: false }));
+    overlay.showResults(hud({ won: false }), runStats());
     overlay.hideResults();
     expect(document.activeElement).toBe(settingsBtn);
   });
@@ -3066,6 +3135,7 @@ describe('overlay — the leave-run confirm dialog (presentation only)', () => {
         stars: 2,
         won: true,
       }),
+      runStats(),
     );
     expect(s.overlay.resultsEl.hidden).toBe(false);
     expect(s.overlay.leaveEl.hidden).toBe(true); // deposed by the higher-priority dialog
@@ -3162,16 +3232,34 @@ describe('overlay — results dialog', () => {
     const { actions, overlay } = setup();
     expect(overlay.resultsEl.hidden).toBe(true);
 
-    overlay.showResults(hud({ won: true, score: 120, stars: 3 }));
+    overlay.showResults(hud({ won: true, score: 120, stars: 3 }), runStats());
     expect(overlay.resultsEl.hidden).toBe(false);
-    expect(overlay.resultsEl.querySelector('h2')!.textContent).toBe('You held the line!');
-    expect(overlay.resultsEl.querySelector('p')!.textContent).toContain('Score 120');
+    expect(overlay.resultsEl.querySelector('h2')!.textContent).toBe('The maze held.');
+    // #181 H2: the score sentence is no longer the dialog's first paragraph — it is the
+    // dialog's DESCRIPTION, so the pin follows `aria-describedby` to the node and reads the
+    // whole sentence rather than a substring of whichever paragraph came first.
+    const describedBy = overlay.resultsEl.getAttribute('aria-describedby')!;
+    expect(document.getElementById(describedBy)!.textContent).toBe('Score 120 — 3 of 3 stars');
 
+    // Every results control in DOM order: Play again, then the Run data toggle, then the three
+    // actions it discloses (no survey in this build, so no Give feedback between them).
     const resBtns = [...overlay.resultsEl.querySelectorAll<HTMLButtonElement>('.wy-btn')];
-    const playAgain = resBtns[0]!;
-    const verify = resBtns[1]!;
-    const copyRun = resBtns[2]!;
-    const saveRun = resBtns[3]!;
+    expect(resBtns.map((b) => b.textContent)).toEqual([
+      'Play again',
+      'Run data',
+      'Verify this run',
+      'Copy run data',
+      'Save run data',
+    ]);
+    const [playAgain, runData, verify, copyRun, saveRun] = resBtns as [
+      HTMLButtonElement,
+      HTMLButtonElement,
+      HTMLButtonElement,
+      HTMLButtonElement,
+      HTMLButtonElement,
+    ];
+    runData.click(); // disclose the three — the toggle itself is no action
+    expect(actions).toEqual([]);
     verify.click();
     copyRun.click();
     saveRun.click();
@@ -3182,9 +3270,11 @@ describe('overlay — results dialog', () => {
       'savePlaytrace',
       'playAgain',
     ]);
-    // Play again keeps its primary styling; the export actions are secondary, like Verify.
+    // Play again keeps its primary styling; everything else is secondary.
     expect(playAgain.className).toContain('wy-primary');
-    for (const b of [verify, copyRun, saveRun]) expect(b.className).not.toContain('wy-primary');
+    for (const b of [runData, verify, copyRun, saveRun]) {
+      expect(b.className).not.toContain('wy-primary');
+    }
 
     overlay.setResultsStatus('checked');
     expect(overlay.resultsEl.querySelector('.wy-verify')!.textContent).toBe('checked');
@@ -3194,10 +3284,384 @@ describe('overlay — results dialog', () => {
 
   it('shows a loss heading', () => {
     const { overlay } = setup();
-    overlay.showResults(hud({ won: false }));
+    overlay.showResults(hud({ won: false }), runStats({ wavesLaunched: 9, wavesCleared: 8 }));
     expect(overlay.resultsEl.querySelector('h2')!.textContent).toBe('The creeps broke through.');
     overlay.destroy();
     expect(document.body.contains(overlay.resultsEl)).toBe(false);
+  });
+});
+
+describe('overlay — the results panel (#181 H2)', () => {
+  const panelOf = (overlay: { resultsEl: HTMLElement }): HTMLElement =>
+    overlay.resultsEl.querySelector<HTMLElement>('.wy-results-panel')!;
+  const statText = (overlay: { resultsEl: HTMLElement }): [string, string][] =>
+    [...overlay.resultsEl.querySelectorAll('.wy-results-stat')].map((tile) => [
+      tile.querySelector('dt')!.textContent!,
+      tile.querySelector('dd')!.textContent!,
+    ]);
+  const earned = (overlay: { resultsEl: HTMLElement }): string[] =>
+    [...overlay.resultsEl.querySelectorAll('.wy-results-star')].map((star) =>
+      star.getAttribute('data-earned')!,
+    );
+  const toggleOf = (overlay: { resultsEl: HTMLElement }): HTMLButtonElement =>
+    overlay.resultsEl.querySelector<HTMLButtonElement>('.wy-results-more')!;
+  const groupOf = (overlay: { resultsEl: HTMLElement }): HTMLElement =>
+    overlay.resultsEl.querySelector<HTMLElement>('.wy-results-run-data')!;
+
+  it('a win: the outcome band, "The maze held.", all waves cleared, its stars, the score and the four tiles', () => {
+    const { overlay } = setup();
+    overlay.showResults(
+      hud({ won: true, phase: 'won', score: 2480, stars: 3 }),
+      runStats({ creepsStopped: 124, leaks: 1, towersBuilt: 27 }),
+    );
+    const panel = panelOf(overlay);
+    expect(panel.dataset.outcome).toBe('won'); // the band's colour and the Leaks ink key on it
+    expect(overlay.resultsEl.getAttribute('aria-label')).toBe('The maze held.');
+    expect(panel.querySelector('.wy-results-subtitle')!.textContent).toBe('All 10 waves cleared');
+    expect(earned(overlay)).toEqual(['true', 'true', 'true']);
+    expect(panel.querySelector('.wy-results-score-label')!.textContent).toBe('Score');
+    expect(panel.querySelector('.wy-results-score-value')!.textContent).toBe('2480');
+    expect(statText(overlay)).toEqual([
+      ['Waves cleared', '10 / 10'],
+      ['Creeps stopped', '124'],
+      ['Leaks', '1'],
+      ['Towers built', '27'],
+    ]);
+  });
+
+  it('a loss: "Lost with {launched} of {count} waves launched", no stars, and the run as it stood', () => {
+    const { overlay } = setup();
+    overlay.showResults(
+      hud({ won: false, phase: 'lost', score: 0, stars: 0 }),
+      runStats({
+        wavesLaunched: 9,
+        wavesCleared: 8,
+        creepsStopped: 93,
+        leaks: 10,
+        towersBuilt: 12,
+      }),
+    );
+    const panel = panelOf(overlay);
+    expect(panel.dataset.outcome).toBe('lost');
+    expect(overlay.resultsEl.getAttribute('aria-label')).toBe('The creeps broke through.');
+    expect(panel.querySelector('.wy-results-subtitle')!.textContent).toBe(
+      'Lost with 9 of 10 waves launched',
+    );
+    expect(earned(overlay)).toEqual(['false', 'false', 'false']);
+    expect(panel.querySelector('.wy-results-score-value')!.textContent).toBe('0');
+    expect(statText(overlay)).toEqual([
+      ['Waves cleared', '8 / 10'],
+      ['Creeps stopped', '93'],
+      ['Leaks', '10'],
+      ['Towers built', '12'],
+    ]);
+  });
+
+  it('fills as many stars as were earned, left to right, and re-renders for the next run', () => {
+    const { overlay } = setup();
+    overlay.showResults(hud({ won: true, phase: 'won', stars: 2 }), runStats());
+    expect(earned(overlay)).toEqual(['true', 'true', 'false']);
+    overlay.hideResults();
+    overlay.showResults(hud({ won: false, phase: 'lost', stars: 0 }), runStats({ leaks: 10 }));
+    expect(earned(overlay)).toEqual(['false', 'false', 'false']);
+    expect(panelOf(overlay).dataset.outcome).toBe('lost');
+  });
+
+  it('says the score and the stars ONCE: one described sentence, the drawn grade aria-hidden, the tiles real text', () => {
+    const { overlay } = setup();
+    overlay.showResults(hud({ won: true, phase: 'won', score: 2480, stars: 3 }), runStats());
+    const description = document.getElementById(
+      overlay.resultsEl.getAttribute('aria-describedby')!,
+    )!;
+    expect(overlay.resultsEl.contains(description)).toBe(true);
+    expect(description.textContent).toBe('Score 2480 — 3 of 3 stars');
+    const grade = overlay.resultsEl.querySelector('.wy-results-grade')!;
+    expect(grade.getAttribute('aria-hidden')).toBe('true');
+    expect(grade.contains(overlay.resultsEl.querySelector('.wy-results-score-value'))).toBe(true);
+    expect(grade.querySelectorAll('.wy-results-star')).toHaveLength(3);
+    // The tiles are content, never hidden from assistive tech.
+    const stats = overlay.resultsEl.querySelector('.wy-results-stats')!;
+    expect(stats.tagName).toBe('DL');
+    expect(stats.closest('[aria-hidden="true"]')).toBeNull();
+    // The dialog keeps ONE heading (survey.spec pins `getByRole('heading')` as unique).
+    expect(overlay.resultsEl.querySelectorAll('h1, h2, h3, h4, h5, h6')).toHaveLength(1);
+  });
+
+  it('Run data is a disclosure: collapsed on every open, aria-expanded in step, the group named by its toggle', () => {
+    const { overlay } = setup();
+    overlay.showResults(hud({ won: true, phase: 'won' }), runStats());
+    const toggle = toggleOf(overlay);
+    const group = groupOf(overlay);
+    expect(toggle.textContent).toBe('Run data');
+    expect(toggle.getAttribute('aria-controls')).toBe(group.id);
+    expect(group.getAttribute('role')).toBe('group');
+    expect(group.getAttribute('aria-labelledby')).toBe(toggle.id);
+    // A disclosure, not a menu: no menu roles anywhere in the dialog.
+    expect(overlay.resultsEl.querySelectorAll('[role^="menu"]')).toHaveLength(0);
+    expect(toggle.hasAttribute('aria-haspopup')).toBe(false);
+
+    expect(toggle.getAttribute('aria-expanded')).toBe('false');
+    expect(group.hidden).toBe(true);
+    toggle.click();
+    expect(toggle.getAttribute('aria-expanded')).toBe('true');
+    expect(group.hidden).toBe(false);
+    expect([...group.querySelectorAll('button')].map((b) => b.textContent)).toEqual([
+      'Verify this run',
+      'Copy run data',
+      'Save run data',
+    ]);
+    toggle.click();
+    expect(toggle.getAttribute('aria-expanded')).toBe('false');
+    expect(group.hidden).toBe(true);
+
+    // Left open, it is collapsed again by the next dialog.
+    toggle.click();
+    overlay.hideResults();
+    overlay.showResults(hud({ won: false, phase: 'lost' }), runStats());
+    expect(toggle.getAttribute('aria-expanded')).toBe('false');
+    expect(group.hidden).toBe(true);
+    // ...and Play again keeps the initial focus throughout.
+    expect(document.activeElement!.textContent).toBe('Play again');
+  });
+
+  it('the survey lock holds the three actions whether the disclosure is open or closed', () => {
+    const { actions, overlay } = setup();
+    overlay.showResults(hud({ won: true, phase: 'won' }), runStats());
+    const group = groupOf(overlay);
+    const writers = [...group.querySelectorAll<HTMLButtonElement>('button')];
+    expect(writers).toHaveLength(3);
+
+    overlay.setResultsWritersLocked(true);
+    for (const b of writers) expect(b.getAttribute('aria-disabled')).toBe('true');
+    for (const b of writers) b.click(); // collapsed: nothing
+    toggleOf(overlay).click(); // opening the group does not release them
+    for (const b of writers) expect(b.getAttribute('aria-disabled')).toBe('true');
+    for (const b of writers) b.click(); // open: still nothing
+    expect(actions).toEqual([]);
+    // The toggle itself is never locked: it writes nothing to the status region.
+    expect(toggleOf(overlay).hasAttribute('aria-disabled')).toBe(false);
+
+    overlay.setResultsWritersLocked(false);
+    for (const b of writers) b.click();
+    expect(actions.map((a) => a.type)).toEqual(['verify', 'copyPlaytrace', 'savePlaytrace']);
+  });
+
+  it('places the survey: Give feedback between Play again and Run data, the form after the disclosed group, both before the status region', () => {
+    const { overlay } = setup();
+    const { opener, form } = overlay.resultsSurveySlots;
+    const row = overlay.resultsEl.querySelector('.wy-results-actions')!;
+    expect([...row.children].map((el) => el.className)).toEqual([
+      'wy-btn wy-primary',
+      'wy-survey-opener',
+      'wy-btn wy-results-more',
+    ]);
+    expect(row.children[1]).toBe(opener);
+    // Both slots stay empty and hidden until a survey renders into them.
+    expect(opener.hidden).toBe(true);
+    expect(form.hidden).toBe(true);
+    const body = overlay.resultsEl.querySelector('.wy-results-body')!;
+    const order = [...body.children];
+    const status = overlay.resultsEl.querySelector('.wy-verify')!;
+    expect(order.indexOf(form)).toBe(order.indexOf(groupOf(overlay)) + 1);
+    expect(order.indexOf(status)).toBe(order.length - 1);
+    expect(order.indexOf(form)).toBeLessThan(order.indexOf(status));
+  });
+
+  /** A pointer click at one spot and time, with no `mousedown` of its own: the press guard
+   *  judges it at the click. */
+  const clickAt = (el: Element, at: number, detail = 1): void => {
+    const event = new MouseEvent('click', {
+      bubbles: true,
+      cancelable: true,
+      detail,
+      clientX: 300,
+      clientY: 400,
+    });
+    Object.defineProperty(event, 'timeStamp', { value: at });
+    el.dispatchEvent(event);
+  };
+
+  it('guards its presses: a second pointer press at the same spot cannot reach Play again once the layout moved under it (#181 H2)', () => {
+    // The wiring of `press-guard.ts` (whose own suite pins its rules): Run data's group closing
+    // under a scrolled body carries Play again down under the pointer before a double-click's
+    // second press lands. jsdom has no layout: the toggle's move is stubbed.
+    const { overlay, actions } = setup();
+    overlay.showResults(hud({ won: true }), runStats());
+    const playAgain = overlay.resultsEl.querySelector<HTMLButtonElement>('.wy-primary')!;
+    const press = clickAt;
+    press(toggleOf(overlay), 1000);
+    expect(toggleOf(overlay).getAttribute('aria-expanded')).toBe('true');
+    toggleOf(overlay).getBoundingClientRect = () => new DOMRect(0, 160, 200, 44);
+    press(playAgain, 1120);
+    expect(actions, 'the second press of the double-click is swallowed').toEqual([]);
+    press(playAgain, 1130, 0);
+    expect(
+      actions.map((a) => a.type),
+      'a keyboard activation passes',
+    ).toEqual(['playAgain']);
+    press(playAgain, 1499);
+    expect(actions, 'still inside the window').toHaveLength(1);
+    press(playAgain, 1500);
+    expect(actions, 'the window has closed').toHaveLength(2);
+  });
+
+  it('the status region never shrinks within one dialog, and the next dialog starts with no floor (#181 H2)', async () => {
+    const { overlay } = setup();
+    overlay.showResults(hud({ won: true }), runStats());
+    const status = overlay.resultsEl.querySelector<HTMLElement>('.wy-verify')!;
+    // jsdom has no layout: the region's height is stubbed as each message would measure.
+    let height = 0;
+    status.getBoundingClientRect = () => new DOMRect(0, 0, 400, height);
+    const write = async (message: string, measured: number): Promise<void> => {
+      height = measured;
+      overlay.setResultsStatus(message);
+      await Promise.resolve(); // the observer's microtask
+      await Promise.resolve();
+    };
+    await write('Saved the run data, as a file with a long name.', 46);
+    expect(status.style.minHeight).toBe('46px');
+    await write('Verified.', 23);
+    expect(status.style.minHeight, 'a shorter message keeps the taller one’s height').toBe('46px');
+    await write('', 0);
+    expect(status.style.minHeight, 'so does a cleared region').toBe('46px');
+    await write('A message three lines tall.', 69);
+    expect(status.style.minHeight, 'a taller message raises the floor').toBe('69px');
+    overlay.hideResults();
+    height = 0;
+    overlay.showResults(hud({ won: false }), runStats());
+    await Promise.resolve();
+    await Promise.resolve();
+    expect(status.style.minHeight, 'the next dialog starts from none').toBe('');
+  });
+
+  it('focusPlayAgain reads layout, then focuses Play again with or without scrolling (#181 H2)', () => {
+    const { overlay } = setup();
+    overlay.showResults(hud({ won: true }), runStats());
+    const playAgain = overlay.resultsEl.querySelector<HTMLButtonElement>('.wy-primary')!;
+    const order: string[] = [];
+    Object.defineProperty(playAgain, 'offsetHeight', {
+      configurable: true,
+      get: () => {
+        order.push('layout');
+        return 0;
+      },
+    });
+    const focus = vi.spyOn(playAgain, 'focus').mockImplementation(() => void order.push('focus'));
+    overlay.focusPlayAgain(true);
+    overlay.focusPlayAgain(false);
+    expect(focus.mock.calls).toEqual([[{ preventScroll: true }], [undefined]]);
+    expect(order, 'WebKit scrolls a preventScroll focus made over dirty layout').toEqual([
+      'layout',
+      'focus',
+      'layout',
+      'focus',
+    ]);
+  });
+
+  it('counts the dialog’s arrival as the layout moving: a press on the board just before it opened holds a quick second press off its controls (#181 H2)', () => {
+    const { overlay, actions } = setup();
+    const board = document.createElement('div');
+    document.body.append(board);
+    try {
+      // The run's last press, on the board: the dialog opens under the pointer.
+      clickAt(board, 1000);
+      overlay.showResults(hud({ won: true }), runStats());
+      const playAgain = overlay.resultsEl.querySelector<HTMLButtonElement>('.wy-primary')!;
+      clickAt(playAgain, 1120, 2);
+      expect(actions, 'the double-click’s second press is swallowed').toEqual([]);
+      clickAt(playAgain, 1700);
+      expect(
+        actions.map((a) => a.type),
+        'a later press is the player’s',
+      ).toEqual(['playAgain']);
+    } finally {
+      board.remove();
+    }
+  });
+
+  it('focusPlayAgain holds Play again’s Enter and Space for a moment: a second key press meant for Send starts no run (#181 H2)', () => {
+    const { overlay } = setup();
+    overlay.showResults(hud({ won: true }), runStats());
+    const playAgain = overlay.resultsEl.querySelector<HTMLButtonElement>('.wy-primary')!;
+    const now = vi.spyOn(document.defaultView!.performance, 'now').mockReturnValue(5000);
+    overlay.focusPlayAgain(false);
+    expect(document.activeElement).toBe(playAgain);
+    const enter = (): KeyboardEvent => {
+      const event = new KeyboardEvent('keydown', { key: 'Enter', bubbles: true, cancelable: true });
+      playAgain.dispatchEvent(event);
+      return event;
+    };
+    now.mockReturnValue(5499);
+    expect(enter().defaultPrevented, 'Enter, 499 ms after focus moved').toBe(true);
+    now.mockReturnValue(5500);
+    expect(enter().defaultPrevented, 'at 500 ms Play again takes its key').toBe(false);
+  });
+
+  it('the floor holds again in the next dialog, from that dialog’s own messages (#181 H2)', async () => {
+    const { overlay } = setup();
+    overlay.showResults(hud({ won: true }), runStats());
+    const status = overlay.resultsEl.querySelector<HTMLElement>('.wy-verify')!;
+    let height = 0;
+    status.getBoundingClientRect = () => new DOMRect(0, 0, 400, height);
+    const write = async (message: string, measured: number): Promise<void> => {
+      height = measured;
+      overlay.setResultsStatus(message);
+      await Promise.resolve();
+      await Promise.resolve();
+    };
+    await write('A message three lines tall.', 69);
+    overlay.hideResults();
+    height = 0;
+    overlay.showResults(hud({ won: false }), runStats());
+    await Promise.resolve();
+    await Promise.resolve();
+    await write('Saved the run data, as a file with a long name.', 46);
+    expect(status.style.minHeight, 'the next dialog’s first message sets its own floor').toBe(
+      '46px',
+    );
+    await write('Verified.', 23);
+    expect(status.style.minHeight, 'and a shorter one keeps it').toBe('46px');
+  });
+
+  it('the floor rises when the status region re-wraps taller with no new message, as after a rotation, and never falls (#181 H2)', () => {
+    // jsdom has no ResizeObserver: a fake stands in, and the region's height is stubbed.
+    const observers: { callback: () => void; observed: Element[]; disconnected: boolean }[] = [];
+    class FakeResizeObserver {
+      private readonly record: (typeof observers)[number];
+      constructor(callback: () => void) {
+        this.record = { callback, observed: [], disconnected: false };
+        observers.push(this.record);
+      }
+      observe(el: Element): void {
+        this.record.observed.push(el);
+      }
+      disconnect(): void {
+        this.record.disconnected = true;
+      }
+    }
+    const original = window.ResizeObserver;
+    window.ResizeObserver = FakeResizeObserver as unknown as typeof ResizeObserver;
+    try {
+      const { overlay } = setup();
+      overlay.showResults(hud({ won: true }), runStats());
+      const status = overlay.resultsEl.querySelector<HTMLElement>('.wy-verify')!;
+      const resized = observers.find((o) => o.observed.includes(status));
+      expect(resized, 'the region’s size is followed').toBeDefined();
+      let height = 46;
+      status.getBoundingClientRect = () => new DOMRect(0, 0, 400, height);
+      resized!.callback();
+      expect(status.style.minHeight).toBe('46px');
+      height = 69; // the window narrowed: the same message wraps to three lines
+      resized!.callback();
+      expect(status.style.minHeight, 'a taller wrap raises the floor').toBe('69px');
+      height = 46; // and widened again
+      resized!.callback();
+      expect(status.style.minHeight, 'it never comes down within the dialog').toBe('69px');
+      overlay.destroy();
+      expect(resized!.disconnected, 'and it stops following on teardown').toBe(true);
+    } finally {
+      window.ResizeObserver = original;
+    }
   });
 });
 
@@ -3207,7 +3671,7 @@ describe('overlay — modal priority (results > settings)', () => {
     settingsBtn.click();
     expect(overlay.settingsEl.hidden).toBe(false);
 
-    overlay.showResults(hud({ won: true }));
+    overlay.showResults(hud({ won: true }), runStats());
     expect(overlay.settingsEl.hidden).toBe(true); // hidden while a higher-priority modal is up
     expect(overlay.resultsEl.hidden).toBe(false);
     const playAgain = overlay.resultsEl.querySelector<HTMLButtonElement>('.wy-btn')!;

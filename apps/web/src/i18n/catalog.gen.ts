@@ -30,6 +30,7 @@ export const EN = {
   "controls.pause": "Pause",
   "controls.playAgain": "Play again",
   "controls.resume": "Resume",
+  "controls.runData": "Run data",
   "controls.saveRun": "Save run data",
   "controls.settings": "Settings",
   "controls.speed": "Speed: {factor}x",
@@ -137,8 +138,16 @@ export const EN = {
   "playtrace.saved": "Run data saved as {filename}.",
   "preview.label": "Wave preview",
   "results.lost": "The creeps broke through.",
+  "results.score": "Score",
+  "results.stat.creepsStopped": "Creeps stopped",
+  "results.stat.leaks": "Leaks",
+  "results.stat.towersBuilt": "Towers built",
+  "results.stat.wavesCleared": "Waves cleared",
+  "results.stat.wavesCleared.value": "{cleared} / {count}",
+  "results.subtitle.lost": "Lost with {launched} of {count} waves launched",
+  "results.subtitle.won": "All {count} waves cleared",
   "results.summary": "Score {score} — {stars} of 3 stars",
-  "results.won": "You held the line!",
+  "results.won": "The maze held.",
   "rotate.message": "Wynding plays best in landscape. Rotate your device to continue.",
   "rotate.title": "Rotate your device",
   "settings.accessibility": "Accessibility",
@@ -221,6 +230,7 @@ export interface MessageParams {
   "controls.pause": Record<never, never>;
   "controls.playAgain": Record<never, never>;
   "controls.resume": Record<never, never>;
+  "controls.runData": Record<never, never>;
   "controls.saveRun": Record<never, never>;
   "controls.settings": Record<never, never>;
   "controls.speed": { "factor": string | number };
@@ -328,6 +338,14 @@ export interface MessageParams {
   "playtrace.saved": { "filename": string | number };
   "preview.label": Record<never, never>;
   "results.lost": Record<never, never>;
+  "results.score": Record<never, never>;
+  "results.stat.creepsStopped": Record<never, never>;
+  "results.stat.leaks": Record<never, never>;
+  "results.stat.towersBuilt": Record<never, never>;
+  "results.stat.wavesCleared": Record<never, never>;
+  "results.stat.wavesCleared.value": { "cleared": string | number; "count": string | number };
+  "results.subtitle.lost": { "launched": string | number; "count": string | number };
+  "results.subtitle.won": { "count": string | number };
   "results.summary": { "score": string | number; "stars": string | number };
   "results.won": Record<never, never>;
   "rotate.message": Record<never, never>;
