@@ -24,7 +24,9 @@ interface CueEvent {
 
 interface Recording {
   readonly events: CueEvent[];
-  /** Per cue: the glance's offset from its chip, frame by frame, from the cue's first frame. */
+  /** Per cue: the glance's offset from its chip at each tenth of its shake's span, read by
+   *  seeking the running animation (so a runner that draws few frames reads the same), or once,
+   *  at rest, when no animation runs. */
   readonly sway: number[][];
 }
 
@@ -54,7 +56,7 @@ async function stampFrames(page: Page): Promise<void> {
 }
 
 /** Record every change of the lives count and of the cue, with what the glance looks like the
- *  moment the cue turns on or off, and sample the glance's sway for each cue. */
+ *  moment the cue turns on or off, and read the glance's sway for each cue. */
 async function record(page: Page): Promise<void> {
   await page.evaluate(() => {
     const chip = document.querySelector<HTMLElement>('.wy-chip[data-wy-chip="lives"]')!;
@@ -63,15 +65,27 @@ async function record(page: Page): Promise<void> {
     const rec: Recording = { events: [], sway: [] };
     window.__wyLeak = rec;
     let lives = value.textContent ?? '';
+    // Sampling the shake frame by frame read too few frames on a slow runner to meet its peaks,
+    // so seek the running animation to each tenth of its span instead, and put it back.
     const sway = (): void => {
       const samples: number[] = [];
       rec.sway.push(samples);
-      const until = performance.now() + 450;
-      const sample = (): void => {
-        samples.push(glance.getBoundingClientRect().left - chip.getBoundingClientRect().left);
-        if (performance.now() < until) requestAnimationFrame(sample);
-      };
-      sample();
+      const offset = (): number =>
+        glance.getBoundingClientRect().left - chip.getBoundingClientRect().left;
+      const animations = glance.getAnimations();
+      if (animations.length === 0) {
+        samples.push(offset());
+        return;
+      }
+      for (const a of animations) {
+        const was = a.currentTime;
+        const span = Number(a.effect?.getTiming().duration);
+        for (let k = 0; k <= 10; k++) {
+          a.currentTime = (span * k) / 10;
+          samples.push(offset());
+        }
+        a.currentTime = was ?? 0;
+      }
     };
     new MutationObserver((mutations) => {
       const t = window.__wyFrameNow ?? NaN;
@@ -198,12 +212,18 @@ for (const reduceMotion of [false, true]) {
       expect(off.bg).toBe(pill);
       expect(off.anim).toBe('none');
     }
+    // Side to side, at least 1.5 px each way from where it rests (the keyframes reach 3 px); under
+    // Reduce motion no animation runs at all.
     expect(rec.sway).toHaveLength(ons.length);
     for (const samples of rec.sway) {
-      expect(samples.length).toBeGreaterThan(5);
-      const most = Math.max(...samples.map((x) => Math.abs(x - samples[0]!)));
-      if (reduceMotion) expect(most).toBe(0);
-      else expect(most).toBeGreaterThanOrEqual(1.5);
+      if (reduceMotion) {
+        expect(samples, 'no animation runs').toHaveLength(1);
+        continue;
+      }
+      expect(samples, 'one shake, read at each tenth of its span').toHaveLength(11);
+      const moves = samples.map((x) => x - samples[0]!);
+      expect(Math.min(...moves), 'sways left').toBeLessThanOrEqual(-1.5);
+      expect(Math.max(...moves), 'and right').toBeGreaterThanOrEqual(1.5);
     }
   });
 }
