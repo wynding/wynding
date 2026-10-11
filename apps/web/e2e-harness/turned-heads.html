@@ -1,0 +1,26 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <!-- The e2e turned-heads harness (#181, T3). Its ONLY consumer is `vite.e2e.config.ts`,
+         which builds it into `dist-e2e`: the shipped build never references this page. -->
+    <title>Wynding turned-heads harness</title>
+    <style>
+      html,
+      body {
+        margin: 0;
+        background: #12141c;
+      }
+      #board {
+        position: absolute;
+        left: 0;
+        top: 0;
+      }
+    </style>
+  </head>
+  <body>
+    <div id="board"></div>
+    <script type="module" src="./turned-heads-entry.ts"></script>
+  </body>
+</html>

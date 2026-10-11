@@ -23,6 +23,8 @@ import { createBakeRunner, type BakedArt } from './bake-runner';
 import { createSpritePool } from './sprite-pool';
 import { createSparkStore } from './sparks';
 import { createScorchTracker } from './scorches';
+import { createAimTracker } from './tower-aim';
+import { createFireTracker } from './tower-fire';
 import { renderTimeOf } from './tracers';
 import {
   createLiveLayers,
@@ -218,6 +220,13 @@ export function mount(el: HTMLElement, geometry: BoardGeometry): RenderHandle {
   const sparks = createSparkStore();
   // Where mines went off, fading (`scorches.ts`): fed by every `draw()`, forgotten with the run.
   const scorches = createScorchTracker();
+  // Where each head points (`tower-aim.ts`) and which towers just fired (`tower-fire.ts`): fed
+  // by every frame drawn (`drawBoardFrame`), forgotten with the run. Unlike the scorches they
+  // read nothing that arrives drained: the controller lists a shot every frame until it lands,
+  // so the next frame drawn still sees one in flight. One that lands first shows nothing, as
+  // one whose whole flight falls between two frames does (`tower-fire.ts`).
+  const aim = createAimTracker();
+  const fire = createFireTracker();
   const now = (): number => game.getTime();
 
   // The art the sprites are showing this frame — what a sprite created mid-frame is given.
@@ -358,6 +367,8 @@ export function mount(el: HTMLElement, geometry: BoardGeometry): RenderHandle {
       frames: art.atlas.frames,
       sparks: sparks.live(now(), overlay.reducedMotion),
       scorches,
+      aim,
+      fire,
     });
   };
 
@@ -366,8 +377,9 @@ export function mount(el: HTMLElement, geometry: BoardGeometry): RenderHandle {
     reset(): void {
       sparks.clear();
       // Frames before READY feed the scorch tracker too, so it is forgotten whatever `targets` is.
+      // (Only a frame drawn feeds the aim and fire trackers, so before READY they hold nothing.)
       scorches.reset();
-      if (targets !== null) resetBoardFrame(targets, { scorches });
+      if (targets !== null) resetBoardFrame(targets, { scorches, aim, fire });
     },
     destroy(): void {
       destroyed = true;

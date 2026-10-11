@@ -8,8 +8,10 @@
 // its centre at (32, 32) — and is drawn scaled by `2 × cellPx / 64` CSS px per unit.
 //
 // PLATE AND HEAD ARE SEPARATE, and the board shows them as two sprites (`art-frames.ts`), so a
-// later pass can turn a head toward its target without touching the plate under it. Heads
-// that will aim (`basic`, `venom`, `stun`, `antiair`) are drawn pointing UP, aim angle 0.
+// head turns toward its target without touching the plate under it (T3, `tower-aim.ts`).
+// Heads that aim (`HeadArt.aims`: `basic`, `venom`, `stun`, `antiair`) are drawn pointing UP,
+// aim angle 0. How a tower shows a shot — a recoil and a muzzle flash, or a ring pulse — is
+// at the end (`MUZZLE_FLASH`, `FIRE_PULSE_RINGS`, `RECOIL_DEPTH`); it is drawn live, not baked.
 //
 // COLOURS ARE TOKENS (`ArtColour`), resolved per colour-vision mode by `artColour`: the plate,
 // its rim, the role colours and the boost glow come from the palette and are gated there
@@ -158,9 +160,14 @@ export const PENDING_PLATE_ART: readonly ArtShape[] = [PLATE_SHADOW, PLATE_FILL,
 
 // ---- The heads ----
 
-/** A head's art: its shapes, and whether it sits on a plate (every tower but the mine). */
+/** A head's art: its shapes, whether it sits on a plate (every tower but the mine), and
+ *  whether it AIMS — turns about the footprint centre to face its target (T3,
+ *  `tower-aim.ts`). An aiming head is drawn pointing straight up, aim angle 0, and shows a
+ *  shot with a recoil and a muzzle flash; one that does not aim never turns, and shows a
+ *  shot with a ring pulse instead (`tower-fire.ts`). */
 export interface HeadArt {
   readonly plate: boolean;
+  readonly aims: boolean;
   readonly shapes: readonly ArtShape[];
 }
 
@@ -222,6 +229,7 @@ export const HEAD_ART: Readonly<Record<TowerFootprintMark, HeadArt>> = {
   // basic — a ringed turret with its barrel up: the plain body, now with a centre.
   plain: {
     plate: true,
+    aims: true,
     shapes: [
       { kind: 'rect', x: 28.5, y: 7, w: 7, h: 21, rx: 2, ...BODY },
       { kind: 'circle', cx: C, cy: C, r: 12.5, ...BODY },
@@ -231,6 +239,7 @@ export const HEAD_ART: Readonly<Record<TowerFootprintMark, HeadArt>> = {
   // slow — a six-pointed star around the ring the mark always drew.
   ringed: {
     plate: true,
+    aims: false,
     shapes: [
       { kind: 'polygon', points: star(6, 19, 10.5), ...BODY },
       { kind: 'circle', cx: C, cy: C, r: 6, stroke: 'ink', width: 2.2 },
@@ -239,6 +248,7 @@ export const HEAD_ART: Readonly<Record<TowerFootprintMark, HeadArt>> = {
   // splash — an octagon with the four spokes of the area-effect mark around a hub.
   crosshair: {
     plate: true,
+    aims: false,
     shapes: [
       { kind: 'polygon', points: regular(8, 18, -22.5), ...BODY },
       { kind: 'circle', cx: C, cy: C, r: 6.5, fill: 'ink' },
@@ -248,6 +258,7 @@ export const HEAD_ART: Readonly<Record<TowerFootprintMark, HeadArt>> = {
   // venom — the droplet itself, tip up, with a highlight.
   droplet: {
     plate: true,
+    aims: true,
     shapes: [
       {
         kind: 'path',
@@ -260,6 +271,7 @@ export const HEAD_ART: Readonly<Record<TowerFootprintMark, HeadArt>> = {
   // stun — a diamond carrying the bolt's zigzag.
   bolt: {
     plate: true,
+    aims: true,
     shapes: [
       {
         kind: 'polygon',
@@ -284,6 +296,7 @@ export const HEAD_ART: Readonly<Record<TowerFootprintMark, HeadArt>> = {
   // antiair — the arrow, swept back and pointing up, with its shaft.
   arrow: {
     plate: true,
+    aims: true,
     shapes: [
       { kind: 'path', d: 'M32 9L47.5 44L37 38L32 51L27 38L16.5 44Z', ...BODY },
       { kind: 'path', d: 'M32 22V37', stroke: 'ink', width: 2.4, cap: 'round' },
@@ -292,6 +305,7 @@ export const HEAD_ART: Readonly<Record<TowerFootprintMark, HeadArt>> = {
   // beacon — the mast on its base, broadcasting.
   pylon: {
     plate: true,
+    aims: false,
     shapes: [
       { kind: 'rect', x: 20, y: 47, w: 24, h: 6, rx: 2, ...BODY },
       { kind: 'path', d: 'M27 48L37 48L35 23L29 23Z', ...BODY },
@@ -310,6 +324,7 @@ export const HEAD_ART: Readonly<Record<TowerFootprintMark, HeadArt>> = {
   // mine — no plate: a studded charge lying on the floor, its own shadow under it.
   charge: {
     plate: false,
+    aims: false,
     shapes: [
       { kind: 'ellipse', cx: 34, cy: 36, rx: 19, ry: 15, fill: 'shadow', alpha: SHADOW_ALPHA },
       ...regular(6, 15.5, 0).map(([cx, cy]): ArtShape => ({
@@ -334,6 +349,7 @@ export const HEAD_ART: Readonly<Record<TowerFootprintMark, HeadArt>> = {
   // other head, splash's and the other two control heads' (the star and the diamond) included.
   'ringed-crosshair': {
     plate: true,
+    aims: false,
     shapes: [
       { kind: 'polygon', points: plus(6, 18), ...BODY },
       { kind: 'circle', cx: C, cy: C, r: 5.25, stroke: 'ink', width: 2.2 },
@@ -418,3 +434,32 @@ export const SCORCH_ART: readonly ArtShape[] = (() => {
     },
   ];
 })();
+
+// ---- Firing (T3) ----
+//
+// How a tower shows a shot, per the style frame's firing state. Drawn LIVE each frame in the
+// effects layer (`tower-fire.ts` plans it, `board-frame.ts` draws it), not baked: each piece
+// lasts a few ticks and fades, so it is a shape at a fading opacity rather than a frame.
+
+/** The muzzle flash's warm white — decorative and transient, like the impact spark. */
+export const ART_FLASH = 0xfff6d8;
+
+/** An aiming head's muzzle flash: a disc of radius `r` design units, centred `reach` units out
+ *  from the footprint centre along the head's facing — just past the tip of every aiming
+ *  head, where the frame draws it (centre (32, 6) with the head pointing up) — at `alpha`
+ *  the instant the shot leaves. As it fades it shrinks to `fadeR`, so it dies away as a
+ *  small spark rather than a full disc greying out over the dark plate (the frame draws only
+ *  the instant of the shot). */
+export const MUZZLE_FLASH = { reach: 26, r: 6, fadeR: 3, alpha: 0.95 } as const;
+
+/** The ring pulse a head that does NOT aim shows when it fires: two rings about the footprint
+ *  centre in the tower's role colour, around the head and inside the plate — each a radius
+ *  and a stroke width in design units, and its opacity the instant the shot leaves. */
+export const FIRE_PULSE_RINGS = [
+  { r: 24, width: 2.6, alpha: 0.85 },
+  { r: 28, width: 1.2, alpha: 0.4 },
+] as const;
+
+/** How far an aiming head is knocked back along its facing when it fires, in design units —
+ *  about a tenth of a cell. The frame draws a still, so this one is ours. */
+export const RECOIL_DEPTH = 3;

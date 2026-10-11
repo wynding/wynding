@@ -25,6 +25,14 @@ export type { TowerFootprintMark, TowerRole, TowerLook } from './tower-paint';
 export { artGraphics } from './art-paint';
 export type { ArtGraphics, ArtCanvas2DLike, PathFactory } from './art-paint';
 export { paintTowerArt, towerArtFit } from './art-frames';
+// How often a tower's shot flashes (visual pass T3) — what `apps/web`'s fire-rate test holds
+// every shipped tower to at every game speed (ADR 0003, WCAG 2.3.1).
+export {
+  flashesPerSecond,
+  shortestFourFlashMs,
+  FIRE_FEEDBACK_TICKS,
+  MAX_FLASHES_PER_SECOND,
+} from './tower-fire';
 // The backing store a canvas needs to be shown pixel for pixel — a Card swatch's as the board's.
 export { backingStoreSize, devicePixelReport, observesDevicePixels } from './device-px';
 export type { DevicePixelReport } from './device-px';

@@ -1,0 +1,15 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+    <!-- The e2e results harness (#181 H2). Its ONLY consumer is `vite.e2e.config.ts`, which
+         builds it into `dist-e2e`: the shipped build never references this page. No manifest,
+         no service worker: it is never installed. -->
+    <title>Wynding results harness</title>
+  </head>
+  <body>
+    <div id="app"></div>
+    <script type="module" src="./results-entry.ts"></script>
+  </body>
+</html>

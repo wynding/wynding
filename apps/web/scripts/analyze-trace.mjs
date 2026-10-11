@@ -42,14 +42,17 @@ if (!Array.isArray(events)) throw new Error('no traceEvents array in trace');
 
 // ---- 1) Renderer process + main thread identification (observed recipe) ----
 // `TracingStartedInBrowser` carries args.data.frames[] = {frame, processId, url, ...};
-// match url to /perf/index.html. `process_labels` was NOT present in pilot traces —
-// do not rely on it. `ph:'M'` metadata then gives thread names.
+// match url to the perf page that was traced: /perf/index.html (the stress scene) or
+// /perf/catalog.html (the catalog scene, which this matched only from visual pass T3 on —
+// before that, a catalog trace stopped at "renderer pid not found"). `process_labels` was
+// NOT present in pilot traces — do not rely on it. `ph:'M'` metadata then gives thread names.
+const PERF_PAGE = /\/perf\/(index|catalog)\.html/;
 let rendererPid = null;
 for (const e of events) {
   if (e.name === 'TracingStartedInBrowser') {
     const frames = e.args?.data?.frames ?? [];
     for (const f of frames) {
-      if (typeof f.url === 'string' && f.url.includes('/perf/index.html')) {
+      if (typeof f.url === 'string' && PERF_PAGE.test(f.url)) {
         rendererPid = f.processId;
       }
     }

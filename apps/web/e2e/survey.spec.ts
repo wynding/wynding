@@ -144,19 +144,32 @@ test.describe('the end-of-run survey (#158, ADR 0014)', () => {
     const tryAgain = results(page).getByRole('button', { name: 'Try again' });
     await expect(tryAgain).toBeFocused();
     await expect(text).toHaveValue('abc');
-    const verify = results(page).getByRole('button', { name: 'Verify this run' });
-    await expect(verify, 'the region was released on the outcome').toHaveAttribute(
-      'aria-disabled',
-      'false',
+    // The region's other writers — Verify and the two exports — sit behind the Run data
+    // disclosure (#181 H2). Opened here, so the lock is checked on controls a player can reach.
+    await results(page).getByRole('button', { name: 'Run data', exact: true }).click();
+    const writers = ['Verify this run', 'Copy run data', 'Save run data'].map((name) =>
+      results(page).getByRole('button', { name }),
     );
+    for (const writer of writers) {
+      await expect(writer).toBeVisible();
+      await expect(writer, 'the region was released on the outcome').toHaveAttribute(
+        'aria-disabled',
+        'false',
+      );
+    }
 
-    // In flight (§6): the region is held, Verify is locked, and no edit gets through.
+    // In flight (§6): the region is held, every other writer is locked, and no edit gets
+    // through.
     await setMode(page, 'hold');
     await tryAgain.click();
     await expect(status(page)).toHaveText('Sending your feedback…');
-    await expect(verify).toHaveAttribute('aria-disabled', 'true');
-    await verify.click({ force: true }); // aria-disabled: Playwright will not click it unforced
-    await expect(status(page), 'a locked Verify says nothing').toHaveText('Sending your feedback…');
+    for (const writer of writers) {
+      await expect(writer).toHaveAttribute('aria-disabled', 'true');
+      await writer.click({ force: true }); // aria-disabled: Playwright will not click it unforced
+      await expect(status(page), 'a locked writer says nothing').toHaveText(
+        'Sending your feedback…',
+      );
+    }
     // Count `change` events from here on: the render-from-model fallback would put a changed
     // choice back, so the final state alone cannot prove the edit was PREVENTED (§6).
     await page.evaluate(() => {
@@ -239,9 +252,9 @@ test.describe('the end-of-run survey (#158, ADR 0014)', () => {
   });
 
   // What this proves is the SCROLL CONTRACT: the form overflows, the top stays reachable, the
-  // bottom scrolls into view. It runs in Chromium only, which also supports `safe center`, so
-  // it cannot by itself catch the older-WebKit fallback that made `ui.css` centre with auto
-  // margins instead; it catches a regression back to plain `center` in any engine.
+  // bottom scrolls into view. Since #181 H2 the scroller is the results panel's BODY, inside a
+  // panel capped to the dialog — so the dialog itself must never be what scrolls, and placing
+  // the panel can never push its top out of reach.
   test.describe('on a short landscape viewport', () => {
     test.use({ viewport: { width: 740, height: 360 } });
 
@@ -250,11 +263,16 @@ test.describe('the end-of-run survey (#158, ADR 0014)', () => {
       await playToResults(page);
       await giveFeedback(page).click();
       const dialog = results(page);
-      const overflows = await dialog.evaluate((el) => el.scrollHeight > el.clientHeight);
+      const scroller = dialog.locator('.wy-results-body');
+      const overflows = await scroller.evaluate((el) => el.scrollHeight > el.clientHeight);
       expect(overflows, 'the case under test: the form is taller than the viewport').toBe(true);
-      // Scrolled to the top, the heading is fully on screen — not centred into negative
+      expect(
+        await dialog.evaluate((el) => el.scrollHeight <= el.clientHeight),
+        'the panel scrolls INSIDE the dialog: the dialog itself never overflows',
+      ).toBe(true);
+      // Scrolled to the top, the heading is fully on screen — not placed into negative
       // overflow, where no scroll position could ever reach it.
-      await dialog.evaluate((el) => {
+      await scroller.evaluate((el) => {
         el.scrollTop = 0;
       });
       const heading = await dialog.getByRole('heading').boundingBox();

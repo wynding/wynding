@@ -1153,3 +1153,234 @@ p95 18.6 / 18.5 ms against the 16.7 ms budget; low-end 60.1 / 59.9 ms against 33
 **What this evidence is.** Emulation on one development machine — the same class of evidence
 as the S10 Finding, with the 6× / 2× CPU throttles slowing JavaScript but not the GPU. It does
 not stand in for the real-device pass that ruling 6 above still holds open.
+
+## Amendment — 2026-10-03 (visual pass T3, #181) — what towers that aim cost
+
+Visual pass item T3 turns the heads of the towers that aim (basic, venom, stun and antiair, and any
+tower the catalog has never heard of, which looks like basic) toward their target every frame, and
+shows each shot: a recoil and a muzzle flash, or a ring pulse for a tower that does not aim. Both
+run per frame, on the render clock, in Phaser-free trackers (`packages/render/src/tower-aim.ts`,
+`tower-fire.ts`); the flash and the pulse are drawn live into the effects layer. This entry records
+what that costs on the record-only browser suite, what was done about it, and what remains. It
+changes no budget, no trigger, `R0`, `TOLERANCE` or the CI ratio gate.
+
+**Attributed (QC round 1, at `335689b`).** Three builds of the same head, each run gated on one
+worker: the head as built; B, the head with no flash or pulse drawn; and C, T3 off, where the
+trackers take nothing in, so every head stays as R2 drew it. Frame time in ms, p50 / p95 / p99:
+
+| scene   | profile   | head               | B: no flash or pulse | C: T3 off          |
+| ------- | --------- | ------------------ | -------------------- | ------------------ |
+| catalog | mid-range | 8.3 / 10.2 / 10.3  | 8.3 / 10.2 / 10.3    | 8.3 / 10.2 / 10.4  |
+| stress  | mid-range | 16.6 / 18.8 / 25.0 | 16.6 / 18.5 / 25.0   | 16.6 / 18.5 / 25.0 |
+| catalog | low-end   | 24.8 / 33.6 / 35.0 | 24.8 / 33.4 / 35.0   | 23.9 / 33.2 / 34.7 |
+| stress  | low-end   | 58.3 / 66.5 / 75.0 | 58.1 / 66.8 / 75.1   | 58.0 / 60.1 / 74.6 |
+
+Read by percentile, B matched the head, and aiming alone looked like it added almost a millisecond
+to the catalog scene's low-end p50 and about 6 ms to the stress scene's low-end p95.
+
+**Why the percentiles jump, and a steadier measure.** On this machine's display, which refreshes
+every 8.33 ms, a frame lasts a whole number of refreshes whenever its own work is what holds it up,
+as it is at low-end. The stress scene's low-end p50 of 58.3 ms is seven refreshes, and its p95 lands
+a little over seven or on eight from run to run. Across the runs in this entry, it was 59.6 and 60.1
+ms with T3 off; with T3 on, 65.4–67.8 ms in four runs and 60.3 ms in the fifth. The catalog scene's
+low-end p95 is four refreshes, 33.2–33.6 ms, in every run with T3 on or off: on the 33.3 ms budget
+line either way. A small cost moves a percentile by a whole refresh or not at all, so the
+percentiles overstate it in some runs and miss it in others. The mean frame time over the sampling
+window (the window's length over the frames counted in it) moves smoothly, so it is the better
+measure of a cost this size. Mean frame time in ms, from the runs above and the two after the change
+(below):
+
+| scene   | profile   | head at `335689b` | head at `2322e24` | B: no flash or pulse | C: T3 off     |
+| ------- | --------- | ----------------- | ----------------- | -------------------- | ------------- |
+| catalog | mid-range | 8.36 / 8.33       | 8.34 / 8.37       | 8.35                 | 8.35 / 8.36   |
+| stress  | mid-range | 15.95 / 15.95     | 15.85 / 15.97     | 15.87                | 15.72 / 15.67 |
+| catalog | low-end   | 23.81 / 23.92     | 23.87 / 23.70     | 23.58                | 22.62 / 22.22 |
+| stress  | low-end   | 56.18 / 57.47     | 59.52 / 55.25     | 56.82                | 53.48 / 55.56 |
+
+T3 costs the catalog scene about 1.4 ms a frame at low-end, about 6%, and every run shows it. It
+costs the stress scene about 2.6 ms at low-end on average, though that scene's runs spread almost as
+widely (55.25 to 59.52 ms for the head), and about a quarter of a millisecond at mid-range. The
+catalog scene at mid-range sits on one refresh either way, so it shows nothing. B sits within the
+head's spread: the flash and the pulse cost little or nothing.
+
+**Where it went, in Node.** A profile of the real per-frame path in Node rather than the browser:
+each perf scene built as its page builds it (the real controller, the same placements and the same
+fast-forward), two hundred frames of it recorded at each profile's pace (a tick a frame for low-end,
+a frame per display refresh for mid-range), then replayed twelve times through the real
+`drawBoardFrame` — the real trackers, the real sprite pools over stand-in sprites — under V8's
+sampling profiler. Unthrottled, the board frame's JavaScript took about a fifth of a millisecond a
+frame in every scene and profile. T3's trackers were 14.5% of it in the stress scene at low-end and
+8.1% in the catalog scene, and most of that was bookkeeping, not aiming: a map of every tower's
+footprint centre, keyed by strings and rebuilt on almost every low-end frame to match new shots to
+their towers (6.2% and 4.9% on its own), a string key built for every tracer in flight every frame,
+and a new map of head angles every frame. Turning the heads, the angle arithmetic itself, was a
+small part of it. Garbage collection was 1.3–1.6% of the replay either way.
+
+**What changed (`e5d3454`).**
+
+- The fire tracker passes over a shot it has already taken in on its launch tick alone. The
+  controller lists every shot a sim tick fires together, from the first frame after that tick
+  (`apps/web/src/controller.ts`), so a shot launched no later than the latest launch tick taken in
+  has been seen already. Only a new shot is matched to its tower, by a scan of the towers, and the
+  towers that just fired are pruned in place.
+- The aim tracker keeps each head and updates it in place, and on a frame whose render time has not
+  moved — a paused game — it turns nothing: it still walks every tower to keep it marked as seen,
+  and skips only the angle maths.
+- The map of where each creep is drawn holds the interpolated creeps themselves, not a copy of each
+  creep's point.
+- `wrapAngle` skips its floating-point remainder for an angle already in range, which every angle
+  the tracker keeps is, and `towerAims` keeps each tower id's answer.
+
+On the same recorded frames, T3's part of the board frame's JavaScript (the frame with T3, less the
+same frame without it) fell from about 71 µs to half that at stress low-end, and from about 43 to 13
+µs at catalog low-end. These Node figures move by about 5 µs from run to run.
+
+**After (`2322e24`).** Two runs of the record-only suite, gated, one worker, on AC power. Frame time
+in ms, p50 / p95 / p99:
+
+| scene   | profile   | first run          | second run         |
+| ------- | --------- | ------------------ | ------------------ |
+| catalog | mid-range | 8.3 / 10.2 / 10.3  | 8.3 / 10.3 / 10.4  |
+| stress  | mid-range | 16.6 / 18.6 / 25.1 | 16.6 / 23.3 / 25.1 |
+| catalog | low-end   | 24.9 / 33.3 / 35.2 | 24.7 / 33.3 / 35.1 |
+| stress  | low-end   | 58.4 / 67.8 / 92.1 | 57.3 / 60.3 / 73.9 |
+
+The browser does not see the saving: the means (the second table above) are where they were before
+the change. What Node saved comes to about a fifth of a millisecond at the low-end profile's 6×
+throttle, below what this suite resolves. The second run's stress mid-range p95 of 23.3 ms is the
+same tail as an earlier head run's, which a repeat put back at 18.8. The stress scene's p95-breach
+signal fires on both profiles, as it did before T3 (V2's entry above).
+
+**What remains: a cost the Node profile does not show.** At catalog low-end T3 costs the browser
+about 1.4 ms a frame, about 230 µs before the 6× throttle. That is more than fifteen times what the
+Node profile puts on T3 in that scene (about 13 µs), and more than the whole board frame's
+JavaScript takes there in Node (about 180 µs). So most of it is not in the per-frame JavaScript as
+the Node replay runs it. What that replay leaves out is Phaser itself — its sprite setters and its
+own render loop, which the S10 Finding found is where most frame time goes — and the browser's
+garbage collection under the whole app's allocation. Turning a head should not make it dearer for
+Phaser to draw: `batchSprite` builds every sprite's transform from its rotation, upright or not.
+Where the rest goes is not established. The S10 Finding's traced method (`WY_TRACE=1`,
+`apps/web/scripts/analyze-trace.mjs`) on the catalog scene at low-end, with T3 on and off, would
+show it: if the `wy:draw` span — the app's own draw, which holds the trackers, the placement and the
+sprite pools — grows by the gap, the cost is in that JavaScript under the browser's conditions; if
+it does not, it is in Phaser's loop or in garbage collection.
+
+**Traced (QC round 2, at `7b943ba`).** The S10 Finding's method (`WY_TRACE=1`, then
+`apps/web/scripts/analyze-trace.mjs`, which reads a catalog trace from this round on) on the catalog
+scene at low-end: one run with T3 on and one with T3 off (variant C above), each built from its own
+scratch copy of the lane head. Per frame, averaged over the sampling window, in µs:
+
+| span                                | T3 off | T3 on  | on − off |
+| ----------------------------------- | ------ | ------ | -------- |
+| the main thread's work              | 24,407 | 25,256 | +849     |
+| Phaser's own frame, its render loop | 17,606 | 18,237 | +630     |
+| the app's draw (`wy:draw`)          | 2,559  | 2,809  | +251     |
+
+The sim step, the view model and garbage collection each moved by less than a twentieth of a
+millisecond. So about three quarters of what T3 costs the browser is Phaser's, and the rest the
+app's own draw. Phaser's part, placed by the call stack each profiler sample was taken in and counted
+inclusively, in µs a frame:
+
+| where in Phaser                                       | T3 off | T3 on  |
+| ----------------------------------------------------- | ------ | ------ |
+| drawing the live layers (its `Graphics` renderer)     | 15,399 | 15,528 |
+| drawing sprites (`ImageWebGLRenderer`, `batchSprite`) | 403    | 619    |
+| its per-object render loop                            | 398    | 522    |
+
+The live layers grew by the flash and the pulse they now draw. The other two grew because heads
+turn, and so did a third, smaller loop: the camera's visibility filter took nearly three times as
+long.
+
+**Why a turned head made every sprite dearer: hidden classes.** Phaser keeps a game object's
+defaults, its rotation, alpha and visibility among them, on the prototype its components are mixed
+into, and an object owns a field only once one is set on it. A head's first `setRotation` gave it a
+`_rotation` of its own, and with it a V8 hidden class of its own. Each of Phaser's loops over its
+objects then met turned and unturned sprites as two shapes where it had met one, and slowed down
+for every sprite, not only the turned heads. A probe that gave every pooled sprite its rotation at birth, and changed nothing else,
+took about 0.29 ms a frame off sprite drawing, the render loop and the visibility filter together,
+about two thirds of what T3 had added to them. Its traced frame as a whole did not show the saving:
+one traced run moves by up to half a millisecond in parts no change touches, and in the probe's run
+the sim step alone, which the probe does not touch, took 0.13 ms a frame more. These runs locate the
+cost; untraced runs are what size it.
+
+**What changed (QC round 2).**
+
+- Every pooled sprite has one shape from birth (`533fbf7`). The pool gives each new sprite its
+  alpha, origin, rotation and visibility at once, in one order, even at their defaults, so every
+  sprite owns the same fields and Phaser's loops meet one shape again. A reused sprite is still
+  given each only when it changed. This rests on where Phaser v3.90 keeps those defaults, so a
+  Phaser upgrade could change it: `sprite-pool.ts` says so beside the code, and a render test fails
+  on any other Phaser release until this is re-checked.
+- The muzzle flash and the pulse rings are polygons (`7bd3183`,
+  `packages/render/src/circle-polygon.ts`). Phaser draws every circle as a hundred and one points
+  whatever its radius (`GraphicsWebGLRenderer` steps round it a hundredth of a turn at a time):
+  earcut triangulates a filled one over all of them, and a stroked one becomes a hundred line quads.
+  A regular polygon with enough sides that none is longer than three CSS pixels, from twelve for the
+  smallest circles up to twenty-four, costs a fraction of that. Below twenty-four sides it is within
+  a fifth of a CSS pixel of its circle, and at twenty-four within 1% of its radius. For a pulse
+  ring, that 1% is under a quarter of a pixel at the cell size a 1440×900 window plays at,
+  thirty-three pixels, and at any smaller cell; at larger cells it grows with the ring, to just
+  under half a pixel at sixty-pixel cells. A flash at thirty-three-pixel cells has thirteen sides.
+
+**After (QC round 2, the code of `3d83684`).** Four runs of the record-only suite, gated, one
+worker, on AC power with the gate's fast policy throughout, alternating the head and T3 off
+(variant C, built from a scratch copy of `3d83684`). Each run's bundle was checked for its
+variant: the polygon helper in both, the control only in T3 off. Frame time in ms, p50 / p95 / p99:
+
+| scene   | profile   | head, first run    | head, second run   | T3 off, first run  | T3 off, second run |
+| ------- | --------- | ------------------ | ------------------ | ------------------ | ------------------ |
+| catalog | mid-range | 8.3 / 10.2 / 10.3  | 8.3 / 10.2 / 10.4  | 8.3 / 10.2 / 10.4  | 8.3 / 10.2 / 10.3  |
+| stress  | mid-range | 16.6 / 18.5 / 25.0 | 16.6 / 18.6 / 25.1 | 16.6 / 18.6 / 25.0 | 16.6 / 18.6 / 24.9 |
+| catalog | low-end   | 24.6 / 33.6 / 35.1 | 24.7 / 33.3 / 35.0 | 24.2 / 32.3 / 33.7 | 23.7 / 33.0 / 34.7 |
+| stress  | low-end   | 58.0 / 66.1 / 74.8 | 58.0 / 65.8 / 66.8 | 58.2 / 64.9 / 67.4 | 52.0 / 60.2 / 75.0 |
+
+Mean frame time in ms, and what T3 adds to it (the head's mean less T3 off's):
+
+| scene   | profile   | head          | T3 off        | T3 adds   |
+| ------- | --------- | ------------- | ------------- | --------- |
+| catalog | mid-range | 8.37 / 8.33   | 8.35 / 8.33   | nothing   |
+| stress  | mid-range | 16.05 / 15.72 | 15.60 / 15.53 | 0.32      |
+| catalog | low-end   | 23.64 / 23.31 | 22.32 / 22.37 | 1.13      |
+| stress  | low-end   | 56.82 / 56.50 | 56.50 / 54.35 | about 1.2 |
+
+**What remains.** At catalog low-end T3 now adds about 1.13 ms a frame, against about 1.4 before
+this round. The head's mean fell to 23.31–23.64 ms, from 23.70–23.92 across QC round 1's four head
+runs, while T3 off held where it was (22.32–22.37 ms, against 22.22–22.62). That is close to what
+the traced probe recovered, so the one sprite shape and the polygons together bought about a fifth
+of T3's cost there. The stress scene's low-end means spread by more than two milliseconds from run
+to run (54.35 to 56.50 ms with T3 off), too widely to size a change this small, and its mid-range
+adds about a third of a millisecond, much as before. The catalog scene at mid-range sits on one
+refresh either way. At catalog low-end T3 still holds the p95 on the 33.3 ms budget line, at 33.6
+and 33.3 ms, where with T3 off it fell just below it. How the millisecond that remains divides was
+not measured after the change. Before it, the trace above put about a quarter of a millisecond
+(traced) in the app's own draw, the trackers and the placement of turned heads, and the rest in
+Phaser, in its per-object loops and in drawing the flash and the rings: the two parts this round
+worked on. None of it moves a budget, a trigger, `R0`, `TOLERANCE` or the CI ratio gate, and the
+stress scene's p95-breach signal fired on both profiles in all four runs, as it did before T3.
+
+**The largest lever left: the live layers' circles.** In the traced frame with T3 on, Phaser's
+`Graphics` renderer took 15.53 of the 25.26 ms, about three fifths of it, drawing the live layers,
+which are cleared and redrawn every frame: tracers, impact sparks, HP pips, range rings and the
+rest. Every circle among them is a hundred and one points whatever its size, so a tracer's dot a few
+pixels across costs Phaser what a range ring does. Drawing those circles as `circle-polygon.ts`
+polygons, as T3's flash and rings now are, is the largest saving left in reach. Visual pass items C1
+and C2 (combat feedback and shots) take it up for tracers, sparks and pips.
+
+**Outside T3: the frame keys.** The single largest cost in the board frame's JavaScript, in every
+scene and with T3 on or off, is `anchorOf` in `placement.ts`, at about a fifth of it: every frame
+builds each creep's and each head's atlas frame key as a new string and looks it up in the frame
+map, so every lookup hashes a fresh string. It predates T3 (R1 and R2), and is left for a later
+pass; the creep frame keys change with the creep art (R4) anyway.
+
+**The rim repaint (`rims`, after the turned-rim fix).** A turned or knocked-back head on a plated
+tower darkened the plate's rim at fractional device scales, so the sprite layer `rims` repaints the
+rim's four straight runs over every posed head, as one baked frame, placed in `placeTowers` beside
+the head. It adds sprites only for posed heads. One gated run of the record-only suite on that
+head, on AC power with the fast policy, shows no cost beyond this suite's own run-to-run spread:
+all four scene and profile cells landed inside the ranges the runs above record for T3 on, and the
+catalog low-end p95 stayed on or under the refresh-budget line it sits on, so T3's claim about that
+line holds unchanged. It changes no budget, no trigger, `R0`, `TOLERANCE` or the CI ratio gate.
+
+**What this evidence is.** Emulation on one development machine (Chrome 149.0.7827.55, ANGLE Metal
+on an Apple M4 Pro), the same class of evidence as V2's entry: the CPU throttles slow JavaScript,
+not the GPU. It does not stand in for the real-device pass that ruling 6 above still holds open.
