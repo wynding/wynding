@@ -42,6 +42,7 @@ import {
   type DevicePixelReport,
 } from './device-px';
 import { layerDepth } from './layers';
+import type { KeptAimPoint } from './placement';
 import type { RenderVM, RenderOverlay, RenderHandle } from './types';
 
 /** Board size in cells — the scene needs this to build its projection (RenderVM carries
@@ -232,6 +233,9 @@ export function mount(el: HTMLElement, geometry: BoardGeometry): RenderHandle {
   // frame drawn, forgotten with the run. Kills and leaks arrive drained, like sparks; the few a
   // frame before READY could hand it are dropped, as nothing is drawn to show them on.
   const feedback = createFeedbackTracker();
+  // Where each creep is drawn this frame (`creepAimPoints`), rewritten in place by every frame
+  // drawn and forgotten with the run.
+  const drawnPoints = new Map<number, KeptAimPoint>();
   const now = (): number => game.getTime();
 
   // The art the sprites are showing this frame — what a sprite created mid-frame is given.
@@ -383,6 +387,7 @@ export function mount(el: HTMLElement, geometry: BoardGeometry): RenderHandle {
       aim,
       fire,
       feedback,
+      drawnPoints,
     });
   };
 
@@ -394,7 +399,8 @@ export function mount(el: HTMLElement, geometry: BoardGeometry): RenderHandle {
       // (Only a frame drawn feeds the aim, fire and feedback trackers, so before READY they hold
       // nothing.)
       scorches.reset();
-      if (targets !== null) resetBoardFrame(targets, { scorches, aim, fire, feedback });
+      if (targets !== null)
+        resetBoardFrame(targets, { scorches, aim, fire, feedback, drawnPoints });
     },
     destroy(): void {
       destroyed = true;

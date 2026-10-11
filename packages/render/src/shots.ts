@@ -29,7 +29,7 @@ import {
   STUN_ARC,
 } from './effect-art';
 import type { Palette } from './palette';
-import type { FrameAnchor, SpritePlacement } from './placement';
+import { anchorOf, type FrameAnchor, type SpritePlacement } from './placement';
 import type { Projection } from './projection';
 import { isDetonation } from './scorches';
 import type { PositionedTracer } from './tracers';
@@ -107,8 +107,7 @@ function centred(
   x: number,
   y: number,
 ): SpritePlacement {
-  const a = frames.get(key);
-  if (a === undefined) throw new Error(`board atlas has no frame '${key}'`);
+  const a = anchorOf(frames, key);
   return { frame: key, x: x - a.anchorX, y: y - a.anchorY };
 }
 
@@ -198,8 +197,7 @@ export function planShots(
     }
     // A tracer turned to its heading, about its head — where the shot is.
     const key = keys.tracer as string;
-    const a = frames.get(key);
-    if (a === undefined) throw new Error(`board atlas has no frame '${key}'`);
+    const a = anchorOf(frames, key);
     flying.push({
       frame: key,
       x: at.x,

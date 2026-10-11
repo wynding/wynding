@@ -21,7 +21,7 @@ export { isDetonation } from './scorches';
 export { ART_GEM, ART_LIVES } from './art-ink';
 // Where a tower's shots start — the sim's fire origin, its footprint centre — for the controller
 // to find a shot's tower by, as the renderer does (`tower-fire.ts`).
-export { footprintCentreFp } from './tower-aim';
+export { footprintCentreFp, fpPointKey } from './tower-aim';
 export {
   creepShapeFor,
   creepFamilyFor,

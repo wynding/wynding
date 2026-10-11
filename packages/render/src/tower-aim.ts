@@ -128,6 +128,12 @@ export function footprintCentreFp(cell: number): number {
   return (cell + 1) * FP_ONE;
 }
 
+/** One number for a fixed-point point, so a map can be keyed by it: sim coordinates are whole and
+ *  far below 2^26. */
+export function fpPointKey(x: number, y: number): number {
+  return x * 67108864 + y;
+}
+
 /** The bearing of `shot` from its tower's footprint centre: toward where its target is drawn,
  *  or where a blast will land. Null when its target is no longer drawn, or sits on the centre. */
 function shotBearing(shot: AimShot, creeps: AimFrame['creeps']): number | null {

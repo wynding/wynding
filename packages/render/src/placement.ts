@@ -74,7 +74,8 @@ export interface HeadPose {
  *  head that does not aim, and every head under Reduce motion. */
 export const HEAD_AT_REST: HeadPose = { angle: 0, recoilPx: 0 };
 
-function anchorOf(frames: ReadonlyMap<string, FrameAnchor>, key: string): FrameAnchor {
+/** The atlas frame `key`'s anchor: a miss is a broken atlas, never a quiet gap. */
+export function anchorOf(frames: ReadonlyMap<string, FrameAnchor>, key: string): FrameAnchor {
   const frame = frames.get(key);
   // Every key placement can produce — `groundFrameKey`, `headFrameKey`, `pendingFrameKey`,
   // the scorch, `creepFrameKeys` — is baked (`art-frames.ts`), for any id at all: a miss is a

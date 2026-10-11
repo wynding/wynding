@@ -48,6 +48,7 @@ import {
   creepBodyCentre,
   placeTowers,
   type CreepPlacement,
+  type KeptAimPoint,
   type SpritePlacement,
 } from './placement';
 import { createScorchTracker } from './scorches';
@@ -219,6 +220,7 @@ function busyFrame(projection = PROJECTION): BoardFrameInput {
     aim: createAimTracker(),
     fire: createFireTracker(),
     feedback: createFeedbackTracker(),
+    drawnPoints: new Map(),
   };
 }
 
@@ -369,8 +371,9 @@ describe('drawBoardFrame — the sprite layers and the board image', () => {
       aim: { reset: () => resets.push('aim') },
       fire: { reset: () => resets.push('fire') },
       feedback: { reset: () => resets.push('feedback') },
+      drawnPoints: { clear: () => resets.push('drawnPoints') },
     });
-    expect(resets.sort()).toEqual(['aim', 'feedback', 'fire', 'scorches']); // each one, once
+    expect(resets.sort()).toEqual(['aim', 'drawnPoints', 'feedback', 'fire', 'scorches']); // each one, once
     for (const layer of [t.layers.shells, t.layers.effects, t.layers.cues]) {
       expect(layer.calls[layer.calls.length - 1]!.method).toBe('clear');
     }
@@ -524,6 +527,7 @@ describe('drawBoardFrame — combat feedback: a hit’s flash, a kill’s burst 
       aim: createAimTracker(),
       fire: createFireTracker(),
       feedback: createFeedbackTracker(),
+      drawnPoints: new Map(),
     };
     const draw = (
       nowMs: number,
@@ -773,6 +777,7 @@ describe('drawBoardFrame — a spent mine’s scorch, in the scorches layer, on 
     const aim = createAimTracker();
     const fire = createFireTracker();
     const feedback = createFeedbackTracker();
+    const drawnPoints = new Map<number, KeptAimPoint>();
     // A mine anchored at (6, 2): its footprint centre — where its blast is anchored — is the
     // corner of cells (7, 3).
     const mine = tower(3, 'mine', 6);
@@ -793,6 +798,7 @@ describe('drawBoardFrame — a spent mine’s scorch, in the scorches layer, on 
       nowMs: 0,
       sparks: [],
       feedback,
+      drawnPoints,
       scorches,
       aim,
       fire,
@@ -839,6 +845,7 @@ describe('drawBoardFrame — a spent mine’s scorch, in the scorches layer, on 
     const aim = createAimTracker();
     const fire = createFireTracker();
     const feedback = createFeedbackTracker();
+    const drawnPoints = new Map<number, KeptAimPoint>();
     const mine = tower(3, 'mine', 6); // footprint centre: the corner of cells (7, 3)
     const frame = (tick: number, towers: readonly TowerVM[], overlay: RenderOverlay) =>
       ({
@@ -855,6 +862,7 @@ describe('drawBoardFrame — a spent mine’s scorch, in the scorches layer, on 
         aim,
         fire,
         feedback,
+        drawnPoints,
       }) satisfies BoardFrameInput;
     fedFrame(t, frame(20, [mine], OVERLAY)); // the mine stands
     // Gone, with no tracer: only the blast's impact, at its footprint centre.
@@ -874,6 +882,7 @@ describe('drawBoardFrame — a spent mine’s scorch, in the scorches layer, on 
     const aim = createAimTracker();
     const fire = createFireTracker();
     const feedback = createFeedbackTracker();
+    const drawnPoints = new Map<number, KeptAimPoint>();
     const centre = 7 * 256;
     const blast = {
       kind: 'blast' as const,
@@ -899,10 +908,11 @@ describe('drawBoardFrame — a spent mine’s scorch, in the scorches layer, on 
         aim,
         fire,
         feedback,
+        drawnPoints,
       }) satisfies BoardFrameInput;
     fedFrame(t, frame(21, [blast]));
     expect(t.scorches.syncs[0]).toHaveLength(1); // held
-    resetBoardFrame(t, { scorches, aim, fire, feedback });
+    resetBoardFrame(t, { scorches, aim, fire, feedback, drawnPoints });
     fedFrame(t, frame(22, []));
     expect(t.scorches.syncs[1]).toEqual([]);
     expect(scorches.live(22)).toEqual([]);
@@ -924,6 +934,7 @@ describe('drawBoardFrame — towers that aim and fire (visual pass T3)', () => {
       aim: createAimTracker(),
       fire: createFireTracker(),
       feedback: createFeedbackTracker(),
+      drawnPoints: new Map(),
     };
     /** A frame drawn at render tick `prevTick + alpha`: each creep moves from `prev` to
      *  `cur`, and the overlay carries `over`. */
@@ -1596,6 +1607,7 @@ describe('drawBoardFrame — a flyer’s kill bursts and pops on its lifted body
       aim: createAimTracker(),
       fire: createFireTracker(),
       feedback: createFeedbackTracker(),
+      drawnPoints: new Map(),
     });
     const at = creepBodyCentre(kill.x, kill.y, kill, PROJECTION, framesFor(PROJECTION));
     const under = PROJECTION.fpToPixel(kill.x, kill.y);
@@ -1620,6 +1632,7 @@ describe('drawBoardFrame — a hit’s flash under Reduce motion (C1)', () => {
       aim: createAimTracker(),
       fire: createFireTracker(),
       feedback: createFeedbackTracker(),
+      drawnPoints: new Map(),
     };
     const target = creep({ creepId: 'swarm' });
     const arriving: TracerVM = {

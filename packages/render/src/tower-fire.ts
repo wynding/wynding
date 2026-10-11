@@ -62,7 +62,7 @@ import { HEAD_AT_REST, type HeadPose } from './placement';
 import type { Projection } from './projection';
 import { isDetonation } from './scorches';
 import { ART_FLASH, FIRE_PULSE_RINGS, MUZZLE_FLASH, RECOIL_DEPTH } from './tower-art';
-import { footprintCentreFp, type AimTracker } from './tower-aim';
+import { footprintCentreFp, fpPointKey, type AimTracker } from './tower-aim';
 import { towerRoleFor } from './tower-paint';
 import type { TowerVM, TracerVM } from './types';
 
@@ -169,9 +169,6 @@ function towerAt(towers: readonly TowerVM[], x: number, y: number): TowerVM | un
   return undefined;
 }
 
-/** One number for a fixed-point point: sim coordinates are whole and far below 2^26. */
-const originKey = (x: number, y: number): number => x * 67108864 + y;
-
 export function createFireTracker(): FireTracker {
   /** Each tower that fired recently, by entity id: the render tick its shot was first seen. */
   const fired = new Map<number, number>();
@@ -203,7 +200,7 @@ export function createFireTracker(): FireTracker {
         // Its tower, for its style, whatever shows of its firing — unless the controller has
         // said it is gone, when a tower standing there now is another one.
         const tower = t.towerId === undefined ? towerAt(towers, t.originX, t.originY) : undefined;
-        if (tower !== undefined) towerIdAt.set(originKey(t.originX, t.originY), tower.towerId);
+        if (tower !== undefined) towerIdAt.set(fpPointKey(t.originX, t.originY), tower.towerId);
         if (renderTick - t.launchTick >= FIRE_FEEDBACK_TICKS) continue; // over before it showed
         if (reducedMotion) continue; // taken in, and never shown
         if (tower === undefined) continue; // no tower's shot — or one already sold
@@ -222,7 +219,7 @@ export function createFireTracker(): FireTracker {
       return at === undefined ? null : now - at;
     },
     towerIdOf(t) {
-      return t.towerId ?? towerIdAt.get(originKey(t.originX, t.originY));
+      return t.towerId ?? towerIdAt.get(fpPointKey(t.originX, t.originY));
     },
     reset() {
       fired.clear();

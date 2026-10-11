@@ -225,6 +225,11 @@ export interface BoardFrameInput {
    *  reset the same way. Each frame feeds it the shots, which creeps are drawn, and the kills
    *  and leaks since the last frame. */
   readonly feedback: FeedbackTracker;
+  /** Where each creep is drawn, in sim units (`creepAimPoints`): one map for every frame, each
+   *  rewriting it in place, so a frame makes no object per creep. The scene owns it and resets
+   *  it with the run. Read only while a frame is drawn — nothing a frame feeds it to keeps it,
+   *  or a point in it, past that frame. */
+  readonly drawnPoints: Map<number, KeptAimPoint>;
 }
 
 /** The trackers a frame keeps across frames — what a reset must forget, every one of them. */
@@ -233,16 +238,12 @@ export interface BoardFrameTrackers {
   readonly aim: Pick<AimTracker, 'reset'>;
   readonly fire: Pick<FireTracker, 'reset'>;
   readonly feedback: Pick<FeedbackTracker, 'reset'>;
+  readonly drawnPoints: Pick<Map<number, KeptAimPoint>, 'clear'>;
 }
-
-/** Where each creep is drawn, in sim units (`creepAimPoints`): one map for every frame, each
- *  rewriting it in place, so a frame makes no object per creep. Read only while a frame is drawn
- *  — nothing a frame feeds it to keeps it, or a point in it, past that frame. */
-const drawnPoints = new Map<number, KeptAimPoint>();
 
 /** Draw one frame into `t`. */
 export function drawBoardFrame(t: BoardTargets, input: BoardFrameInput): void {
-  const { prevVm, curVm, alpha, overlay, projection, frames } = input;
+  const { prevVm, curVm, alpha, overlay, projection, frames, drawnPoints } = input;
   const pal = resolvePalette(overlay.colourMode); // resolved once per frame, passed down
   const { shells, effects, cues } = t.layers;
   // ONE render-time derivation per frame, shared by the scorches, the tracers and the
@@ -394,7 +395,7 @@ export function resetBoardFrame(t: BoardTargets, state: BoardFrameTrackers): voi
   state.aim.reset();
   state.fire.reset();
   state.feedback.reset();
-  drawnPoints.clear();
+  state.drawnPoints.clear();
   t.layers.shells.clear();
   t.layers.effects.clear();
   t.layers.cues.clear();
