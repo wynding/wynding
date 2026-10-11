@@ -269,8 +269,11 @@ export interface StepEvents {
    *  blast lands visibly even if it catches nobody, or its original target died in
    *  flight; Codex R1-12). Phase 3 (out of this story's sim-only scope) threads
    *  `radiusFp` through `RenderOverlay.sparks`; the sim emits the shape now so a
-   *  later builder never has to touch this type again. */
-  readonly impactPoints: { x: number; y: number; radiusFp: number }[];
+   *  later builder never has to touch this type again. `targetId` (visual pass C2,
+   *  #181) is set on a `targeted` point only: the entity id of the creep it struck,
+   *  so a caller knows which creep each spark belongs to without matching points to
+   *  positions. A `blast` point names no creep and carries none. */
+  readonly impactPoints: { x: number; y: number; radiusFp: number; targetId?: number }[];
   /** Shots FIRED this tick (#32), in fire order — fp-unit origin (firing tower centre)
    *  + the target locked AT FIRE TIME (never re-derived from `state.impacts`: a tower
    *  that retargets before the shot resolves would otherwise break the association —
@@ -320,6 +323,25 @@ export interface StepEvents {
    *  contract as `impactPoints`/`fired`: append-only, never hash-relevant, never
    *  serialized; a caller that passes no `leaked` array sees no difference at all. */
   readonly leaked?: number[];
+  /** Every creep the combat phase KILLED this tick, in the order its sweep credits them
+   *  (visual pass C1, #181): the creep's entity id, its catalog kind, its fixed-point
+   *  position as the step left it — the point the view model and an impact point derive
+   *  for it, through the same {@link deriveValidCreepPosition} — and the bounty the
+   *  sweep credited for it (the amount it adds to the player's bounty: the creep's own
+   *  `bounty` column, `0` when that is not a whole number). A creep spawned and killed
+   *  inside one step is here too, though no state before or after the step holds it.
+   *  Through `step()` every kill is listed; only a forged row handed to `runCombat`
+   *  directly can die where no position derives, and it is not (movement drops such a
+   *  row before combat runs). Optional and presentational, same contract as `leaked`:
+   *  append-only, never hash-relevant, never serialized; a caller that passes no
+   *  `killed` array sees no difference, and no position is derived for it. */
+  readonly killed?: {
+    readonly id: number;
+    readonly creepId: string;
+    readonly x: number;
+    readonly y: number;
+    readonly bounty: number;
+  }[];
 }
 
 /** Structural creep SoA combat reads/mutates (CreepArrays is assignable to it).
@@ -1509,7 +1531,13 @@ export function runCombat(
       ) {
         continue;
       }
-      events?.impactPoints.push({ x: point.x, y: point.y, radiusFp: 0 }); // BEFORE damage
+      // BEFORE damage, naming the creep it struck (`StepEvents.impactPoints`).
+      events?.impactPoints.push({
+        x: point.x,
+        y: point.y,
+        radiusFp: 0,
+        targetId: creeps.id[idx] as number,
+      });
       applyImpactToCreep(
         creeps,
         idx,
@@ -1703,7 +1731,10 @@ export function runCombat(
   //     `slowUntilTick` thread through by source row like any other column.
   //     `survivorIds` (M2-S5a P3) collects the surviving id set alongside the
   //     compaction itself — reused by step (6)'s DoT-record cleanup below so that
-  //     pass never has to re-derive it from `survivors.id`.
+  //     pass never has to re-derive it from `survivors.id`. Each credited kill is also
+  //     reported, for a caller that passes the list (`StepEvents.killed`), with the
+  //     amount credited and its position through the derivation every other reader of
+  //     a creep's position uses — output only, read by nothing here.
   let nextBounty = bounty;
   let killBounty = 0;
   const survivors = emptyCreeps();
@@ -1714,6 +1745,26 @@ export function runCombat(
         const amount = Number.isSafeInteger(creeps.bounty[i]) ? (creeps.bounty[i] as number) : 0;
         nextBounty = satAdd(nextBounty, amount);
         killBounty += amount >= 0 ? amount : 0;
+        const killed = events?.killed;
+        if (killed !== undefined) {
+          const geom = deriveValidCreepPosition(
+            creeps.fromX[i],
+            creeps.fromY[i],
+            creeps.headCol[i],
+            creeps.headRow[i],
+            creeps.progress[i],
+            grid,
+          );
+          if (geom !== null) {
+            killed.push({
+              id: creeps.id[i] as number,
+              creepId: creeps.creepId[i] as string,
+              x: geom.point.x,
+              y: geom.point.y,
+              bounty: amount,
+            });
+          }
+        }
       }
       continue;
     }
