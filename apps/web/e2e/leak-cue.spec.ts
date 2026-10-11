@@ -20,7 +20,6 @@ interface CueEvent {
   readonly lives: string;
   readonly bg?: string;
   readonly anim?: string;
-  readonly shadow?: string;
 }
 
 interface Recording {
@@ -92,7 +91,6 @@ async function record(page: Page): Promise<void> {
           lives,
           bg: cs.backgroundColor,
           anim: cs.animationName,
-          shadow: cs.boxShadow,
         });
         if (on) sway();
       }
@@ -190,11 +188,10 @@ for (const reduceMotion of [false, true]) {
       expect(offs[i]!.prev - on.t, `cue ${i}`).toBeLessThan(600);
     });
 
-    // Drawn: the pill turns the leak's red, ringed in it — and shakes, or under Reduce motion
-    // holds still — and goes back to the lives pill when the cue clears.
+    // Drawn: the pill turns the leak's red — and shakes, or under Reduce motion holds still —
+    // and goes back to the lives pill when the cue clears.
     for (const on of ons) {
       expect(on.bg).toBe(red);
-      expect(on.shadow).toContain(red);
       expect(on.anim).toBe(reduceMotion ? 'none' : 'wy-lives-shake');
     }
     for (const off of offs) {
@@ -300,8 +297,10 @@ for (const size of [
     // Within a pixel of the glance's box on every side: none past it (a ring past the box is
     // cut off by the HUD's edge on the left in Compact, and rings the pill in Standard) and
     // none short of it (a clipped fill).
-    // (A pill's tips are anti-aliased, so up to 3 px of its own length may fall short of a
-    // pixel of the exact red; a ring 0.2em wide would run to about the same past the box.)
+    // (Short: in Standard the chip's own border, in the lives colour, rings the red, so the red
+    // starts a border's width in, give or take a device pixel's snapping: 0.5 to 1.7 px measured
+    // in Chromium and WebKit. Compact has no border: 1.1 px at most. Past: the outer ring this
+    // replaced passed by 1.7 to 3.3 px.)
     const past = 1;
     const short = 3;
     const gaps = {
