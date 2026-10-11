@@ -90,9 +90,11 @@ export default defineConfig({
     // passes even before the P1 fix lands. `results-pointer.spec.ts` is #181's: the results
     // panel under a real pointer, where WebKit differs from Chromium in ways that move content
     // (it scrolls a `preventScroll` focus made over dirty layout); it runs in both projects.
+    // `leak-cue.spec.ts` is #181 C1's: the lives chip's leak cue, drawn by `ui.css` and timed by
+    // `main.ts`, which only a browser runs together; it runs in both projects.
     {
       name: 'webkit',
-      testMatch: /slow-press\.spec\.ts|results-pointer\.spec\.ts/,
+      testMatch: /slow-press\.spec\.ts|results-pointer\.spec\.ts|leak-cue\.spec\.ts/,
       use: { ...devices['Desktop Safari'] },
     },
   ],

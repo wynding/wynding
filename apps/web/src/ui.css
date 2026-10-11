@@ -480,17 +480,28 @@ a.wy-home:focus-visible {
    under Reduce motion in either branch (the setting below, the OS query at the end of this
    file), turns red and holds still. Decorative: the count beside the heart is the lives'
    value, and the chip's full message its accessible one. The selector outranks Standard's pill
-   fill, set inside its layout query below; the ring of the same red past the box makes a
-   padded pill in Compact, where the chip has none, without moving anything around it. */
+   fill, set inside its layout query below; the ring of the same red is INSET, drawn inside the
+   glance's own box, so it makes a whole pill in Compact, where the chip has none, and a clipped
+   one nowhere (a ring past the box was cut off by the HUD's edge), without moving anything. */
 .wy-shell .wy-chip[data-wy-chip='lives'][data-wy-leak] .wy-chip-glance {
   border-radius: 999px;
   background: var(--wy-lives-leak);
-  box-shadow: 0 0 0 0.2em var(--wy-lives-leak);
+  box-shadow: inset 0 0 0 0.2em var(--wy-lives-leak);
   animation: wy-lives-shake 360ms ease-in-out;
 }
 
 .wy-shell[data-wy-reduced-motion] .wy-chip[data-wy-chip='lives'][data-wy-leak] .wy-chip-glance {
   animation: none;
+}
+
+/* Forced colours drop the red fill and the ring, so the cue would show nothing past the shake
+   (nothing at all under Reduce motion): an outline in the system highlight, drawn inside the
+   glance's box, says it. */
+@media (forced-colors: active) {
+  .wy-shell .wy-chip[data-wy-chip='lives'][data-wy-leak] .wy-chip-glance {
+    outline: 2px solid Highlight;
+    outline-offset: -2px;
+  }
 }
 
 @keyframes wy-lives-shake {
