@@ -141,6 +141,7 @@ createApp(document, root, {
     if (params.get('endOnPress') === '1') return endingOnPress(seed);
     const controller = createController(seed);
     playScript(controller, plan);
+    // The message is also `check:build-layering`'s marker for this module: rename it there too.
     if (!controller.isTerminal()) throw new Error('results harness: the scripted run did not end');
     return controller;
   },
