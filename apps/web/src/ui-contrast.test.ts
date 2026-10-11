@@ -155,7 +155,8 @@ describe('DOM contrast gate — ui.css tokens (WCAG text ≥ 4.5:1, non-text ≥
   it("every colour mode inks the strip's creep icons at 3:1 or better on its surface", () => {
     expect(COLOUR_MODES.length).toBeGreaterThan(1);
     const families = [...new Set(CREEP_LOOKS.map((l) => l.family))];
-    expect(families).toHaveLength(6);
+    // By name, so a family dropped from the looks, or renamed, fails here as itself.
+    expect([...families].sort()).toEqual(['armored', 'boss', 'fast', 'flying', 'normal', 'swarm']);
     for (const mode of COLOUR_MODES) {
       const pal = resolvePalette(mode);
       for (const [name, ink] of [
