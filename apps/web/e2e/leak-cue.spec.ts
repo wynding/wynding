@@ -26,7 +26,9 @@ interface Recording {
   readonly events: CueEvent[];
   /** Per cue: the glance's offset from its chip at each tenth of its shake's span, read by
    *  seeking the running animation (so a runner that draws few frames reads the same), or once,
-   *  at rest, when no animation runs. */
+   *  at rest, when no animation runs. A shake whose duration is not a number has no tenths to
+   *  seek: it is recorded as one sample that is not a number either (`NaN`), which the test
+   *  fails on by name rather than reading a sway from it. */
   readonly sway: number[][];
 }
 
@@ -78,13 +80,18 @@ async function record(page: Page): Promise<void> {
         return;
       }
       for (const a of animations) {
+        const span = a.effect?.getTiming().duration;
+        if (typeof span !== 'number' || !Number.isFinite(span)) {
+          samples.push(Number.NaN); // see `Recording.sway`
+          continue;
+        }
         const was = a.currentTime;
-        const span = Number(a.effect?.getTiming().duration);
         for (let k = 0; k <= 10; k++) {
           a.currentTime = (span * k) / 10;
           samples.push(offset());
         }
-        a.currentTime = was ?? 0;
+        // Back where it was; one that had no current time (idle) is never set to 0 instead.
+        if (typeof was === 'number') a.currentTime = was;
       }
     };
     new MutationObserver((mutations) => {
@@ -216,6 +223,10 @@ for (const reduceMotion of [false, true]) {
     // Reduce motion no animation runs at all.
     expect(rec.sway).toHaveLength(ons.length);
     for (const samples of rec.sway) {
+      expect(
+        samples.every((x) => Number.isFinite(x)),
+        `every offset read is a number, so the shake's duration was one (read: ${samples.join(', ')})`,
+      ).toBe(true);
       if (reduceMotion) {
         expect(samples, 'no animation runs').toHaveLength(1);
         continue;

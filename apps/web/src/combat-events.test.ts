@@ -301,4 +301,39 @@ describe('stepOutcome / markFlyerSparks — what the attribution tests above cou
     );
     expect(out!.flyer).toEqual({ creepId: 'flying', boss: false });
   });
+
+  it('a flyer and a ground creep killed on one tick by targeted impacts, after moving different distances: each spark takes its own creep’s look (Codex, PR #189)', () => {
+    // A flyer (30 fp a tick) just behind a fast walker (44): each impact strikes its creep where
+    // the step moved it, which puts the flyer's point nearer where the WALKER was drawn.
+    const before = vm([
+      creep(1, { creepId: 'flying', domain: 'air', x: 1000, y: 900 }),
+      creep(2, { creepId: 'fast', x: 1040, y: 900 }),
+    ]);
+    const onFlyer = { x: 1000 + 30, y: 900 };
+    const onWalker = { x: 1040 + 44, y: 900 };
+    const { kills } = stepOutcome(
+      before,
+      [
+        killed(1, { creepId: 'flying', ...onFlyer, bounty: 2 }),
+        killed(2, { creepId: 'fast', ...onWalker, bounty: 2 }),
+      ],
+      [],
+      ruleset,
+    );
+    const d2 = (a: { x: number; y: number }, b: { x: number; y: number }): number =>
+      (a.x - b.x) ** 2 + (a.y - b.y) ** 2;
+    expect(
+      d2(onFlyer, kills[1]!),
+      'the premise: the flyer’s point lies nearer where the walker was drawn',
+    ).toBeLessThan(d2(onFlyer, kills[0]!));
+    const sparks = markFlyerSparks(
+      [
+        { ...onFlyer, radiusFp: 0, targetId: 1 },
+        { ...onWalker, radiusFp: 0, targetId: 2 },
+      ],
+      vm([]),
+      kills,
+    );
+    expect(sparks.map((s) => s.flyer)).toEqual([{ creepId: 'flying', boss: false }, undefined]);
+  });
 });

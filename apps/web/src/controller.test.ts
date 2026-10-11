@@ -2356,4 +2356,50 @@ describe('controller — combat feedback wiring the tests above could not tell a
       'the premise: a flyer stood on the point of a creep a shot struck',
     ).toBeGreaterThan(0);
   });
+
+  it('a creep a step spawned and killed, in no view model and so never drawn, still bursts and pops its bounty, where the step left it (Codex, PR #189)', () => {
+    // Wave 1 spawns a normal at the entrance every 20 ticks from tick 0. A mine beside the
+    // entrance, built on tick 19, is set off that tick by the first normal; its blast lands on
+    // tick 20, the tick the second normal spawns into it.
+    const c = createController(1);
+    startAndCall(c);
+    tick(c, 19);
+    c.armTower('mine');
+    c.aimAt(1, 9);
+    expect(c.confirm(), 'the mine queued').toBe(true);
+    tick(c); // tick 19: the mine goes off
+    c.drainFeedback();
+    c.drainSparks();
+    const before = c.frame().curVm;
+    expect(before.creeps, 'the premise: one creep drawn as the blast is due').toHaveLength(1);
+    expect(c.runStats().creepsStopped).toBe(0);
+    tick(c); // tick 20: the blast lands as the second normal spawns
+    const blasts = c.drainSparks().filter((p) => p.radiusFp > 0);
+    expect(blasts, 'the premise: the blast landed on the spawn tick').toHaveLength(1);
+    expect(c.frame().curVm.creeps, 'the premise: no creep is drawn after it').toHaveLength(0);
+    expect(
+      c.runStats().creepsStopped,
+      'the premise: it stopped the creep drawn before it and one spawned into it',
+    ).toBe(2);
+    const { kills } = c.drainFeedback();
+    expect(kills, 'one kill per creep stopped, the one never drawn too').toHaveLength(2);
+    const drawn = before.creeps[0]!;
+    // The creep the board drew bursts where it last drew it...
+    expect(kills.find((k) => k.id === drawn.id)).toMatchObject({ x: drawn.x, y: drawn.y });
+    // ...and the one it never drew where the step left it: one budget past the entrance's
+    // centre, on its way out. Its look is its catalog id's, its bounty what the sim paid.
+    const unseen = kills.find((k) => k.id !== drawn.id)!;
+    const { entrance } = c.ruleset.board.grid;
+    const normal = c.ruleset.creepById['normal']!;
+    expect(unseen).toEqual({
+      id: unseen.id,
+      x: entrance.col * 256 + 128 + normal.speedFp,
+      y: entrance.row * 256 + 128,
+      creepId: 'normal',
+      domain: 'ground',
+      boss: false,
+      bounty: normal.bounty,
+    });
+    expect(unseen.bounty, 'a bounty to pop').toBeGreaterThan(0);
+  });
 });
