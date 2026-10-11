@@ -1405,3 +1405,27 @@ line holds unchanged. It changes no budget, no trigger, `R0`, `TOLERANCE` or the
 **What this evidence is.** Emulation on one development machine (Chrome 149.0.7827.55, ANGLE Metal
 on an Apple M4 Pro), the same class of evidence as V2's entry: the CPU throttles slow JavaScript,
 not the GPU. It does not stand in for the real-device pass that ruling 6 above still holds open.
+
+## Amendment — 2026-10-11 (visual pass C1 and C2, #181) — what combat feedback costs
+
+Visual pass items C1 and C2 add the combat feedback the board shows (kill bursts, bounty pops,
+the exit's leak pulse, hit flashes, one tracer per tower) and the lives chip's leak cue, a restyle
+and a shake of one DOM chip. This entry records what that costs at low-end, which is where it
+shows; it changes no budget, no trigger, `R0`, `TOLERANCE` or the CI ratio gate.
+
+**Measured at low-end (R5's QC, pooled over its runs).** About 3.4% fewer frames in the sampling
+window in both scenes than the head before the pass's combat feedback, and no p95 breach the
+head before it did not already show. Taking the leak cue's restyle out accounts for under two
+percent of the catalog scene's frames; the per-frame JavaScript the feedback adds is about 1% of
+the frame.
+The two fixes that came out of the measurement are in the head: the board frame keeps one map of
+where each creep is drawn instead of building one per frame (`creepAimPoints`), and the
+controller's per-tick walk for what a step removed is a single pass down two sorted lists
+(`stepOutcome`), with an early return in `markFlyerSparks` when no flyer stands or fell. The
+traces, profiles and A/B tables are in the R5 QC perf evidence directory
+(`/Users/rob/.claude/jobs/9aacf26a/tmp/r5qc1-perf/`); the percentile and mean-frame-time
+reading is the one T3's entry above gives.
+
+**What this evidence is.** Emulation on one development machine, the same class of evidence as
+T3's entry: the CPU throttles slow JavaScript, not the GPU. It does not stand in for the
+real-device pass that ruling 6 above still holds open.
