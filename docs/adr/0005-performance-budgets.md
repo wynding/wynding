@@ -1435,6 +1435,11 @@ inside the spread of `075942e`'s own runs (793 to 810 frames in the catalog scen
 stress scene): they trim work the suite does not see at this size. The reading of the frame counts
 is the mean-frame-time one T3's entry above gives.
 
+The leak cue names its creeps from the step, not from where they stood: the sim's movement phase
+appends the id of each creep it removes at the exit to an optional `StepEvents.leaked` list, which
+the controller hands to `stepOutcome`. That is one array push per leak and only for a caller that
+passes the list; it adds no state, changes no world hash and needs no `SIM_VERSION` bump.
+
 **What this evidence is.** Emulation on one development machine, the same class of evidence as
 T3's entry: the CPU throttles slow JavaScript, not the GPU. It does not stand in for the
 real-device pass that ruling 6 above still holds open.
