@@ -7,7 +7,7 @@ import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import path from 'node:path';
 import { describe, it, expect } from 'vitest';
-import { COLOUR_MODES, resolvePalette } from '@wynding/render';
+import { COLOUR_MODES, CREEP_LOOKS, creepArtColour, resolvePalette } from '@wynding/render';
 
 // `new URL('./ui.css', import.meta.url)` would normally suffice, but under the jsdom test
 // environment the global `URL` is jsdom's DOM implementation, not Node's — resolve via
@@ -176,16 +176,20 @@ describe('DOM contrast gate — ui.css tokens (WCAG text ≥ 4.5:1, non-text ≥
 
   // #181 (L1): the wave strip's creep icons are inked from the ACTIVE colour-vision palette
   // (`hud-icons.ts`), not from a token here, and drawn on the strip's `surface`. Every mode's
-  // body ink and airborne chevron must clear the non-text bar on that surface, or a mode switch
-  // could leave a shape the player reads the wave by unreadable.
+  // body ink — each creep family's hue, since C3 — and a flyer's wings must clear the non-text
+  // bar on that surface, or a mode switch could leave a shape the player reads the wave by
+  // unreadable.
   it("every colour mode inks the strip's creep icons at 3:1 or better on its surface", () => {
     expect(COLOUR_MODES.length).toBeGreaterThan(1);
+    const families = [...new Set(CREEP_LOOKS.map((l) => l.family))];
+    // By name, so a family dropped from the looks, or renamed, fails here as itself.
+    expect([...families].sort()).toEqual(['armored', 'boss', 'fast', 'flying', 'normal', 'swarm']);
     for (const mode of COLOUR_MODES) {
       const pal = resolvePalette(mode);
       for (const [name, ink] of [
-        ['creep', pal.creep],
-        ['airborne', pal.airborne],
-      ] as const) {
+        ...families.map((f) => [f, creepArtColour('family', pal, f)] as const),
+        ['airborne', pal.airborne] as const,
+      ]) {
         const ratio = contrast(ink, tokens['surface']!);
         expect(ratio, `${mode} ${name} on surface = ${ratio.toFixed(2)}`).toBeGreaterThanOrEqual(
           3.0,

@@ -1,13 +1,13 @@
 // board-frame.ts — one frame of the board, Phaser-free (V2, #181). Everything the renderer
 // draws per frame is decided here: which live layer each cue goes into, which sprite shows
 // which frame where, and in what order. `scene.ts` supplies the targets — the baked board
-// image, three live `Graphics` and five sprite pools, all as structural interfaces — and
+// image, three live `Graphics` and seven sprite pools, all as structural interfaces — and
 // this fills them, so the routing that keeps every aura shell under every tower body (M2-S8)
 // is a unit-tested fact rather than a property of call order in a coverage-excluded file.
 //
 // The layers composite in `layers.ts`'s order: board, scorches, shells, plates, heads, rims,
-// pending, effects (selection, fire feedback, tracers), creeps, cues (pips and status cues,
-// then the ghost, then sparks).
+// pending, creep shadows, effects (selection, fire feedback, tracers), creeps, cues (HP bars
+// and status cues, then the ghost, then sparks).
 //
 // State that lives across frames — where mines went off, where each head points, which towers
 // just fired — is kept in Phaser-free trackers the scene owns (`scorches.ts`, `tower-aim.ts`,
@@ -24,6 +24,7 @@ import {
   visibleTowers,
   type GraphicsLike,
 } from './board-draw';
+import { polygonCircles, type PathGraphics } from './circle-path';
 import { fillCircleAsPolygon, strokeCircleAsPolygon, type PolygonGraphics } from './circle-polygon';
 import { snapToDevicePx } from './device-px';
 import { interpolateCreeps } from './interpolate';
@@ -64,7 +65,7 @@ export interface LiveLayers {
   /** The selection cue, then the shots' muzzle flashes and ring pulses, then in-flight
    *  tracers — over the heads and the pending builds, under the creeps. */
   readonly effects: LayerGraphics;
-  /** Every creep's pip and status cues, then the build ghost, then impact sparks — on top. */
+  /** Every creep's HP bar and status cues, then the build ghost, then impact sparks — on top. */
   readonly cues: LayerGraphics;
 }
 
@@ -79,6 +80,17 @@ export function createLiveLayers<G extends LayerGraphics>(
   return { shells: make('shells'), effects: make('effects'), cues: make('cues') };
 }
 
+/** The three live layers as `createLiveLayers` makes them, with every layer's circles drawn as
+ *  polygons sized to their radius at `dpr()`, read at each call (`circle-path.ts`): the live
+ *  layers draw hundreds of circles a frame, and Phaser's own arc is 100 segments whatever its
+ *  size (ADR 0005). Here, not in `scene.ts`, so a test can see that every layer has it. */
+export function createPolygonLiveLayers<G extends LayerGraphics & PathGraphics>(
+  make: (layer: LiveLayerName) => G,
+  dpr: () => number,
+): { readonly shells: G; readonly effects: G; readonly cues: G } {
+  return createLiveLayers((layer) => polygonCircles(make(layer), dpr));
+}
+
 /** A sprite layer: shows a placement list (`sprite-pool.ts`). */
 export interface SpriteLayer {
   sync(placements: readonly SpritePlacement[]): void;
@@ -86,12 +98,13 @@ export interface SpriteLayer {
 }
 
 /** A sprite layer's name — the one it is made under, and its depth is read from. */
-export type SpriteLayerName = 'scorches' | 'plates' | 'heads' | 'rims' | 'pending' | 'creeps';
+export type SpriteLayerName =
+  'scorches' | 'plates' | 'heads' | 'rims' | 'pending' | 'creepShadows' | 'creeps';
 
 /** One `S` per sprite layer. */
 export type SpriteLayers<S> = { readonly [L in SpriteLayerName]: S };
 
-/** The five sprite layers, each made by `make` under its own name, as `createLiveLayers`. */
+/** The seven sprite layers, each made by `make` under its own name, as `createLiveLayers`. */
 export function createSpriteLayers<S>(make: (layer: SpriteLayerName) => S): SpriteLayers<S> {
   return {
     scorches: make('scorches'),
@@ -99,6 +112,7 @@ export function createSpriteLayers<S>(make: (layer: SpriteLayerName) => S): Spri
     heads: make('heads'),
     rims: make('rims'),
     pending: make('pending'),
+    creepShadows: make('creepShadows'),
     creeps: make('creeps'),
   };
 }
@@ -136,6 +150,9 @@ export interface BoardTargets {
   /** The plate rim's straight runs, again, over each posed head (`TowerPlacements.rims`). */
   readonly rims: SpriteLayer;
   readonly pending: SpriteLayer;
+  /** Every creep's ground shadow — under every creep's body. */
+  readonly creepShadows: SpriteLayer;
+  /** Every creep's body: those on the ground, then flyers over them. */
   readonly creeps: SpriteLayer;
 }
 
@@ -239,15 +256,16 @@ export function drawBoardFrame(t: BoardTargets, input: BoardFrameInput): void {
     ),
   );
   drawTracers(effects, pal, overlay, renderTimeTicks, drawnAt, projection);
-  // creeps — atlas sprites, in creep order.
+  // creep shadows and creeps — atlas sprites: every shadow, then every body over them.
   const creeps = placeCreeps(interpolated, pal, projection, frames);
-  t.creeps.sync(creeps);
-  // cues — every pip and status cue over every silhouette, then the ghost, then sparks.
+  t.creepShadows.sync(creeps.shadows);
+  t.creeps.sync(creeps.bodies);
+  // cues — every HP bar and status cue over every body, then the ghost, then sparks.
   // CLOCK DOMAIN (QC round 2): `renderTimeOf` is in fractional TICKS (tracers.test.ts:
   // `renderTimeOf(vm(5), vm(6), 0.5) === 5.5`); the paint-plan's pulse period is
   // MILLISECONDS (`renderTimeMs`) — convert here, or the 900ms breath becomes a
   // 900-TICK (45s) one and the motion cue is imperceptible inside a 40-tick slow.
-  drawCreepCues(cues, pal, creeps, overlay.reducedMotion, renderTimeTicks * MS_PER_TICK);
+  drawCreepCues(cues, pal, creeps.bodies, overlay.reducedMotion, renderTimeTicks * MS_PER_TICK);
   drawGhost(cues, pal, overlay, projection);
   drawSparks(cues, pal, input.sparks, overlay.reducedMotion, projection);
 }
@@ -268,6 +286,7 @@ export function resetBoardFrame(t: BoardTargets, state: BoardFrameTrackers): voi
   t.heads.hideAll();
   t.rims.hideAll();
   t.pending.hideAll();
+  t.creepShadows.hideAll();
   t.creeps.hideAll();
 }
 
@@ -295,8 +314,9 @@ export function drawFireFeedback(
  * content gate lives in `tracers.test.ts` against the plan itself. Each tracer lerps toward
  * its target creep's interpolated point (`drawnAt`, by creep id — the frame's one map of
  * them), and its dot is snapped to a whole device pixel the way the creep sprites are
- * (`placement.ts`), so a tracer that has arrived sits EXACTLY on the centre its target creep
- * is drawn at, not up to half a device pixel off it.
+ * (`placement.ts`), so a tracer that has arrived sits EXACTLY on the creep's true centre
+ * (a flyer's body is drawn above that point, its shadow on it), not up to half a device pixel
+ * off it.
  */
 export function drawTracers(
   g: GraphicsLike,

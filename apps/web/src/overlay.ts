@@ -2143,7 +2143,7 @@ export function createOverlay(
    *  by the owner on 2026-08-16 (#101) on measured evidence: the preview is read to answer
    *  two questions — "is air next?" and "is a boss next?" — while a live wave runs, i.e. as
    *  a threat-signature glance, not a stat-table read. Since #181 (L1) the strip answers the
-   *  first question with SHAPE — every entry's icon carries the board's airborne chevron —
+   *  first question with SHAPE — every air entry's icon carries the board's wings —
    *  and prints this clause only beside a single-entry wave, where there is room for it.
    *
    *  OMITTED BY SEMANTIC BASELINE, NOT BY FREQUENCY. Each omission means "nothing to say
@@ -2196,15 +2196,15 @@ export function createOverlay(
   // `main.ts` owns the settings subscription and calls `setColourMode` on a change).
   let palette: Palette = resolvePalette(settings.get().colourMode);
 
-  /** One strip entry's visible glance (#181 L1): the creep's icon — the board's own
-   *  silhouette, with the board's airborne chevron on an air entry (`hud-icons.ts`) — and
-   *  "×count". Only when the wave has a SINGLE entry does it add the creep's name and its
-   *  deviating clause, which `ui.css` drops whenever the strip has no room for them; a
-   *  multi-entry wave is read by shape and count alone. `aria-hidden`: the row's full sentence
-   *  is its accessible text. The same sentence is the glance's `title` tooltip — set HERE, on
-   *  the aria-hidden node, rather than on the row, because a `title` on the row would become
-   *  its accessible name or description and have assistive tech read the sentence twice (the
-   *  reason the Shell's home link carries none). */
+  /** One strip entry's visible glance (#181 L1): the creep's icon — the board's own creep
+   *  art, its silhouette in its family's hue, with the board's wings on an air entry
+   *  (`hud-icons.ts`) — and "×count". Only when the wave has a SINGLE entry does it add the
+   *  creep's name and its deviating clause, which `ui.css` drops whenever the strip has no
+   *  room for them; a multi-entry wave is read by shape and count alone. `aria-hidden`: the
+   *  row's full sentence is its accessible text. The same sentence is the glance's `title`
+   *  tooltip — set HERE, on the aria-hidden node, rather than on the row, because a `title` on
+   *  the row would become its accessible name or description and have assistive tech read the
+   *  sentence twice (the reason the Shell's home link carries none). */
   function buildEntryGlance(entry: PreviewEntryVM, single: boolean, full: string): HTMLElement {
     const parts = glanceParts(entry, single);
     const glance = doc.createElement('span');

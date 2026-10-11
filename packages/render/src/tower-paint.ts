@@ -23,14 +23,15 @@
  *  full-height) evoking "shoots skyward" — distinct from `'crosshair'`'s four spokes (a shaft
  *  and two barbs, not four radial strokes with a centre gap) and `'bolt'`'s zigzag (a
  *  straight shaft, not a three-segment stagger), so `antiair` is never visually
- *  conflated with `basic`'s plain body. It is deliberately NOT a bare "^": the airborne
- *  creep cue (`airborneCuePaintOps`) is exactly that glyph, and a flyer's cue lands in
- *  the cell to its north — i.e. on top of a tower footprint — so a bare chevron here
- *  would put two same-shaped marks a tenth of a cell apart with only colour separating
- *  them (ADR 0003 forbids leaning on colour for essential cues). `'pylon'` is `beacon`'s
- *  (M2-S8) — an upright post through the footprint centre with a short crossbar near its
- *  top and a wider base bar, evoking "a broadcasting mast": a NEW value, never a reuse,
- *  so no two towers share a mark. Distinct from `'arrow'` (which converges to a point
+ *  conflated with `basic`'s plain body. It is deliberately NOT a bare "^": until the visual
+ *  pass's C4 (#181) the airborne creep cue was exactly that glyph, landing in the cell to
+ *  its creep's north — i.e. on top of a tower footprint — so a bare chevron here would have
+ *  put two same-shaped marks a tenth of a cell apart with only colour separating them (ADR
+ *  0003 forbids leaning on colour for essential cues). A flyer now carries wings on its
+ *  body instead (`CREEP_WINGS`, `creep-art.ts`); the arrow keeps its shaft. `'pylon'` is
+ *  `beacon`'s (M2-S8) — an upright post through the footprint centre with a short crossbar
+ *  near its top and a wider base bar, evoking "a broadcasting mast": a NEW value, never a
+ *  reuse, so no two towers share a mark. Distinct from `'arrow'` (which converges to a point
  *  with two barbs at the TIP and no base) and from `'bolt'` (a staggered zigzag, not a
  *  straight post). `'charge'` is `mine`'s (M2-S9) — a FILLED disc at the footprint
  *  centre, at the same `size * 0.22` half-size `'ringed'`/`'crosshair'`/`'droplet'`/

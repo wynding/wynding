@@ -102,7 +102,7 @@ _Avoid_: queued, buffered.
 **Tracer**:
 The in-flight visual of a tower shot, travelling from tower to target over the
 shot's real flight window. Purely decorative — damage outcomes are always carried
-by the impact spark and HP pips, never by the tracer.
+by the impact spark and HP bars, never by the tracer.
 _Avoid_: projectile, bullet, missile.
 
 **Impact**:

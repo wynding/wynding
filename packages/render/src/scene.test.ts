@@ -23,9 +23,16 @@
 // witness ("1 strokeCircle + 4 lineBetween") is now the same count of the same glyph in the
 // head: its ink rings, ink discs and ink line segments. The body ✦ is gone, replaced by the
 // boost glow, and its containment test measures the glow from the drawn frames instead.
+//
+// AND BY THE CREEP ART (C3/C4/B3). A creep is vector art too (`creep-art.ts`): a body frame —
+// its silhouette in its family's hue, outlined in ink, a flyer's wings under it — and a shadow
+// frame, both painted through `art()`. So each silhouette's old primitive witness (`fillPoints`
+// with six points, two `fillTriangle`s) is the silhouette's own polygon in the art it paints,
+// and the airborne cue's line strokes are the two wings in the same frame. The live cues gained
+// ink under-strokes and the HP bar, and are read by the colour each call is drawn in.
 
 import { describe, it, expect } from 'vitest';
-import { drawAuraShells, drawCreepCues, drawSelection } from './board-draw';
+import { CUE_INK_PX, drawAuraShells, drawCreepCues, drawSelection } from './board-draw';
 import {
   atlasFrameSpecs,
   artUnit,
@@ -43,7 +50,14 @@ import {
   PENDING_PLATE_ALPHA,
   PLATE_RECT,
 } from './tower-art';
-import { placeCreeps, placeTowers, type CreepPlacementInput as CreepIn } from './placement';
+import { CREEP_ART_R, CREEP_BODY, CREEP_LIFT, CREEP_WINGS, creepRadius } from './creep-art';
+import { covers } from './test-support/outline-overlap';
+import {
+  placeCreeps,
+  placeTowers,
+  type CreepPlacement,
+  type CreepPlacementInput as CreepIn,
+} from './placement';
 import { layerDepth } from './layers';
 import { createProjection } from './projection';
 import { snapToDevicePx } from './device-px';
@@ -224,89 +238,105 @@ const creep = (opts: Partial<CreepIn> = {}): CreepIn => ({
   ...opts,
 });
 
-/** One creep's drawing: its silhouette frame (frame-local), then its live pip + cues
- *  (board coordinates) — the creep sprite layer, then the cue layer above it. */
+/** How many `method` calls `calls` makes in `colour` — the fill colour in force for a fill,
+ *  the line colour for a stroke. */
+function countIn(calls: readonly Call[], method: string, colour: number): number {
+  let fill = -1;
+  let line = -1;
+  let n = 0;
+  for (const { method: m, args } of calls) {
+    if (m === 'fillStyle') fill = args[0] as number;
+    else if (m === 'lineStyle') line = args[1] as number;
+    else if (m === method && (m.startsWith('stroke') ? line : fill) === colour) n++;
+  }
+  return n;
+}
+
+/** One creep's drawing: its body frame and its shadow frame (frame-local) — the creep sprite
+ *  layers — then its live HP bar and cues (board coordinates), the cue layer above them. */
 function drawnCreep(
   c: CreepIn,
   reducedMotion = false,
-): { frame: Call[]; cues: Call[]; all: Call[] } {
-  const placed = placeCreeps([c], PAL, PROJECTION, FRAMES);
-  expect(placed).toHaveLength(1);
-  const frame = paintFrame((placed[0] as { frame: string }).frame);
+): { frame: Call[]; shadow: Call[]; cues: Call[]; body: CreepPlacement } {
+  const { shadows, bodies } = placeCreeps([c], PAL, PROJECTION, FRAMES);
+  expect(bodies).toHaveLength(1);
+  expect(shadows).toHaveLength(1);
   const g = fakeGraphics();
-  drawCreepCues(g, PAL, placed, reducedMotion, 0);
-  return { frame, cues: g.calls, all: [...frame, ...g.calls] };
+  drawCreepCues(g, PAL, bodies, reducedMotion, 0);
+  return {
+    frame: paintFrame(bodies[0]!.frame),
+    shadow: paintFrame(shadows[0]!.frame),
+    cues: g.calls,
+    body: bodies[0]!,
+  };
 }
 
+/** The silhouette a body frame paints: the one shape filled in the family's hue. */
+const silhouetteOf = (frame: readonly Call[]): ArtShape => {
+  const bodies = shapesOf(frame).filter((s) => s.fill === 'family');
+  expect(bodies).toHaveLength(1);
+  return bodies[0]!;
+};
+
+/** A polygon silhouette's corner count — or `null` for any other kind of shape. */
+const cornersOf = (s: ArtShape): number | null => (s.kind === 'polygon' ? s.points.length : null);
+
 describe('creep silhouettes — the hexagon (armored, M2-S5a)', () => {
-  it('an armored creep draws fillPoints with exactly 6 points (the hexagon branch) — fails if that branch is deleted', () => {
-    const fillPointsCalls = drawnCreep(creep({ creepId: 'armored' })).all.filter(
-      (c) => c.method === 'fillPoints',
-    );
-    expect(fillPointsCalls).toHaveLength(1);
-    const pts = fillPointsCalls[0]!.args[0] as unknown[];
-    expect(pts).toHaveLength(6);
-    // A non-hexagon shape (normal → triangle) must NOT hit fillPoints at all — this is
-    // what would go red if the hexagon branch collapsed into the triangle fallback.
-    expect(
-      drawnCreep(creep({ creepId: 'normal' })).all.some((c) => c.method === 'fillPoints'),
-    ).toBe(false);
+  it('an armored creep’s body frame paints a 6-cornered polygon — fails if the hexagon is replaced', () => {
+    expect(cornersOf(silhouetteOf(drawnCreep(creep({ creepId: 'armored' })).frame))).toBe(6);
+    // A non-hexagon shape (normal → triangle) must NOT paint it — this is what would go red
+    // if the hexagon collapsed into the triangle fallback.
+    expect(cornersOf(silhouetteOf(drawnCreep(creep({ creepId: 'normal' })).frame))).toBe(3);
   });
 });
 
-describe('creep silhouettes — the boss size cue (M2-S10, ruling 2: size only, no new shape)', () => {
-  it('a boss and an armored creep share the hexagon silhouette but the boss draws it at BOSS_SCALE (1.5×) — fails if BOSS_SCALE is forced to 1', () => {
+describe('creep silhouettes — the boss size cue (M2-S10: one shape, a larger size; since C3 a hue too)', () => {
+  it('a boss and an armored creep share the hexagon silhouette but the boss draws it 1.5× as large — fails if the step is forced to 1', () => {
     // Both `armored` and `boss` map to `'hexagon'` (creep-paint.ts) — the composability
-    // proof this story exercises — so size is the ONLY channel telling them apart at the
-    // silhouette itself. The hexagon's apex vertex sits at exactly `(cx, cy - r)` (angle
-    // -90°, the same "apex up" convention every other polygon builder here uses), so the
-    // vertical offset from the frame's centre anchor IS `r` — no trig needed to recover it
-    // from the recorded `fillPoints` call.
-    const armored = placeCreeps([creep({ creepId: 'armored' })], PAL, PROJECTION, FRAMES)[0]!;
-    const boss = placeCreeps(
-      [creep({ creepId: 'boss', warded: true, boss: true })],
-      PAL,
-      PROJECTION,
-      FRAMES,
-    )[0]!;
-    const radiusOf = (frame: string): number => {
-      const pts = paintFrame(frame).find((c) => c.method === 'fillPoints')!.args[0] as {
-        x: number;
-        y: number;
-      }[];
-      expect(pts).toHaveLength(6); // still the SAME shape — ruling 2, no new CreepShape
-      return frameSpec(frame).anchorY - pts[0]!.y; // apex vertex: y = cy - r
+    // proof this story exercises. Size was the ONLY channel telling them apart at the
+    // silhouette until C3 gave each family its own hue; it is pinned here at full strength.
+    // The hexagon's corners all sit `10` design units from its centre, so its drawn radius
+    // is 10 × the frame's scale — read off the recorded `art()` call, not restated.
+    const armored = drawnCreep(creep({ creepId: 'armored' }));
+    const boss = drawnCreep(creep({ creepId: 'boss', warded: true, boss: true }));
+    const radiusOf = (frame: readonly Call[]): number => {
+      const [call] = artCallsOf(frame);
+      const hex = silhouetteOf(frame);
+      expect(cornersOf(hex)).toBe(6); // still the SAME shape — no new CreepShape
+      if (hex.kind !== 'polygon') throw new Error('the hexagon is a polygon');
+      return Math.hypot(...hex.points[0]!) * call!.unit;
     };
     const armoredR = radiusOf(armored.frame);
     const bossR = radiusOf(boss.frame);
-    // The boss draws strictly larger — dies if `BOSS_SCALE` is forced to 1 (equal radii).
+    // The boss draws strictly larger — dies if its step is forced to the armored creep's.
     expect(bossR).toBeGreaterThan(armoredR);
-    // Pinned to the spec's exact multiplier, not just "bigger" — BOSS_SCALE = 1.5.
+    // Pinned to the exact multiplier, not just "bigger" — 1.5.
     expect(bossR).toBeCloseTo(armoredR * 1.5, 5);
     // ... and the live cues are drawn around that same radius, so they scale with it.
-    expect(boss.r).toBeCloseTo(armored.r * 1.5, 5);
-    expect(armored.r).toBeCloseTo(armoredR, 5);
+    expect(boss.body.r).toBeCloseTo(armored.body.r * 1.5, 5);
+    expect(armored.body.r).toBeCloseTo(armoredR, 5);
   });
 });
 
 describe('creep silhouettes — the pentagon (resolute, M2-S6)', () => {
-  it('a resolute creep draws fillPoints with exactly 5 points (the pentagon branch) — fails if that branch is deleted', () => {
-    const fillPointsCalls = drawnCreep(creep({ creepId: 'resolute' })).all.filter(
-      (c) => c.method === 'fillPoints',
-    );
-    expect(fillPointsCalls).toHaveLength(1);
-    const pts = fillPointsCalls[0]!.args[0] as unknown[];
-    expect(pts).toHaveLength(5);
+  it('a resolute creep’s body frame paints a 5-cornered polygon — fails if the pentagon is replaced', () => {
+    expect(cornersOf(silhouetteOf(drawnCreep(creep({ creepId: 'resolute' })).frame))).toBe(5);
   });
 });
 
 describe('drawCreepCues — the poisoned-pip telegraph (M2-S5a)', () => {
-  it('draws 3 pip fillCircles under reduced motion and 6 with motion allowed — fails if the pip loop is deleted', () => {
-    expect(count(drawnCreep(creep({ poisoned: true }), true).all, 'fillCircle')).toBe(3);
-    expect(count(drawnCreep(creep({ poisoned: true }), false).all, 'fillCircle')).toBe(6);
+  it('draws 3 pips under reduced motion and 6 with motion allowed — fails if the pip loop is deleted', () => {
+    const pips = (reduced: boolean, poisoned = true): number =>
+      countIn(drawnCreep(creep({ poisoned }), reduced).cues, 'fillCircle', PAL.poisoned);
+    expect(pips(true)).toBe(3);
+    expect(pips(false)).toBe(6);
     // A creep that is NOT poisoned draws zero pips at all — the branch under test only
     // fires when it should.
-    expect(count(drawnCreep(creep({ poisoned: false }), false).all, 'fillCircle')).toBe(0);
+    expect(pips(false, false)).toBe(0);
+    // Each guaranteed pip sits on its own ink disc (C3); the drift pips, a motion cue, do not.
+    expect(countIn(drawnCreep(creep({ poisoned: true }), false).cues, 'fillCircle', ART_INK)).toBe(
+      3,
+    );
   });
 });
 
@@ -372,7 +402,7 @@ describe('tower heads — the antiair arrow (M2-S7)', () => {
     // zigzag never is.
     expect(glyphOf(shapes)).toEqual({ rings: 0, discs: 0, segments: 1, vertical: 1 });
     // The arrowhead is the head's own filled outline — a closed shape, so it reads as a
-    // solid dart, never as the airborne cue's bare open chevron (two strokes, no fill).
+    // solid dart, never as the bare open chevron the airborne cue was until C4 (two strokes, no fill).
     const body = bodyOf(shapes);
     expect(body.kind).toBe('path');
     if (body.kind !== 'path') return;
@@ -953,109 +983,164 @@ describe('tower heads — the remaining committed/pending heads, the boost glow,
   });
 });
 
-describe('creep silhouettes and cues — the remaining shapes + slowed telegraph', () => {
-  it('a fast creep draws the diamond (2 fillTriangle calls); a swarm creep draws the square (fillRect); an unknown id falls back to a single triangle', () => {
-    expect(count(drawnCreep(creep({ creepId: 'fast' })).all, 'fillTriangle')).toBe(2);
-    // One fillRect for the square silhouette (its frame) + one for the HP pip (live).
-    const swarm = drawnCreep(creep({ creepId: 'swarm' }));
-    expect(count(swarm.all, 'fillRect')).toBe(2);
-    expect(count(swarm.frame, 'fillRect')).toBe(1);
-    expect(count(swarm.cues, 'fillRect')).toBe(1);
-    expect(count(drawnCreep(creep({ creepId: 'unknown-id' })).all, 'fillTriangle')).toBe(1);
+describe('creep silhouettes and cues — the remaining shapes + the telegraphs', () => {
+  it('a fast creep paints the diamond, a swarm creep the rounded square, and an unknown id falls back to the triangle', () => {
+    const fast = silhouetteOf(drawnCreep(creep({ creepId: 'fast' })).frame);
+    expect(cornersOf(fast)).toBe(4);
+    if (fast.kind !== 'polygon') throw new Error('the diamond is a polygon');
+    // A diamond, not a square: its corners lie on the axes.
+    for (const [x, y] of fast.points) expect(x === 0 || y === 0).toBe(true);
+    expect(silhouetteOf(drawnCreep(creep({ creepId: 'swarm' })).frame).kind).toBe('rect');
+    const unknown = drawnCreep(creep({ creepId: 'unknown-id' }));
+    expect(cornersOf(silhouetteOf(unknown.frame))).toBe(3);
+    expect(unknown.body.frame).toBe(drawnCreep(creep({ creepId: 'normal' })).body.frame);
   });
 
-  it('a low-hp creep switches the silhouette/pip colour (hpColour branch)', () => {
-    const low = drawnCreep(creep({ hpFrac: 0.1 }));
-    const fillStyleCalls = low.all.filter((c) => c.method === 'fillStyle');
-    expect(fillStyleCalls[0]!.args[0]).toBe(PAL.creepLowHp); // the silhouette
-    // ... and the live pip drawn over it wears the same tint.
-    expect(low.cues.find((c) => c.method === 'fillStyle')!.args[0]).toBe(PAL.creepLowHp);
-    // At full health both are the ordinary creep colour.
-    const full = drawnCreep(creep({ hpFrac: 1 }));
-    expect(full.all.filter((c) => c.method === 'fillStyle').map((c) => c.args[0])).toEqual([
-      PAL.creep,
-      PAL.creep,
-    ]);
+  // Retargeted (C3): this test pinned the silhouette AND the pip switching to the low-HP tint
+  // together. A body now keeps its family's hue at any HP, and only the HP bar's fill turns —
+  // both halves pinned, at the same two HPs.
+  it('a low-HP creep keeps its body’s family hue — its HP bar’s fill turns to the low-HP colour instead', () => {
+    const low = drawnCreep(creep({ creepId: 'swarm', hpFrac: 0.1 }));
+    const full = drawnCreep(creep({ creepId: 'swarm', hpFrac: 1 }));
+    expect(low.body.frame).toBe(full.body.frame); // one body frame at any HP
+    const [lowArt] = artCallsOf(low.frame);
+    expect(lowArt).toBeDefined();
+    const colour = (frame: readonly Call[]): number =>
+      (frame.find((c) => c.method === 'art')!.args[1] as (t: string) => number)('family');
+    expect(colour(low.frame)).toBe(PAL.creepSwarm);
+    expect(colour(full.frame)).toBe(PAL.creepSwarm);
+    // The bar: its backing in ink, then its fill — low-HP below the threshold, the family's
+    // hue above it.
+    const fills = (cues: readonly Call[]): number[] =>
+      cues.filter((c) => c.method === 'fillStyle').map((c) => c.args[0] as number);
+    expect(fills(low.cues)).toEqual([ART_INK, PAL.creepLowHp]);
+    expect(fills(full.cues)).toEqual([ART_INK, PAL.creepSwarm]);
   });
 
-  it('a slowed creep draws the ring (always) + pulse (motion allowed) or just the ring (reduced motion)', () => {
-    expect(count(drawnCreep(creep({ slowed: true }), false).all, 'strokeCircle')).toBe(2); // ring + pulse
-    expect(count(drawnCreep(creep({ slowed: true }), true).all, 'strokeCircle')).toBe(1); // ring only
+  it('a slowed creep draws the ring (always) + pulse (motion allowed) or just the ring (reduced motion) — the ring on an ink under-stroke', () => {
+    const slow = (reduced: boolean): Call[] => drawnCreep(creep({ slowed: true }), reduced).cues;
+    expect(countIn(slow(false), 'strokeCircle', PAL.slowed)).toBe(2); // ring + pulse
+    expect(countIn(slow(true), 'strokeCircle', PAL.slowed)).toBe(1); // ring only
+    expect(countIn(slow(false), 'strokeCircle', ART_INK)).toBe(1); // the ring's, not the pulse's
+    expect(countIn(slow(true), 'strokeCircle', ART_INK)).toBe(1);
   });
 
-  it('a stunned creep draws the jolt (always) + flicker (motion allowed) or just the jolt (reduced motion)', () => {
-    expect(count(drawnCreep(creep({ stunned: true }), false).all, 'strokeCircle')).toBe(2); // jolt + flicker
-    expect(count(drawnCreep(creep({ stunned: true }), true).all, 'strokeCircle')).toBe(1); // jolt only
-    expect(count(drawnCreep(creep({ stunned: false }), false).all, 'strokeCircle')).toBe(0);
+  it('a stunned creep draws the jolt (always) + flicker (motion allowed) or just the jolt (reduced motion) — each on an ink under-stroke', () => {
+    const stun = (reduced: boolean, stunned = true): Call[] =>
+      drawnCreep(creep({ stunned }), reduced).cues;
+    expect(countIn(stun(false), 'strokeCircle', PAL.stunned)).toBe(2); // jolt + flicker
+    expect(countIn(stun(true), 'strokeCircle', PAL.stunned)).toBe(1); // jolt only
+    expect(countIn(stun(false), 'strokeCircle', ART_INK)).toBe(2);
+    expect(countIn(stun(true), 'strokeCircle', ART_INK)).toBe(1);
+    expect(count(stun(false, false), 'strokeCircle')).toBe(0);
   });
 
-  it('a warded creep draws a single opaque ring, regardless of reducedMotion (not a timed status)', () => {
-    expect(count(drawnCreep(creep({ warded: true }), false).all, 'strokeCircle')).toBe(1);
-    expect(count(drawnCreep(creep({ warded: true }), true).all, 'strokeCircle')).toBe(1); // unchanged
-    expect(count(drawnCreep(creep({ warded: false }), false).all, 'strokeCircle')).toBe(0);
-  });
-
-  it("an air creep's wingspan COMPOSES over the base silhouette (M2-S7) — both draw, regardless of reducedMotion (not a timed status)", () => {
-    // `armored` (hexagon, 6-point fillPoints) rather than `normal`, so this proves the
-    // airborne cue doesn't merely coexist with the DEFAULT triangle — it composes with
-    // whatever base shape the id already draws, exactly the armored-flyer (S10)
-    // requirement PLAN.md calls out.
-    const air = drawnCreep(creep({ creepId: 'armored', domain: 'air' }));
-    const fillPointsCalls = air.all.filter((c) => c.method === 'fillPoints');
-    expect(fillPointsCalls).toHaveLength(1); // the hexagon silhouette — still drawn
-    expect((fillPointsCalls[0]!.args[0] as unknown[]).length).toBe(6);
-    // The wingspan is 2 light strokes (apex→left, apex→right) over 2 ink strokes under them
-    // (QC round 1, #181) — ADDITIONAL to the silhouette, never a replacement for it.
-    expect(count(air.all, 'lineBetween')).toBe(4);
-    const strokes = air.cues.flatMap((c, i) =>
-      c.method === 'lineBetween'
-        ? [
-            {
-              style: air.cues
-                .slice(0, i)
-                .filter((s) => s.method === 'lineStyle')
-                .pop()!,
-              c,
-            },
-          ]
-        : [],
-    );
-    const [inkL, inkR, lightL, lightR] = strokes;
-    // The ink first, in the art kit's ink, 1px wider on each side than the light stroke...
-    for (const ink of [inkL!, inkR!]) expect(ink.style.args).toEqual([4, ART_INK, 1]);
-    for (const light of [lightL!, lightR!]) expect(light.style.args).toEqual([2, PAL.airborne, 1]);
-    // ... and run 1px past both ends of the light stroke it outlines: the same line, longer.
-    for (const [ink, light] of [
-      [inkL!, lightL!],
-      [inkR!, lightR!],
-    ] as const) {
-      const [lx0, ly0, lx1, ly1] = light.c.args as number[];
-      const [ix0, iy0, ix1, iy1] = ink.c.args as number[];
-      const lightLen = Math.hypot(lx1! - lx0!, ly1! - ly0!);
-      expect(Math.hypot(ix1! - ix0!, iy1! - iy0!)).toBeCloseTo(lightLen + 2, 9);
-      expect(Math.hypot(ix0! - lx0!, iy0! - ly0!)).toBeCloseTo(1, 9); // past the apex
-      expect(Math.hypot(ix1! - lx1!, iy1! - ly1!)).toBeCloseTo(1, 9); // past the tip
+  it('a warded creep draws a single opaque ring on an ink under-stroke, regardless of reducedMotion (not a timed status)', () => {
+    for (const reduced of [false, true]) {
+      const cues = drawnCreep(creep({ warded: true }), reduced).cues;
+      expect(countIn(cues, 'strokeCircle', PAL.warded)).toBe(1);
+      expect(countIn(cues, 'strokeCircle', ART_INK)).toBe(1);
     }
-
-    // Reduced motion changes nothing — the airborne cue carries no motion component.
-    expect(
-      count(drawnCreep(creep({ creepId: 'armored', domain: 'air' }), true).all, 'lineBetween'),
-    ).toBe(4);
-
-    // A ground creep of the same id draws the hexagon with no wingspan at all.
-    const ground = drawnCreep(creep({ creepId: 'armored', domain: 'ground' }));
-    expect(count(ground.all, 'fillPoints')).toBe(1);
-    expect(count(ground.all, 'lineBetween')).toBe(0);
+    expect(count(drawnCreep(creep({ warded: false })).cues, 'strokeCircle')).toBe(0);
   });
 
-  it('draws every creep’s health pip at its drawn centre: length AND colour carry health', () => {
-    const placed = placeCreeps([creep({ hpFrac: 0.5 })], PAL, PROJECTION, FRAMES)[0]!;
+  it('each guaranteed cue’s ink under-stroke is the cue’s own stroke, CUE_INK_PX wider on each side, at the same centre and radius', () => {
+    const { cues } = drawnCreep(creep({ slowed: true, stunned: true, warded: true }), true);
+    const strokes: { width: number; colour: number; at: number[] }[] = [];
+    let style: unknown[] = [];
+    for (const c of cues) {
+      if (c.method === 'lineStyle') style = c.args;
+      if (c.method === 'strokeCircle') {
+        strokes.push({
+          width: style[0] as number,
+          colour: style[1] as number,
+          at: c.args as number[],
+        });
+      }
+    }
+    const inks = strokes.filter((s) => s.colour === ART_INK);
+    const colours = strokes.filter((s) => s.colour !== ART_INK);
+    expect(inks).toHaveLength(3);
+    expect(colours.map((s) => s.colour)).toEqual([PAL.slowed, PAL.stunned, PAL.warded]);
+    colours.forEach((cue, i) => {
+      expect(inks[i]!.at).toEqual(cue.at);
+      expect(inks[i]!.width).toBe(cue.width + 2 * CUE_INK_PX);
+    });
+    // The weights themselves: the slow ring 2, the jolt 4, the ward 2.
+    expect(colours.map((s) => s.width)).toEqual([2, 4, 2]);
+  });
+
+  it("an air creep's wings COMPOSE with its base silhouette in one body frame (M2-S7, C4) — none in the cues, whatever the motion setting", () => {
+    // `armored` (the hexagon) rather than `normal`, so this proves the wings don't merely
+    // coexist with the DEFAULT triangle — they compose with whatever base shape the id already
+    // draws, exactly the armored-flyer (S10) requirement PLAN.md calls out.
+    const air = drawnCreep(creep({ creepId: 'armored', domain: 'air' }));
+    const shapes = shapesOf(air.frame);
+    expect(cornersOf(silhouetteOf(air.frame))).toBe(6); // the hexagon — still drawn
+    // Two wings UNDER it: filled in the airborne colour, outlined in ink.
+    const wings = shapes.filter((s) => s.fill === 'airborne');
+    expect(wings).toHaveLength(2);
+    expect(shapes.indexOf(wings[1]!)).toBeLessThan(shapes.indexOf(silhouetteOf(air.frame)));
+    for (const w of wings) expect(w.stroke).toBe('ink');
+    const colour = air.frame.find((c) => c.method === 'art')!.args[1] as (t: string) => number;
+    expect(colour('airborne')).toBe(PAL.airborne);
+    expect(colour('ink')).toBe(ART_INK);
+    // Nothing of it is drawn live, so reduced motion changes nothing about it.
+    for (const reduced of [false, true]) {
+      const cues = drawnCreep(creep({ creepId: 'armored', domain: 'air' }), reduced).cues;
+      expect(cues.some((c) => c.method === 'lineBetween')).toBe(false);
+      expect(cues.some((c) => c.method === 'fillStyle' && c.args[0] === PAL.airborne)).toBe(false);
+    }
+    // A ground creep of the same id draws the hexagon with no wings at all.
+    const ground = drawnCreep(creep({ creepId: 'armored', domain: 'ground' }));
+    expect(shapesOf(ground.frame).filter((s) => s.fill === 'airborne')).toHaveLength(0);
+    expect(cornersOf(silhouetteOf(ground.frame))).toBe(6);
+  });
+
+  it('draws every creep’s HP bar at its drawn body: an ink backing, then a fill whose length AND colour carry HP', () => {
+    const { body, cues } = drawnCreep(creep({ hpFrac: 0.5 }));
+    const rects = cues.filter((c) => c.method === 'fillRect').map((c) => c.args as number[]);
+    expect(rects).toHaveLength(2);
+    const r = body.r;
+    const w = r * 2.1;
+    const h = Math.max(3, r * 0.32);
+    const top = body.cy - r * 1.75;
+    // The backing, a pixel larger all round; then the fill, half its length at half HP.
+    expect(rects[0]).toEqual([body.cx - w / 2 - 1, top - 1, w + 2, h + 2]);
+    expect(rects[1]).toEqual([body.cx - w / 2, top, w * 0.5, h]);
+    // A creep with nothing left draws the backing alone: an empty bar, still there.
+    const dead = drawnCreep(creep({ hpFrac: 0 })).cues.filter((c) => c.method === 'fillRect');
+    expect(dead).toHaveLength(1);
+  });
+
+  it('draws in passes over EVERY creep: every ring’s ink, then every ring, then every HP bar, then every pip’s ink disc, then every pip — so no ring’s ink covers a ring and no creep’s ink disc covers a pip', () => {
+    const all = { slowed: true, poisoned: true, stunned: true, warded: true };
+    const { bodies } = placeCreeps(
+      [creep(all), creep({ ...all, x: 5 * 256 + 40, creepId: 'armored' })],
+      PAL,
+      PROJECTION,
+      FRAMES,
+    );
     const g = fakeGraphics();
-    drawCreepCues(g, PAL, [placed], false, 0);
-    const pip = g.calls.find((c) => c.method === 'fillRect')!;
-    const r = placed.r;
-    // The pip spans the silhouette's width at full health, half of it here, 4px above it.
-    expect(pip.args).toEqual([placed.cx - r, placed.cy - r - 4, r * 2 * 0.5, 3]);
+    drawCreepCues(g, PAL, bodies, true, 0);
+    // Each drawing call tagged with its pass.
+    const passes: string[] = [];
+    let fill = -1;
+    let line = -1;
+    for (const { method, args } of g.calls) {
+      if (method === 'fillStyle') fill = args[0] as number;
+      else if (method === 'lineStyle') line = args[1] as number;
+      else if (method === 'strokeCircle') passes.push(line === ART_INK ? 'ink' : 'ring');
+      else if (method === 'fillRect') passes.push('bar');
+      else if (method === 'fillCircle') passes.push(fill === ART_INK ? 'pip-ink' : 'pip');
+    }
+    // Two creeps, each: three rings' ink (slow, jolt, ward), three rings, a bar of two rects,
+    // three pips on three ink discs (every pip's ink, then every pip).
+    const runs = passes.filter((p, i) => p !== passes[i - 1]);
+    expect(runs).toEqual(['ink', 'ring', 'bar', 'pip-ink', 'pip']);
+    expect(passes.filter((p) => p === 'ink')).toHaveLength(6);
+    expect(passes.filter((p) => p === 'ring')).toHaveLength(6);
+    expect(passes.filter((p) => p === 'bar')).toHaveLength(4);
   });
 });
 
@@ -1065,22 +1150,24 @@ describe('creep silhouettes and cues — the remaining shapes + slowed telegraph
 // telegraph carried this from M2-S3 and had therefore never rendered at all; the DoT
 // telegraph inherited it. These assert the cues land ON the projected centre, so passing
 // the raw creep again fails immediately — and, since V2, ON the centre the creep's sprite
-// is actually drawn at.
+// is actually drawn at; since C4, a flyer's on its lifted body.
 describe('drawCreepCues — every telegraph draws at the PROJECTED centre, not fixed-point (PR #78)', () => {
   const CREEP = creep({ slowed: true, poisoned: true });
 
   it('the slowed ring and the poison pips are centred within a cell of the silhouette', () => {
     const g = fakeGraphics();
-    const placed = placeCreeps([CREEP], PAL, PROJECTION, FRAMES);
-    drawCreepCues(g, PAL, placed, true, 0);
+    const { bodies } = placeCreeps([CREEP], PAL, PROJECTION, FRAMES);
+    drawCreepCues(g, PAL, bodies, true, 0);
     const p = PROJECTION.fpToPixel(CREEP.x, CREEP.y);
     // Sanity: the projection must actually MOVE the point, or this test proves nothing.
     expect(Math.hypot(p.x - CREEP.x, p.y - CREEP.y)).toBeGreaterThan(PROJECTION.cellPx);
 
-    const ring = g.calls.find((c) => c.method === 'strokeCircle');
-    expect(ring).toBeDefined();
-    const [rx, ry] = ring!.args as [number, number, number];
-    expect(Math.hypot(rx - p.x, ry - p.y)).toBeLessThan(PROJECTION.cellPx);
+    const rings = g.calls.filter((c) => c.method === 'strokeCircle');
+    expect(rings.length).toBeGreaterThan(0);
+    for (const ring of rings) {
+      const [rx, ry] = ring.args as [number, number, number];
+      expect(Math.hypot(rx - p.x, ry - p.y)).toBeLessThan(PROJECTION.cellPx);
+    }
 
     const pips = g.calls.filter((c) => c.method === 'fillCircle');
     expect(pips.length).toBeGreaterThan(0);
@@ -1098,23 +1185,24 @@ describe('drawCreepCues — every telegraph draws at the PROJECTED centre, not f
 
   it('the stun jolt and the ward ring are centred EXACTLY on the projected silhouette centre', () => {
     const g = fakeGraphics();
-    const placed = placeCreeps([STUN_WARD_CREEP], PAL, PROJECTION, FRAMES);
-    drawCreepCues(g, PAL, placed, true, 0);
+    const { bodies } = placeCreeps([STUN_WARD_CREEP], PAL, PROJECTION, FRAMES);
+    drawCreepCues(g, PAL, bodies, true, 0);
     const p = PROJECTION.fpToPixel(STUN_WARD_CREEP.x, STUN_WARD_CREEP.y);
     expect(Math.hypot(p.x - STUN_WARD_CREEP.x, p.y - STUN_WARD_CREEP.y)).toBeGreaterThan(
       PROJECTION.cellPx,
     );
-    // The silhouette sprite's centre — its top-left plus its frame's centre anchor — IS the
-    // projected point here (a whole pixel at dpr 1, so the device-pixel snap is a no-op).
-    const sprite = placed[0]!;
+    // The body sprite's centre — its top-left plus its frame's anchor — IS the projected point
+    // here (a whole pixel at dpr 1, so the device-pixel snap is a no-op).
+    const sprite = bodies[0]!;
     const spec = frameSpec(sprite.frame);
     expect(sprite.x + spec.anchorX).toBe(p.x);
     expect(sprite.y + spec.anchorY).toBe(p.y);
 
-    // Reduced motion drops the flicker, so exactly 2 strokeCircle calls remain: jolt,
-    // then ward (the cue pass's draw order) — both must land on the projected centre.
+    // Reduced motion drops the flicker, so exactly 4 strokeCircle calls remain: the jolt's and
+    // the ward's ink under-strokes, then the jolt and the ward (the passes' draw order) — every
+    // one must land on the projected centre.
     const strokes = g.calls.filter((c) => c.method === 'strokeCircle');
-    expect(strokes).toHaveLength(2);
+    expect(strokes).toHaveLength(4);
     for (const s of strokes) {
       const [sx, sy] = s.args as [number, number, number];
       // EXACT, not a tolerance. `strokeCircle` takes its centre directly, so every one of
@@ -1126,6 +1214,33 @@ describe('drawCreepCues — every telegraph draws at the PROJECTED centre, not f
       expect(sx).toBe(p.x);
       expect(sy).toBe(p.y);
     }
+  });
+
+  it('a flyer’s cues are centred EXACTLY on its lifted body — the projected point, raised by its lift — and its shadow on the point itself', () => {
+    const flyer = creep({ creepId: 'flying', domain: 'air', stunned: true, warded: true });
+    const { shadows, bodies } = placeCreeps([flyer], PAL, PROJECTION, FRAMES);
+    const g = fakeGraphics();
+    drawCreepCues(g, PAL, bodies, true, 0);
+    const p = PROJECTION.fpToPixel(flyer.x, flyer.y);
+    const body = bodies[0]!;
+    // Where the body is drawn: the frame paints the art's centre `CREEP_LIFT` design units
+    // above its anchor, which sits on the projected point.
+    const [art] = artCallsOf(paintFrame(body.frame));
+    expect(body.x + frameSpec(body.frame).anchorX).toBe(p.x);
+    expect(body.y + frameSpec(body.frame).anchorY).toBe(p.y);
+    const centre = { x: body.x + art!.x, y: body.y + art!.y };
+    expect(centre.y).toBeCloseTo(p.y - CREEP_LIFT * art!.unit, 9);
+    const strokes = g.calls.filter((c) => c.method === 'strokeCircle');
+    expect(strokes).toHaveLength(4);
+    for (const s of strokes) {
+      const [sx, sy] = s.args as [number, number, number];
+      expect(sx).toBe(centre.x);
+      expect(sy).toBeCloseTo(centre.y, 9);
+    }
+    // The shadow marks where the flyer truly is.
+    const shadow = shadows[0]!;
+    expect(shadow.x + frameSpec(shadow.frame).anchorX).toBe(p.x);
+    expect(shadow.y + frameSpec(shadow.frame).anchorY).toBe(p.y);
   });
 });
 
@@ -1226,4 +1341,182 @@ describe('selection and aura shells at a fractional dpr — they follow the snap
       });
     });
   }
+});
+
+// ---- R4 QC (#181): inks, pips and the bar, where creeps bunch ----
+
+describe('drawCreepCues — every ink under its own cue, every pip whole, the bar opaque (R4 QC)', () => {
+  /** Each drawing call with the paint in force: the fill's colour and alpha for a fill, the
+   *  line's width, colour and alpha for a stroke. */
+  const painted = (
+    calls: readonly Call[],
+  ): { method: string; args: number[]; colour: number; alpha: number; width: number }[] => {
+    const out: { method: string; args: number[]; colour: number; alpha: number; width: number }[] =
+      [];
+    let fill = { colour: -1, alpha: 1, width: 0 };
+    let line = { colour: -1, alpha: 1, width: 0 };
+    for (const { method, args } of calls) {
+      if (method === 'fillStyle') {
+        fill = { colour: args[0] as number, alpha: (args[1] as number | undefined) ?? 1, width: 0 };
+      } else if (method === 'lineStyle') {
+        line = {
+          width: args[0] as number,
+          colour: args[1] as number,
+          alpha: (args[2] as number | undefined) ?? 1,
+        };
+      } else if (method.startsWith('stroke')) out.push({ method, args: args as number[], ...line });
+      else if (method.startsWith('fill')) out.push({ method, args: args as number[], ...fill });
+    }
+    return out;
+  };
+
+  it('no creep’s pip ink disc lands on a pip already drawn — a neighbour’s included', () => {
+    // Two poisoned creeps 2px apart, as a bunch draws them: a later creep's ink disc must not
+    // cover an earlier creep's pip, the one channel a poison has.
+    const { bodies } = placeCreeps(
+      [creep({ poisoned: true }), creep({ poisoned: true, x: 5 * 256 + 51, creepId: 'armored' })],
+      PAL,
+      PROJECTION,
+      FRAMES,
+    );
+    expect(Math.abs(bodies[1]!.cx - bodies[0]!.cx), 'the premise: two creeps 2px apart').toBe(2);
+    const g = fakeGraphics();
+    drawCreepCues(g, PAL, bodies, true, 0);
+    const discs = painted(g.calls).filter((c) => c.method === 'fillCircle');
+    const pips = discs.flatMap((d, i) => (d.colour === PAL.poisoned ? [{ d, i }] : []));
+    expect(pips).toHaveLength(6);
+    for (const { d: pip, i } of pips) {
+      for (const later of discs.slice(i + 1)) {
+        if (later.colour !== ART_INK) continue;
+        const gap = Math.hypot(later.args[0]! - pip.args[0]!, later.args[1]! - pip.args[1]!);
+        expect(gap, 'an ink disc drawn after a pip covers it').toBeGreaterThanOrEqual(
+          later.args[2]! + pip.args[2]! - 1e-9,
+        );
+      }
+    }
+  });
+
+  it('draws each guaranteed pip over its own ink disc — CUE_INK_PX larger, at the same centre — and the drift over the pips', () => {
+    const { bodies } = placeCreeps([creep({ poisoned: true })], PAL, PROJECTION, FRAMES);
+    const g = fakeGraphics();
+    drawCreepCues(g, PAL, bodies, false, 0);
+    const discs = painted(g.calls).filter((c) => c.method === 'fillCircle');
+    const inks = discs.filter((d) => d.colour === ART_INK);
+    const pips = discs.filter((d) => d.colour === PAL.poisoned && d.alpha === 1);
+    const drifts = discs.filter((d) => d.colour === PAL.poisoned && d.alpha < 1);
+    expect([inks.length, pips.length, drifts.length]).toEqual([3, 3, 3]);
+    pips.forEach((pip, i) => {
+      expect(inks[i]!.args.slice(0, 2)).toEqual(pip.args.slice(0, 2));
+      expect(inks[i]!.args[2]).toBeCloseTo(pip.args[2]! + CUE_INK_PX, 12);
+      expect(discs.indexOf(inks[i]!)).toBeLessThan(discs.indexOf(pip));
+    });
+    const lastPip = Math.max(...pips.map((p) => discs.indexOf(p)));
+    for (const d of drifts) expect(discs.indexOf(d)).toBeGreaterThan(lastPip);
+  });
+
+  it('under-strokes the flicker as it does the jolt: its own stroke, CUE_INK_PX wider each side, at the flicker’s own animated alpha', () => {
+    for (const t of [0, 225, 450]) {
+      // the flicker's trough (alpha 0.15), its middle and its crest
+      const { bodies } = placeCreeps(
+        [creep({ stunned: true, slowed: true })],
+        PAL,
+        PROJECTION,
+        FRAMES,
+      );
+      const g = fakeGraphics();
+      drawCreepCues(g, PAL, bodies, false, t);
+      const strokes = painted(g.calls).filter((c) => c.method === 'strokeCircle');
+      const inks = strokes.filter((s) => s.colour === ART_INK);
+      // Every coloured ring but the slow pulse, a motion cue drawn without an ink.
+      const rings = strokes.filter(
+        (s) => s.colour !== ART_INK && !(s.colour === PAL.slowed && s.alpha < 1),
+      );
+      expect(rings.map((s) => s.colour)).toEqual([PAL.slowed, PAL.stunned, PAL.stunned]);
+      expect(inks).toHaveLength(3);
+      rings.forEach((ring, i) => {
+        expect(inks[i]!.args, `t=${t}`).toEqual(ring.args);
+        expect(inks[i]!.width, `t=${t}`).toBe(ring.width + 2 * CUE_INK_PX);
+        expect(inks[i]!.alpha, `t=${t}`).toBe(ring.alpha);
+      });
+      if (t === 0) expect(rings[2]!.alpha, 'the premise: a faded flicker').toBeCloseTo(0.15, 12);
+    }
+  });
+
+  it('paints the HP bar’s backing and fill opaque — the colours the palette gate measures are the colours drawn', () => {
+    for (const hpFrac of [1, 0.2]) {
+      const { cues } = drawnCreep(creep({ hpFrac }));
+      const rects = painted(cues).filter((c) => c.method === 'fillRect');
+      expect(rects.map((r) => [r.colour, r.alpha])).toEqual([
+        [ART_INK, 1],
+        [hpFrac < 0.34 ? PAL.creepLowHp : PAL.creep, 1],
+      ]);
+    }
+  });
+});
+
+// ---- R4 QC (#181): a flyer's wings under its own cues ----
+
+describe('a slowed flyer’s wings under its own slow ring — MEASURED and PINNED (R4 QC)', () => {
+  // Until C4 the airborne cue was held clear of every ring (r×3.22 and out, and clear of the
+  // drift). Since C4 it is the wings, under every cue (`layers.ts`), and the slow ring — which a
+  // flyer carries in shipped content, the slow tower striking both domains — crosses them on an
+  // ink band a fixed 4px wide. At a phone's cells that band covers most of each wing. Pinned
+  // here, not passed: the share of the wings' area outside the body that the ring leaves in
+  // sight, per cell size, so a change that hides more of them fails.
+  const PINNED: Readonly<Record<number, readonly [number, number]>> = {
+    // cellPx: [flying, armored-flyer], the measured share rounded down
+    10: [0.15, 0.17],
+    13: [0.29, 0.23],
+    20: [0.49, 0.43],
+    40: [0.74, 0.72],
+  };
+
+  /** The share of a look's wings outside its body that no slow-ring stroke covers, at `r`. */
+  const visibleShare = (shape: 'triangle' | 'hexagon', r: number): number => {
+    const g = fakeGraphics();
+    const cue = { cx: 0, cy: 0, r, hue: 0, hpFrac: 1, slowed: true };
+    drawCreepCues(g, PAL, [{ ...cue, poisoned: false, stunned: false, warded: false }], true, 0);
+    // Every ring stroke as drawn: its radius and half its width, in CSS px.
+    const bands: { r: number; half: number }[] = [];
+    let width = 0;
+    for (const { method, args } of g.calls) {
+      if (method === 'lineStyle') width = args[0] as number;
+      if (method === 'strokeCircle') bands.push({ r: args[2] as number, half: width / 2 });
+    }
+    expect(bands.length, 'the premise: the ring and its ink').toBe(2);
+    const unit = r / CREEP_ART_R;
+    const body = CREEP_BODY[shape];
+    let wing = 0;
+    let seen = 0;
+    for (let x = -24; x <= 24; x += 0.1) {
+      for (let y = -12; y <= 8; y += 0.1) {
+        if (!CREEP_WINGS.some((w) => covers(w, x, y, unit)) || covers(body, x, y, unit)) continue;
+        wing++;
+        const d = Math.hypot(x, y) * unit;
+        if (bands.every((b) => Math.abs(d - b.r) > b.half)) seen++;
+      }
+    }
+    return seen / wing;
+  };
+
+  it(
+    'leaves at least the pinned share of each flyer’s wings in sight, at the narrow floor, a phone’s cells, and up',
+    { timeout: 60_000 },
+    () => {
+      const report: string[] = [];
+      for (const [cell, [flying, armoredFlyer]] of Object.entries(PINNED)) {
+        const cellPx = Number(cell);
+        const shares = [
+          visibleShare('triangle', creepRadius(cellPx, 'flying')),
+          visibleShare('hexagon', creepRadius(cellPx, 'armored')),
+        ];
+        report.push(`${cellPx}px ${shares.map((s) => (s * 100).toFixed(0) + '%').join('/')}`);
+        expect(shares[0], `flying at ${cellPx}px`).toBeGreaterThanOrEqual(flying);
+        expect(shares[1], `armored-flyer at ${cellPx}px`).toBeGreaterThanOrEqual(armoredFlyer);
+      }
+      console.info(
+        `[scene.test] a slowed flyer's wings in sight past its slow ring: ${report.join(', ')}`,
+      );
+    },
+  );
 });

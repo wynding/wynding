@@ -3903,7 +3903,7 @@ describe('overlay — the wave strip (#181 L1)', () => {
     }
   });
 
-  it("every icon executes the render package's own silhouette for its creep, with the airborne chevron only on air", () => {
+  it("every icon executes the render package's own art for its creep, with the wings only on air", () => {
     const { overlay, shell } = setup();
     const ids = Object.keys(ruleset.creepById);
     expect(ids.length).toBeGreaterThan(0);
@@ -3913,7 +3913,7 @@ describe('overlay — the wave strip (#181 L1)', () => {
         const icon = shell.preview.list.querySelector<SVGSVGElement>('.wy-creep-icon')!;
         expect(icon.dataset.wyShape, creepId).toBe(creepShapeFor(creepId));
         expect(icon.getAttribute('aria-hidden')).toBe('true');
-        expect(icon.querySelector('.wy-creep-chevron') !== null, `${creepId}/${domain}`).toBe(
+        expect(icon.querySelector('.wy-creep-wing') !== null, `${creepId}/${domain}`).toBe(
           domain === 'air',
         );
       }
@@ -3926,10 +3926,10 @@ describe('overlay — the wave strip (#181 L1)', () => {
     const row = shell.preview.list.firstElementChild!;
     const body = (): string | null =>
       shell.preview.list.querySelector('.wy-creep-body')!.getAttribute('fill');
-    const chevron = (): string | null =>
-      shell.preview.list.querySelector('.wy-creep-chevron')!.getAttribute('stroke');
+    const wing = (): string | null =>
+      shell.preview.list.querySelector('.wy-creep-wing')!.getAttribute('fill');
     expect(body()).toBe(hexColour(resolvePalette('default').creep));
-    expect(chevron()).toBe(hexColour(resolvePalette('default').airborne));
+    expect(wing()).toBe(hexColour(resolvePalette('default').airborne));
 
     const other = COLOUR_MODES.find(
       (m) => resolvePalette(m).creep !== resolvePalette('default').creep,
@@ -3937,13 +3937,14 @@ describe('overlay — the wave strip (#181 L1)', () => {
     expect(other, 'a colour mode that inks creeps differently').toBeDefined();
     overlay.setColourMode(other!);
     expect(body()).toBe(hexColour(resolvePalette(other!).creep));
-    expect(chevron()).toBe(hexColour(resolvePalette(other!).airborne));
+    expect(wing()).toBe(hexColour(resolvePalette(other!).airborne));
     // Repainted, not rebuilt: a reader parked on the row keeps its node.
     expect(shell.preview.list.firstElementChild).toBe(row);
 
-    // And a wave built AFTER the change is born in the new palette.
+    // And a wave built AFTER the change is born in the new palette — in its own family's hue
+    // (C3): a fast creep wears the fast family's.
     show(overlay, [entry({ creepId: 'fast' })], 2);
-    expect(body()).toBe(hexColour(resolvePalette(other!).creep));
+    expect(body()).toBe(hexColour(resolvePalette(other!).creepFast));
   });
 
   describe('the overflow scroll form', () => {

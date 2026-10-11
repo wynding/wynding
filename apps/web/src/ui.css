@@ -1213,9 +1213,10 @@ a.wy-home:focus-visible {
   white-space: nowrap;
 }
 
-/* The creep icon (`hud-icons.ts`): the board's own silhouette. `overflow: visible` lets a
-   boss's larger silhouette and an air entry's chevron use the line's spare height rather than
-   shrinking every other icon to make room. */
+/* The creep icon (`hud-icons.ts`): the board's own creep art. `overflow: visible` lets an air
+   entry's wings reach past the icon's sides, rather than shrinking every icon to make room.
+   Standard leaves them the gap beside the icon; Compact's column has none on the left, so it
+   gives the icon a margin of its own (below). */
 .wy-creep-icon {
   flex: none;
   width: 1.3em;
@@ -2257,9 +2258,10 @@ a.wy-home:focus-visible {
 /* FORCED COLORS (#181). Chromium leaves SVG `fill` and `stroke` unforced, so the icons would
    keep their authored inks on the user's Canvas — the countdown clock and the chips' icons
    near-white on white. Every SVG ink takes a system colour instead. The shapes carry the
-   meaning (heart, gem, star; a creep's silhouette and its airborne chevron), so they read in
-   the one colour the user's theme draws text in. The creep icons' palette inks are
-   presentation attributes, which any rule here outranks. The countdown dial is in the
+   meaning (heart, gem, star; a creep's silhouette and a flyer's wings), so they read in the
+   one colour the user's theme draws text in — a flyer's wings as outlines on the background,
+   so they stay apart from the solid body they are attached to. The creep icons' palette inks
+   are presentation attributes, which any rule here outranks. The countdown dial is in the
    control's own system ink, `ButtonText`, over its face in `ButtonFace` — the control's own
    system ground, so the remaining wedge reads at the full contrast of the control's text
    (`GrayText` under it measured 1.5:1 in the contrast themes), and the ring and crown still
@@ -2271,8 +2273,12 @@ a.wy-home:focus-visible {
     stroke: CanvasText;
   }
 
-  .wy-icon .wy-icon-line,
-  .wy-creep-icon .wy-creep-chevron {
+  .wy-icon .wy-icon-line {
+    stroke: CanvasText;
+  }
+
+  .wy-creep-icon .wy-creep-wing {
+    fill: Canvas;
     stroke: CanvasText;
   }
 
@@ -3184,6 +3190,19 @@ a.wy-home:focus-visible {
     flex-direction: column;
     gap: 0.15rem;
     margin-top: 0.25rem;
+  }
+
+  /* An air entry's wings reach 0.1287em past the icon's box on each side (the armored flyer's,
+     the widest that ships), and the column's scrollport has no gap to give them on the left:
+     this margin does. 0.15em, not the reach, for a little room. The glance gives the same
+     0.15em back from its gap, so every count stays where it was: at 568×320 the column has
+     under a pixel to spare for one, and the right wing still clears it. */
+  .wy-wave-preview-list .wy-creep-icon {
+    margin-inline-start: 0.15em;
+  }
+
+  .wy-wave-preview-list .wy-preview-glance {
+    gap: 0.15em;
   }
 
   .wy-preview-detail {

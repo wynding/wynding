@@ -2,14 +2,15 @@
 // sprites and only moving/transient things are drawn live, so the order is the scene
 // graph's depth order rather than the order calls were recorded in — and this is the test
 // that used to be "every aura shell is drawn before any tower body", made structural. The
-// visual pass split a tower into a plate and a head (so a head can turn on its own) and
-// added the scorch a spent mine leaves, on the floor.
+// visual pass split a tower into a plate and a head (so a head can turn on its own), added
+// the scorch a spent mine leaves, on the floor, and gave every creep a shadow, under every
+// creep's body.
 
 import { describe, it, expect } from 'vitest';
 import { BOARD_LAYERS, layerDepth } from './layers';
 
 describe('BOARD_LAYERS — the board draw order', () => {
-  it('is exactly: board, scorches, shells, plates, heads, rims, pending, effects, creeps, cues', () => {
+  it('is exactly: board, scorches, shells, plates, heads, rims, pending, creepShadows, effects, creeps, cues', () => {
     expect(BOARD_LAYERS).toEqual([
       'board',
       'scorches',
@@ -18,6 +19,7 @@ describe('BOARD_LAYERS — the board draw order', () => {
       'heads',
       'rims',
       'pending',
+      'creepShadows',
       'effects',
       'creeps',
       'cues',
@@ -55,6 +57,19 @@ describe('BOARD_LAYERS — the board draw order', () => {
 
   it('draws a creep cue over EVERY creep body, so a neighbour can never hide it (the V2 reorder)', () => {
     expect(layerDepth('creeps')).toBeLessThan(layerDepth('cues'));
+  });
+
+  it('lays every creep shadow over every tower surface a flyer can cross, and under every creep body, cue and effect (B3)', () => {
+    // Over the towers, a posed head's repainted rim included — a flyer's shadow falls on
+    // what it crosses…
+    for (const layer of ['plates', 'heads', 'rims', 'pending'] as const) {
+      expect(layerDepth(layer), layer).toBeLessThan(layerDepth('creepShadows'));
+    }
+    // …under every body, so one creep's shadow never darkens a neighbour, and under the
+    // selection cue, the tracers and every creep cue, so none is dimmed by one.
+    for (const layer of ['effects', 'creeps', 'cues'] as const) {
+      expect(layerDepth('creepShadows'), layer).toBeLessThan(layerDepth(layer));
+    }
   });
 
   it('keeps the rest of the old recording order: pending over towers, selection and tracers under creeps', () => {

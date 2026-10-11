@@ -1,25 +1,43 @@
-// creep-paint.test.ts — the silhouette/telegraph paint-plan (M2-S3), asserted at the REAL
+// creep-paint.test.ts — a creep's look (its shape, family and domain, M2-S3 onward and the
+// visual pass's C3/C4, #181), its HP bar, and the telegraph paint plans, asserted at the REAL
 // supported floor (568×320 → CELL_PX_MIN_NARROW = 10px cells, Codex R1-12) rather than the
-// 12px the risk-of-record originally assumed.
+// 12px the risk-of-record originally assumed. The art a look is drawn with — silhouettes,
+// wings, shadows, size steps — is `creep-art.test.ts`'s.
 
 import { describe, it, expect } from 'vitest';
+import { getBundledRuleset, bundledRulesetIds } from '@wynding/content';
 import {
   creepShapeFor,
-  creepSilhouettePaintOp,
+  creepFamilyFor,
+  creepLookFor,
+  creepLookKey,
+  CREEP_FAMILIES,
+  CREEP_LOOKS,
+  CREEP_SHAPE_VALUES,
+  CREEP_LOW_HP_FRAC,
+  isLowHp,
+  hpBarPaintOp,
+  HP_BAR_BACKING_PX,
+  isCreepFamily,
   slowTelegraphPaintOps,
   dotTelegraphPaintOps,
   stunTelegraphPaintOps,
   wardPaintOps,
-  airborneCuePaintOps,
-  AIRBORNE_OUTLINE_SHIFT_PX,
 } from './creep-paint';
+import { CUE_INK_PX } from './board-draw';
+import { creepRadius } from './creep-art';
 import { resolvePalette } from './palette';
 import { ART_INK } from './tower-art';
 
 // The narrow floor's cell size (apps/web/e2e/compact.spec.ts's CELL_PX_MIN_NARROW) — the
-// silhouette radius the scene actually draws at that floor (`max(3, cellPx * 0.35)`).
+// base radius the scene actually draws at that floor (`max(3, cellPx * 0.35)`), the normal
+// family's.
 const CELL_PX_MIN_NARROW = 10;
 const R = Math.max(3, CELL_PX_MIN_NARROW * 0.35);
+/** Every family's radius at the narrow floor — the swarm's the smallest, under `R`. */
+const FAMILY_R_AT_FLOOR = CREEP_FAMILIES.map(
+  (f) => [f, creepRadius(CELL_PX_MIN_NARROW, f)] as const,
+);
 
 describe('creepShapeFor — id-keyed silhouette (total over any string)', () => {
   it('keeps the triangle for normal', () => {
@@ -43,10 +61,160 @@ describe('creepShapeFor — id-keyed silhouette (total over any string)', () => 
   });
 });
 
-describe('creepSilhouettePaintOp', () => {
-  it('carries the id-keyed shape plus the passed-through geometry/colour/hpFrac', () => {
-    const op = creepSilhouettePaintOp('fast', 10, 20, R, 0xf0e442, 0.5);
-    expect(op).toEqual({ shape: 'diamond', x: 10, y: 20, r: R, colour: 0xf0e442, hpFrac: 0.5 });
+describe('creepFamilyFor — the hue and size step a creep wears (C3, #181)', () => {
+  it('gives each catalog creep the style frame’s family; ids the frame gives one hue share one', () => {
+    expect(creepFamilyFor('swarm', false)).toBe('swarm');
+    expect(creepFamilyFor('normal', false)).toBe('normal');
+    expect(creepFamilyFor('fast', false)).toBe('fast');
+    expect(creepFamilyFor('resolute', false)).toBe('normal');
+    expect(creepFamilyFor('armored', false)).toBe('armored');
+    expect(creepFamilyFor('flying', false)).toBe('flying');
+    expect(creepFamilyFor('armored-flyer', false)).toBe('armored');
+    expect(creepFamilyFor('boss', true)).toBe('boss');
+  });
+
+  it('the boss ROLE puts any creep in the boss family — the size step was always keyed on the role, not the id', () => {
+    for (const id of ['normal', 'armored', 'flying', 'not-a-catalog-creep']) {
+      expect(creepFamilyFor(id, true), id).toBe('boss');
+    }
+    // …and the boss id without the role is an ordinary creep of no family of its own.
+    expect(creepFamilyFor('boss', false)).toBe('normal');
+  });
+
+  it('falls back to the normal family for an unknown id — never throws, never escapes via the prototype', () => {
+    expect(creepFamilyFor('', false)).toBe('normal');
+    expect(creepFamilyFor('__proto__', false)).toBe('normal');
+    expect(creepFamilyFor('constructor', false)).toBe('normal');
+  });
+
+  it('isCreepFamily knows every family, and nothing else — no near miss, no name on the prototype, no non-string', () => {
+    for (const family of CREEP_FAMILIES) expect(isCreepFamily(family), family).toBe(true);
+    for (const value of ['', 'Normal', 'boss ', 'flyer', 'resolute', '__proto__', 'constructor']) {
+      expect(isCreepFamily(value), value).toBe(false);
+    }
+    for (const value of [undefined, null, 0, {}, ['normal']]) {
+      expect(isCreepFamily(value), String(value)).toBe(false);
+    }
+  });
+});
+
+describe('creepLookFor — shape, family and domain, three independent axes', () => {
+  it("composes: armored-flyer keeps the armored hexagon AND the armored hue, and flies (S10's requirement)", () => {
+    expect(creepLookFor('armored-flyer', false, true)).toEqual({
+      shape: 'hexagon',
+      family: 'armored',
+      airborne: true,
+    });
+    // The shape is keyed ONLY on the id — domain never changes it…
+    expect(creepLookFor('armored', false, true).shape).toBe(
+      creepLookFor('armored', false, false).shape,
+    );
+    // …and domain is the VM's own field, never inferred from the id: an id the catalog has
+    // never heard of may fly, and a `flying` id the VM says is on the ground walks.
+    expect(creepLookFor('not-a-catalog-creep', false, true).airborne).toBe(true);
+    expect(creepLookFor('flying', false, false).airborne).toBe(false);
+  });
+
+  it('a boss and an armored creep share the hexagon, and differ in family — size step and hue', () => {
+    const boss = creepLookFor('boss', true, false);
+    const armored = creepLookFor('armored', false, false);
+    expect(boss.shape).toBe(armored.shape);
+    expect(boss.family).not.toBe(armored.family);
+  });
+
+  it('keys every look by all three axes', () => {
+    expect(creepLookKey(creepLookFor('fast', false, false))).toBe('diamond:fast:ground');
+    expect(creepLookKey(creepLookFor('armored-flyer', false, true))).toBe('hexagon:armored:air');
+    expect(creepLookKey(creepLookFor('boss', true, false))).toBe('hexagon:boss:ground');
+  });
+});
+
+describe('CREEP_LOOKS — every look the board can be asked for, baked by construction', () => {
+  const keys = CREEP_LOOKS.map(creepLookKey);
+
+  it('lists each look once', () => {
+    expect(new Set(keys).size).toBe(keys.length);
+  });
+
+  it('holds the look of every creep in every shipped ruleset, any id, in either domain, with or without the boss role', () => {
+    const ids = new Set<string>(['', '__proto__', 'not-a-catalog-creep']);
+    for (const rulesetId of bundledRulesetIds()) {
+      for (const c of getBundledRuleset(rulesetId).creepCatalog) ids.add(c.id);
+    }
+    expect(ids.has('armored-flyer')).toBe(true); // the premise: the real catalog is in there
+    for (const id of ids) {
+      for (const boss of [false, true]) {
+        for (const airborne of [false, true]) {
+          expect(keys, `${id} boss=${boss} air=${airborne}`).toContain(
+            creepLookKey(creepLookFor(id, boss, airborne)),
+          );
+        }
+      }
+    }
+  });
+
+  it('draws every shape and every family', () => {
+    expect(new Set(CREEP_LOOKS.map((l) => l.shape))).toEqual(new Set(CREEP_SHAPE_VALUES));
+    expect(new Set(CREEP_LOOKS.map((l) => l.family))).toEqual(new Set(CREEP_FAMILIES));
+  });
+});
+
+describe('hpBarPaintOp — the HP bar: LENGTH and colour, two channels for one fact (C3)', () => {
+  const HUE = 0x123456;
+  const LOW = 0xabcdef;
+  const centre = { x: 40, y: 30 };
+
+  it('draws an opaque backing the bar’s full length, a pixel larger on every side, under a fill as long as the HP left', () => {
+    const r = 7;
+    const bar = hpBarPaintOp(centre, r, 0.5, HUE, LOW, ART_INK);
+    const w = r * 2.1;
+    const h = Math.max(3, r * 0.32);
+    expect(bar.fill).toEqual({ x: 40 - w / 2, y: 30 - r * 1.75, w: w / 2, h, colour: HUE });
+    expect(bar.backing).toEqual({
+      x: 40 - w / 2 - HP_BAR_BACKING_PX,
+      y: 30 - r * 1.75 - HP_BAR_BACKING_PX,
+      w: w + 2 * HP_BAR_BACKING_PX,
+      h: h + 2 * HP_BAR_BACKING_PX,
+      colour: ART_INK,
+    });
+    // Centred on the body, above it.
+    expect(bar.backing.x + bar.backing.w / 2).toBeCloseTo(centre.x, 10);
+    expect(bar.backing.y + bar.backing.h).toBeLessThan(centre.y);
+  });
+
+  it('its LENGTH carries HP: the fill is the HP fraction of the bar, from full down to nothing', () => {
+    const full = hpBarPaintOp(centre, 7, 1, HUE, LOW, ART_INK);
+    for (const hp of [1, 0.75, 0.5, 0.34, 0.2, 0]) {
+      const bar = hpBarPaintOp(centre, 7, hp, HUE, LOW, ART_INK);
+      expect(bar.fill.w).toBeCloseTo(full.fill.w * hp, 10);
+      expect(bar.fill.x).toBe(full.fill.x); // it shrinks toward its left end
+      expect(bar.backing).toEqual(full.backing); // the backing shows what is lost
+    }
+  });
+
+  // Retargeted from the body (C3): until C3 the silhouette's FRAME turned low-HP at this
+  // threshold — `art-frames.test.ts` pinned `creepFrameKey` at 0.34, 0.3399 and 0. A body now
+  // keeps its family's hue at any HP; the bar carries the turn, pinned at the same three
+  // points and through the same one threshold test.
+  it('its colour turns from the family hue to the low-HP colour below `isLowHp`’s threshold — and only there', () => {
+    expect(CREEP_LOW_HP_FRAC).toBe(0.34);
+    const colourAt = (hp: number): number =>
+      hpBarPaintOp(centre, 7, hp, HUE, LOW, ART_INK).fill.colour;
+    expect(colourAt(1)).toBe(HUE);
+    expect(colourAt(0.34)).toBe(HUE); // exactly at the threshold: not low
+    expect(isLowHp(0.34)).toBe(false);
+    expect(colourAt(0.3399)).toBe(LOW);
+    expect(isLowHp(0.3399)).toBe(true);
+    expect(colourAt(0)).toBe(LOW);
+  });
+
+  it('keeps its height at the 3px floor where a proportional bar would be under three pixels', () => {
+    for (const [family, r] of FAMILY_R_AT_FLOOR) {
+      const bar = hpBarPaintOp(centre, r, 1, HUE, LOW, ART_INK);
+      expect(bar.fill.h, family).toBe(Math.max(3, r * 0.32));
+      expect(bar.fill.h, family).toBeGreaterThanOrEqual(3);
+    }
+    expect(hpBarPaintOp(centre, 20, 1, HUE, LOW, ART_INK).fill.h).toBeCloseTo(6.4, 10);
   });
 });
 
@@ -99,6 +267,11 @@ describe('slowTelegraphPaintOps', () => {
     const [ring] = slowTelegraphPaintOps({ x: 0, y: 0, slowed: true }, R, true, 0x56b4e9, 0);
     expect(ring).toBeDefined();
     expect(ring!.r - R).toBeGreaterThanOrEqual(1);
+    // …for every family's size step (C3) — the swarm's, under the base radius, the tightest.
+    for (const [family, r] of FAMILY_R_AT_FLOOR) {
+      const [own] = slowTelegraphPaintOps({ x: 0, y: 0, slowed: true }, r, true, 0x56b4e9, 0);
+      expect(own!.r - r, family).toBeGreaterThanOrEqual(1);
+    }
   });
 });
 
@@ -174,6 +347,12 @@ describe('dotTelegraphPaintOps (M2-S5a) — the DoT ("poisoned") telegraph, mirr
     const [slowRing] = slowTelegraphPaintOps({ x: 0, y: 0, slowed: true }, R, true, 0x56b4e9, 0);
     const [pip] = dotTelegraphPaintOps({ x: 0, y: 0, poisoned: true }, R, true, POISONED, 0);
     expect(pipDistance(pip!, 0, 0) - slowRing!.r).toBeGreaterThanOrEqual(1);
+    // …for every family's size step (C3).
+    for (const [family, r] of FAMILY_R_AT_FLOOR) {
+      const [ring] = slowTelegraphPaintOps({ x: 0, y: 0, slowed: true }, r, true, 0x56b4e9, 0);
+      const [own] = dotTelegraphPaintOps({ x: 0, y: 0, poisoned: true }, r, true, POISONED, 0);
+      expect(pipDistance(own!, 0, 0) - ring!.r, family).toBeGreaterThanOrEqual(1);
+    }
   });
 
   // QC round 3 — the three assertions below pin fixes that landed in earlier rounds with
@@ -182,15 +361,71 @@ describe('dotTelegraphPaintOps (M2-S5a) — the DoT ("poisoned") telegraph, mirr
   // centre, which is rotation-invariant and so cannot see an orientation regression at
   // all; the narrow-floor test measures ring SEPARATION, never a pip's own drawn radius.
 
-  it('puts the lone pip at the TOP (apex-up, matching the triangle silhouette and the hexagon) — not the bottom', () => {
+  it('puts the lone pip at the BOTTOM (apex-down) and the pair up and out to either side — clear of the HP bar across the top', () => {
     const pips = dotTelegraphPaintOps({ x: 0, y: 0, poisoned: true }, R, true, POISONED, 0);
-    // Canvas y grows DOWNWARD, so "above the centre" is y < 0. The first draft's
-    // [90, 210, 330] inverts this exactly — one pip BELOW and two above — and is
-    // indistinguishable from the correct set by distance alone.
-    const above = pips.filter((p) => p.y < 0);
-    expect(above).toHaveLength(1);
-    expect(above[0]!.x).toBeCloseTo(0, 6); // horizontally centred: straight up, not off-axis
-    expect(above[0]!.y).toBeCloseTo(-R * 1.8, 6);
+    // Canvas y grows DOWNWARD, so "below the centre" is y > 0. Apex-up — this test's own
+    // pin until C3 (#181), for symmetry with the triangle silhouette — inverts this exactly
+    // and is indistinguishable from it by distance alone; it put the lone pip on the HP
+    // bar's middle (the next test measures what that costs).
+    const below = pips.filter((p) => p.y > 0);
+    expect(below).toHaveLength(1);
+    expect(below[0]!.x).toBeCloseTo(0, 6); // horizontally centred: straight down, not off-axis
+    expect(below[0]!.y).toBeCloseTo(R * 1.8, 6);
+    const pair = pips.filter((p) => p.y < 0);
+    expect(pair).toHaveLength(2);
+    for (const p of pair) expect(p.y).toBeCloseTo(-R * 0.9, 6); // 30° above the horizontal
+    expect(pair.map((p) => Math.sign(p.x)).sort()).toEqual([-1, 1]); // one either side
+  });
+
+  /** How much of a full HP bar's FILL — the part whose length carries HP — the guaranteed
+   *  pips cover, ink discs included, as the board draws them (`drawCreepCues`: each pip on
+   *  an ink disc `CUE_INK_PX` larger, over the bar): the share of the bar's length at which
+   *  some pip covers part of the fill's height, and how far in from the nearer end it
+   *  reaches. Sampled at 1/4000 of the bar. */
+  const pipCover = (r: number): { share: number; reach: number } => {
+    const fill = hpBarPaintOp({ x: 0, y: 0 }, r, 1, 0, 0, 0).fill;
+    const discs = dotTelegraphPaintOps({ x: 0, y: 0, poisoned: true }, r, true, POISONED, 0).map(
+      (p) => ({ x: p.x, y: p.y, r: p.r + CUE_INK_PX }),
+    );
+    const steps = 4000;
+    let hit = 0;
+    let reach = 0;
+    for (let i = 0; i <= steps; i++) {
+      const x = fill.x + (fill.w * i) / steps;
+      const covered = discs.some((d) => {
+        const dx = Math.abs(x - d.x);
+        if (dx >= d.r) return false;
+        const dy = Math.sqrt(d.r * d.r - dx * dx);
+        return d.y - dy < fill.y + fill.h && d.y + dy > fill.y;
+      });
+      if (!covered) continue;
+      hit++;
+      reach = Math.max(reach, Math.min(i, steps - i) / steps);
+    }
+    return { share: hit / (steps + 1), reach };
+  };
+
+  it('no guaranteed pip covers the HP bar’s fill at ordinary cells; at the narrow floor they reach only its ends (C3)', () => {
+    // MEASURED, never hand-computed. Apex-up, the lone pip sat on the bar's middle: at the
+    // narrow floor it covered 87% of a swarm's bar, and from a 20px cell up it still hid the
+    // fill's END for every HP from about a third to two thirds.
+    const report: string[] = [];
+    for (const cellPx of [10, 12, 14, 16, 20, 28, 40, 64]) {
+      for (const family of CREEP_FAMILIES) {
+        const { share, reach } = pipCover(creepRadius(cellPx, family));
+        report.push(
+          `${cellPx}px ${family} ${(share * 100).toFixed(1)}%/${(reach * 100).toFixed(1)}%`,
+        );
+        // Never the middle three fifths of the bar, at any supported cell…
+        expect(reach, `${family} at ${cellPx}px`).toBeLessThan(0.2);
+        // …and nothing at all once the cell is ordinary.
+        if (cellPx >= 20) expect(share, `${family} at ${cellPx}px`).toBe(0);
+        if (cellPx >= 14 && family !== 'swarm') expect(share, `${family} at ${cellPx}px`).toBe(0);
+      }
+    }
+    console.log(
+      `[C3] DoT pips over the HP bar's fill (share / reach in from an end): ${report.join(', ')}`,
+    );
   });
 
   it('holds a pip at the DOT_PIP_MIN_PX floor at the narrow cell, where the proportional radius alone would be sub-pixel', () => {
@@ -249,7 +484,6 @@ describe('dotTelegraphPaintOps (M2-S5a) — the DoT ("poisoned") telegraph, mirr
 // Driven from the REAL palette, like `POISONED` above.
 const STUNNED = resolvePalette('default').stunned;
 const WARDED = resolvePalette('default').warded;
-const AIRBORNE = resolvePalette('default').airborne;
 
 describe('stunTelegraphPaintOps (M2-S6) — the stun telegraph', () => {
   it('is empty when the creep is not stunned', () => {
@@ -355,252 +589,6 @@ describe('wardPaintOps (M2-S6) — the ward cue', () => {
     // fail to compile if this builder ever grew one by mistake.
     const a = wardPaintOps({ x: 1, y: 2, warded: true }, R, WARDED);
     const b = wardPaintOps({ x: 1, y: 2, warded: true }, R, WARDED);
-    expect(a).toEqual(b); // deterministic, no hidden time dependency
-  });
-});
-
-describe('airborneCuePaintOps (M2-S7) — the airborne cue', () => {
-  it('is empty for a ground creep (not emitted)', () => {
-    expect(airborneCuePaintOps({ x: 0, y: 0, airborne: false }, R, AIRBORNE)).toEqual([]);
-  });
-
-  it('is emitted for an air creep — a single wingspan op, outlined in ink', () => {
-    expect(airborneCuePaintOps({ x: 5, y: 6, airborne: true }, R, AIRBORNE)).toEqual([
-      {
-        kind: 'wingspan',
-        // The radius multipliers, plus the 1.25px the chevron moves out to make room for
-        // its ink outline (QC round 1, #181).
-        apexX: 5,
-        apexY: 6 - (R * 3.4 + 1.25),
-        leftX: 5 - R * 0.9,
-        leftY: 6 - (R * 3.1 + 1.25),
-        rightX: 5 + R * 0.9,
-        rightY: 6 - (R * 3.1 + 1.25),
-        colour: AIRBORNE,
-        alpha: 1,
-        // A 2px light stroke over the art kit's near-black ink, 1px wider each side: the
-        // light core reads on dark ground, the ink edge on a light tower head.
-        strokePx: 2,
-        outlinePx: 1,
-        outlineColour: ART_INK,
-      },
-    ]);
-  });
-
-  it("composes over the base silhouette rather than replacing it — creepShapeFor is untouched by domain, and the cue is an independent, ADDITIONAL paint plan (armored-flyer's S10 requirement)", () => {
-    // The shape a creep draws is keyed ONLY on `creepId` (`creepShapeFor`) — domain is
-    // never consulted, so an armored id keeps its hexagon regardless of whether it is
-    // also airborne.
-    expect(creepShapeFor('armored')).toBe('hexagon');
-    // The airborne cue is a SEPARATE paint plan (its own function, its own op list) —
-    // both fire independently for a creep that is both armored (shape) and airborne
-    // (this cue), so the scene draws both, never one instead of the other.
-    const silhouette = creepSilhouettePaintOp('armored', 5, 6, R, 0xffffff, 1);
-    const airborne = airborneCuePaintOps({ x: 5, y: 6, airborne: true }, R, AIRBORNE);
-    expect(silhouette.shape).toBe('hexagon');
-    expect(airborne).toHaveLength(1);
-    expect(airborne[0]!.kind).toBe('wingspan');
-  });
-
-  it('clears the silhouette AND every timed telegraph ring AND the ward — every point at radius ≥ r×3.22', () => {
-    // The original version of this test only checked the SILHOUETTE (|y| > r, |x| > r),
-    // which the old r×1.393 wingtips satisfied while sitting exactly on the slow ring at
-    // r×1.4 and crossing the stun jolt at r×1.15 (ship-review, M2-S7). Radius from the
-    // creep centre is what decides collision — every other cue here is a circle centred
-    // on it — so that is what this asserts now, mirroring the dot-pip and ward
-    // clearance tests above.
-    const [op] = airborneCuePaintOps({ x: 0, y: 0, airborne: true }, R, AIRBORNE);
-    const radius = (x: number, y: number): number => Math.hypot(x, y) / R;
-    const points: ReadonlyArray<readonly [number, number]> = [
-      [op!.apexX, op!.apexY],
-      [op!.leftX, op!.leftY],
-      [op!.rightX, op!.rightY],
-    ];
-    for (const [x, y] of points) {
-      expect(radius(x, y)).toBeGreaterThan(1.15); // stun jolt
-      expect(radius(x, y)).toBeGreaterThan(1.4); // slow ring
-      expect(radius(x, y)).toBeGreaterThan(1.8); // dot pips
-      expect(radius(x, y)).toBeGreaterThan(2.0); // slow pulse ceiling
-      expect(radius(x, y)).toBeGreaterThan(2.2); // ward
-      // The drift's CENTRE crest (r×2.4) — the outermost timed cue, which the block this
-      // ladder mirrors used to omit entirely (#126). Its DRAWN extent goes further still;
-      // that is measured, not laddered, by the case below.
-      expect(radius(x, y)).toBeGreaterThan(2.4);
-      // …and the rung this title actually claims. Without it the whole body passes under
-      // the PRE-#126 geometry (tips at r×2.751, apex r×2.9), so the title's radius was an
-      // unpinned assertion — the same class of defect as the comment block this ladder
-      // mirrors. The bound is r×3.22, NOT the r×3.23 the prose rounds to: the wingtips are
-      // the minimum at √(0.9² + 3.1²) = 3.22800…, so "≥ 3.23" is false by 0.002 and would
-      // fail here. Approximations may round; a pinned bound may not.
-      expect(radius(x, y)).toBeGreaterThan(3.22);
-      expect(y).toBeLessThan(0); // and it floats ABOVE the creep, not around it
-    }
-    expect(op!.leftX).toBeLessThan(0); // still a chevron: tips either side of the apex
-    expect(op!.rightX).toBeGreaterThan(0);
-  });
-
-  // What `board-draw.ts` actually draws for the wingspan: the ink outline, `strokePx +
-  // 2 × outlinePx` wide and run `outlinePx` past both ends, under the light stroke — so the
-  // OUTLINE's edge is the cue's outermost drawn extent, and the clearance is measured from
-  // it. Strokes are centred, so half the width spills INSIDE the geometric radius — the same
-  // correction this file's stun note makes for the jolt/slow pair, and the reason a radius
-  // ladder alone under-counts.
-  const drawnHalfWidth = (op: { strokePx: number; outlinePx: number }): number =>
-    op.strokePx / 2 + op.outlinePx;
-
-  /** A wing's drawn segment: apex to tip, run `outlinePx` past both ends as the outline is. */
-  const drawnWing = (
-    op: { apexX: number; apexY: number; outlinePx: number },
-    tx: number,
-    ty: number,
-  ): [number, number, number, number] => {
-    const len = Math.hypot(tx - op.apexX, ty - op.apexY);
-    const ux = ((tx - op.apexX) / len) * op.outlinePx;
-    const uy = ((ty - op.apexY) / len) * op.outlinePx;
-    return [op.apexX - ux, op.apexY - uy, tx + ux, ty + uy];
-  };
-
-  /** Distance from a point to a line SEGMENT (not its infinite line — the chevron's
-   *  strokes stop at the apex and the tips, and treating them as infinite would report a
-   *  collision that is not drawn). */
-  const distToSegment = (
-    px: number,
-    py: number,
-    ax: number,
-    ay: number,
-    bx: number,
-    by: number,
-  ): number => {
-    const dx = bx - ax;
-    const dy = by - ay;
-    const len2 = dx * dx + dy * dy;
-    const t = len2 === 0 ? 0 : Math.max(0, Math.min(1, ((px - ax) * dx + (py - ay) * dy) / len2));
-    return Math.hypot(px - (ax + t * dx), py - (ay + t * dy));
-  };
-
-  /** The worst (smallest) gap, in px, between any drift pip's FILLED DISC and either
-   *  drawn chevron stroke, over the whole 900ms sawtooth. Negative means they overlap. */
-  const worstDriftGap = (r: number): { gap: number; atMs: number } => {
-    const [wing] = airborneCuePaintOps({ x: 0, y: 0, airborne: true }, r, AIRBORNE);
-    let gap = Infinity;
-    let atMs = 0;
-    // 1ms steps across the sawtooth's full period — the drift's radius is monotonic in
-    // phase, so this brackets the crest without assuming where the crest is.
-    for (let ms = 0; ms < 900; ms++) {
-      for (const d of dotTelegraphPaintOps(
-        { x: 0, y: 0, poisoned: true },
-        r,
-        false,
-        POISONED,
-        ms,
-      )) {
-        if (d.kind !== 'drift') continue;
-        for (const [tx, ty] of [
-          [wing!.leftX, wing!.leftY],
-          [wing!.rightX, wing!.rightY],
-        ]) {
-          const [ax, ay, bx, by] = drawnWing(wing!, tx!, ty!);
-          const g = distToSegment(d.x, d.y, ax, ay, bx, by) - d.r - drawnHalfWidth(wing!);
-          if (g < gap) {
-            gap = g;
-            atMs = ms;
-          }
-        }
-      }
-    }
-    return { gap, atMs };
-  };
-
-  it('clears the DoT drift — the outermost timed cue — at the narrow cell floor, where the pip floor makes it widest (#126)', () => {
-    // THE CO-OCCURRENCE IS A VM CONTRACT, NOT A REACHABLE CONTENT STATE. `poisoned` and
-    // `airborne` are independent booleans on the render VM, so the builders must compose
-    // for a creep carrying both — that alone is what this asserts. In today's shipped
-    // rulesets a poisoned flyer cannot occur: every `dot` effect belongs to a GROUND-domain
-    // tower (`venom`, and `stress-venom` in the stress ruleset), and `combat.ts` rejects an
-    // impact whose domain does not cover the target's. `slow` is the both-domain effect
-    // since S7; an earlier version of this comment misattributed that to `venom`.
-    //
-    // Asserted anyway, and DELIBERATELY: the alternative — "safe, because shipped DoT
-    // sources are ground-only" — would pin content domain assignments inside a render test,
-    // the exact cross-layer coupling #126 exists to correct, and would go quietly wrong the
-    // day a ruleset ships an air-capable DoT. The geometry is real either way.
-    //
-    // The drift's outward crest lands straight above the creep (the 270° pip) — the one
-    // sector the chevron occupies — and its drawn disc is held at `DOT_PIP_MIN_PX` while
-    // the chevron's radius stays proportional, so the narrow floor is where they meet.
-    //
-    // MEASURED, never hand-computed: the numbers below are printed by this test, and it
-    // is the print that made #126 decidable. At the pre-#126 apex of r×2.9 both were
-    // NEGATIVE (r=3.5: −0.838px, r=3: −1.075px) — a real overlap, not a tight fit.
-    const supported = worstDriftGap(R); // R = 3.5, the CELL_PX_MIN_NARROW = 10 floor
-    const clamped = worstDriftGap(3); // the defensive `max(3, cellPx × 0.35)` clamp
-    console.log(
-      `[#126] airborne-vs-drift clearance: r=${R} → ${supported.gap.toFixed(3)}px (worst at ${supported.atMs}ms); r=3 → ${clamped.gap.toFixed(3)}px (worst at ${clamped.atMs}ms)`,
-    );
-    expect(supported.gap).toBeGreaterThan(0);
-    expect(clamped.gap).toBeGreaterThan(0);
-    // The ink outline (QC round 1, #181) cost no clearance: measured from the OUTLINE's
-    // edge, both gaps still beat what the light stroke alone had before it — 0.823px and
-    // 0.348px — because the chevron moved out `AIRBORNE_OUTLINE_SHIFT_PX` to make room.
-    expect(supported.gap).toBeGreaterThan(0.823);
-    expect(clamped.gap).toBeGreaterThan(0.348);
-    // And it only gets easier as cells grow — the drift's extent is a ratio plus a pixel
-    // floor, so the floor's contribution shrinks relative to r.
-    for (const r of [5, 10, 20, 40]) expect(worstDriftGap(r).gap).toBeGreaterThan(0);
-  });
-
-  it('flips BELOW the creep when the upward cue would leave the viewport (Codex P2, PR #87)', () => {
-    // A flyer near the canvas top — the row-0-openings board, which P1's axis-alignment
-    // gate admits because entrance and exit share a row. Without the flip the whole
-    // wingspan draws at negative y and is never seen, and since `flying` shares
-    // `normal`'s silhouette that removes the ONLY air-vs-ground channel.
-    const nearTop = airborneCuePaintOps({ x: 100, y: R * 0.5, airborne: true }, R, AIRBORNE, 0);
-    const [flipped] = nearTop;
-    expect(flipped!.apexY).toBeGreaterThan(R * 0.5); // below the creep centre, not above
-    expect(flipped!.leftY).toBeGreaterThan(R * 0.5);
-    for (const y of [flipped!.apexY, flipped!.leftY, flipped!.rightY]) {
-      expect(y).toBeGreaterThanOrEqual(0); // and on-canvas
-    }
-
-    // Mirroring only changes the SIGN — every radius, and so every clearance derived in
-    // the CUE-RADIUS ORDERING block, is preserved.
-    const centre = { x: 0, y: 0 };
-    const up = airborneCuePaintOps({ ...centre, airborne: true }, R, AIRBORNE, -Infinity)[0]!;
-    const down = airborneCuePaintOps({ ...centre, airborne: true }, R, AIRBORNE, 0)[0]!;
-    expect(Math.abs(down.apexY)).toBeCloseTo(Math.abs(up.apexY), 10);
-    expect(Math.abs(down.leftY)).toBeCloseTo(Math.abs(up.leftY), 10);
-    expect(down.leftX).toBe(up.leftX); // horizontal span untouched
-  });
-
-  it('flips at the boundary the outline’s shift sets, not the bare apex’s', () => {
-    // Half a pixel more than the bare apex needs (r × 3.4 above the centre) is still too
-    // little once the chevron has moved out `AIRBORNE_OUTLINE_SHIFT_PX` for its outline: the
-    // apex would sit at −0.75px. It flips, and the apex and both tips stay on the canvas.
-    const y = R * 3.4 + 0.5;
-    const [op] = airborneCuePaintOps({ x: 100, y, airborne: true }, R, AIRBORNE, 0);
-    expect(op!.apexY).toBeGreaterThan(y);
-    for (const v of [op!.apexY, op!.leftY, op!.rightY]) expect(v).toBeGreaterThanOrEqual(0);
-  });
-
-  it('does not flip once the apex and its outline’s shift fit — the boundary from the other side', () => {
-    // A hundredth of a pixel more than the apex (r × 3.4) and the outline's shift need: the
-    // chevron stays above its creep, its apex on the canvas.
-    const y = R * 3.4 + AIRBORNE_OUTLINE_SHIFT_PX + 0.01;
-    const [op] = airborneCuePaintOps({ x: 100, y, airborne: true }, R, AIRBORNE, 0);
-    expect(op!.apexY).toBeLessThan(y);
-    expect(op!.apexY).toBeGreaterThanOrEqual(0);
-  });
-
-  it('does NOT flip when there is room above — the default stays upward', () => {
-    const [op] = airborneCuePaintOps({ x: 100, y: 500, airborne: true }, R, AIRBORNE, 0);
-    expect(op!.apexY).toBeLessThan(500);
-  });
-
-  it('takes no renderTimeMs and has no reduced-motion branch — a domain is not a timed status', () => {
-    // Same posture as `wardPaintOps`'s own test above: calling the builder with only
-    // its documented 3 parameters (creep, r, colour) is itself the assertion.
-    const a = airborneCuePaintOps({ x: 1, y: 2, airborne: true }, R, AIRBORNE);
-    const b = airborneCuePaintOps({ x: 1, y: 2, airborne: true }, R, AIRBORNE);
     expect(a).toEqual(b); // deterministic, no hidden time dependency
   });
 });
