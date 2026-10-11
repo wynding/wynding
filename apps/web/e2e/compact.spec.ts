@@ -90,6 +90,17 @@ const CELL_PX_MIN_WITH_BANNER_ZOOMED = 10;
  *  which is why the asserted ceiling is 50% and not a flat 40dvh. */
 const STANDARD_CHROME_FRACTION_MAX_WITH_BANNER = 0.5;
 
+/** Whether an element is VISUALLY hidden the way this app hides text it keeps for assistive
+ *  tech: a box clipped to at most a pixel, still in the layout (so still in the accessible
+ *  name). Distinct from Playwright's `toBeHidden()`, which calls a 1px box visible. */
+async function visuallyHidden(locator: import('@playwright/test').Locator): Promise<boolean> {
+  return locator.evaluate((el) => {
+    const r = el.getBoundingClientRect();
+    const cs = getComputedStyle(el);
+    return cs.display !== 'none' && r.width <= 1 && r.height <= 1 && cs.clipPath.includes('inset');
+  });
+}
+
 async function gotoAt(
   page: import('@playwright/test').Page,
   size: { width: number; height: number },
@@ -130,13 +141,17 @@ test.describe('Compact layout (PLAN.md P1 / two-layouts contract)', () => {
     // M2-S8's seventh, ×8 at M2-S9's eighth, ×9 at M2-S10's ninth) — count pinned
     // first, so a renamed/removed badge class cannot pass this loop vacuously (QC round 1).
     await expect(page.locator('.wy-card-hotkey')).toHaveCount(9);
-    for (const badge of await page.locator('.wy-card-hotkey').all())
-      await expect(badge).toBeHidden();
-    // The glyph swatch is COMPACT-gated like the badge (space, not capability — its
-    // ui.css comment): count pinned first for the same vacuous-pass reason.
+    // Since #181 (L2) VISUALLY hidden rather than removed: still the tail of each Card's
+    // accessible name. (`toBeHidden()` cannot say this — a 1px clipped box is "visible" to it.)
+    for (const [i, card] of (await page.locator('.wy-card').all()).entries()) {
+      expect(await visuallyHidden(card.locator('.wy-card-hotkey')), `card ${i + 1}`).toBe(true);
+      await expect(card).toHaveAccessibleName(new RegExp(`^.+ Cost: \\d+ ${i + 1}$`));
+    }
+    // The tower art is the phone rail's point (#181 L2: icon-first Cards), where it used to be
+    // the first thing Compact dropped: count pinned first for the same vacuous-pass reason.
     await expect(page.locator('.wy-card-swatch')).toHaveCount(9);
     for (const swatch of await page.locator('.wy-card-swatch').all())
-      await expect(swatch).toBeHidden();
+      await expect(swatch).toBeVisible();
 
     // All FIVE chip slots are visible pre-start now (M2-S2, PLAN.md P3 step 15's Start
     // decouple): the wave chip is countdown-only and the sim's real `countdownRemaining`
@@ -727,7 +742,7 @@ test.describe('Compact layout (PLAN.md P1 / two-layouts contract)', () => {
     // The badge is Compact-gated, NOT pointer-gated: a fine pointer does not bring it back.
     await expect(page.locator('.wy-card-hotkey')).toHaveCount(9); // vacuous-pass guard (QC round 1, M2-S4a: three cards, now nine at M2-S10)
     for (const badge of await page.locator('.wy-card-hotkey').all())
-      await expect(badge).toBeHidden();
+      expect(await visuallyHidden(badge)).toBe(true);
     await expect(page.locator('.wy-wordmark')).toBeHidden();
 
     await assertDeclaredRegions(page);
@@ -744,8 +759,8 @@ test.describe('Rail under the open Panel — Compact (#69)', () => {
 
     const railScrollTop = () =>
       page.evaluate(() => (document.querySelector('.wy-rail') as HTMLElement).scrollTop);
-    // Internal overflow only: the hotkey badge is `display: none` on Compact, so a
-    // badge-position assertion here would pass vacuously on a zero rect.
+    // Internal overflow only: the hotkey badge is visually hidden on Compact (a 1px clipped
+    // box, #181), so a badge-position assertion here would pass vacuously on that rect.
     const cardOverflows = () =>
       page.evaluate(() =>
         [...document.querySelectorAll('.wy-card')].map((c) => c.scrollHeight - c.clientHeight),
@@ -884,8 +899,10 @@ async function settleRailScroll(page: import('@playwright/test').Page): Promise<
   await settleScroll(page, '.wy-rail');
 }
 
-/* NOTE — the visible-stats-block fork (`glance` unless it is `display: none`) is
-   re-derived inline in each `page.evaluate` below rather than hoisted. Playwright
+/* NOTE — the visible-stats-block fork (`glance` unless it is `display: none`, else the
+   label-value rows — since #181 the full sentences are visually hidden at EVERY width, so
+   they are never the block a player sees) is re-derived inline in each `page.evaluate`
+   below rather than hoisted. Playwright
    serializes every evaluate body independently, so sharing it means either an
    `evaluateHandle` threaded through each call or an init-script global — and the failure
    mode the duplication risks is a LOUD one: if the fork or either class name moves, these
@@ -900,8 +917,8 @@ async function visibleRowTexts(page: import('@playwright/test').Page): Promise<s
   return page.evaluate(() => {
     const panel = document.querySelector('.wy-panel') as HTMLElement;
     const glance = panel.querySelector('.wy-stats-glance') as HTMLElement;
-    const full = panel.querySelector('.wy-stats-full') as HTMLElement;
-    const shown = getComputedStyle(glance).display !== 'none' ? glance : full;
+    const rows = panel.querySelector('.wy-stats-rows') as HTMLElement;
+    const shown = getComputedStyle(glance).display !== 'none' ? glance : rows;
     return [...shown.querySelectorAll('p')].map((p) => p.textContent ?? '');
   });
 }
@@ -931,7 +948,7 @@ test.describe('M2-S12a: arming shows the player what they armed', () => {
         const firstRow = (
           (getComputedStyle(shownBlock).display !== 'none'
             ? shownBlock
-            : (document.querySelector('.wy-stats-full') as HTMLElement)
+            : (document.querySelector('.wy-stats-rows') as HTMLElement)
           ).querySelector('p') as HTMLElement
         ).getBoundingClientRect();
         return {
@@ -997,7 +1014,7 @@ test.describe('M2-S12a: arming shows the player what they armed', () => {
         const shown =
           getComputedStyle(glance).display !== 'none'
             ? glance
-            : (sc.querySelector('.wy-stats-full') as HTMLElement);
+            : (sc.querySelector('.wy-stats-rows') as HTMLElement);
         const box = sc.getBoundingClientRect();
         return [...shown.querySelectorAll('p')]
           .map((p, i) => {
@@ -1121,7 +1138,7 @@ test.describe('M2-S12a: arming shows the player what they armed', () => {
           const shown =
             getComputedStyle(shownBlock).display !== 'none'
               ? shownBlock
-              : (panel.querySelector('.wy-stats-full') as HTMLElement);
+              : (panel.querySelector('.wy-stats-rows') as HTMLElement);
           const hit = document.elementFromPoint((cr.left + cr.right) / 2, (cr.top + cr.bottom) / 2);
           return {
             position: getComputedStyle(panel).position,
@@ -1187,20 +1204,28 @@ test.describe('M2-S12a: the condensed Panel and the Rail affordance', () => {
     const m = await page.evaluate(() => {
       const glance = document.querySelector('.wy-stats-glance') as HTMLElement;
       const full = document.querySelector('.wy-stats-full') as HTMLElement;
+      const rows = document.querySelector('.wy-stats-rows') as HTMLElement;
       const gs = getComputedStyle(glance);
       const fs = getComputedStyle(full);
+      const costRow = glance.querySelector('p') as HTMLElement;
+      const gem = costRow.firstElementChild as SVGElement;
       return {
         glanceDisplay: gs.display,
         glanceAriaHidden: glance.getAttribute('aria-hidden'),
+        rowsDisplay: getComputedStyle(rows).display,
         fullPosition: fs.position,
         fullClip: fs.clipPath,
         fullWidth: full.getBoundingClientRect().width,
         glanceScrollHeight: glance.scrollHeight,
-        glanceText: glance.textContent ?? '',
+        costRowText: costRow.textContent ?? '',
+        gemClass: gem.getAttribute('class') ?? '',
+        gemWidth: gem.getBoundingClientRect().width,
         fullText: full.textContent ?? '',
       };
     });
     expect(m.glanceDisplay, 'the glance block is the visible one at a 144px Rail').not.toBe('none');
+    // The docked Panel's label-value rows (#181) are the wide Rail's form, never this one's.
+    expect(m.rowsDisplay, 'a 144px Rail paints no label-value rows').toBe('none');
     // Visually hidden, NOT removed: the full sentences remain the Panel's accessible text
     // at every width, so only the presentation forks.
     expect(m.fullPosition).toBe('absolute');
@@ -1208,7 +1233,11 @@ test.describe('M2-S12a: the condensed Panel and the Rail affordance', () => {
     expect(m.fullWidth).toBeLessThanOrEqual(2);
     expect(m.glanceAriaHidden).toBe('true');
     expect(m.fullText).toContain('Cost: 16');
-    expect(m.glanceText).toContain('◈16');
+    // The cost leads with the HUD's gem (#181: the inline-SVG icon, where it was the `◈`
+    // glyph), painted at a real size, then the number.
+    expect(m.gemClass).toContain('wy-icon--bounty');
+    expect(m.gemWidth, 'the gem must be painted, not collapsed').toBeGreaterThan(6);
+    expect(m.costRowText).toMatch(/^16 · /);
 
     // The BOUND, asserted on intrinsic `scrollHeight` rather than rendered height: P3's cap
     // already squeezes any Panel in a 320px Rail, so a rendered-height bound could not tell
@@ -1220,7 +1249,82 @@ test.describe('M2-S12a: the condensed Panel and the Rail affordance', () => {
     ).toBeLessThanOrEqual(180);
   });
 
-  test('1000×720: a wide Rail keeps the FULL block visible and drops the glance entirely', async ({
+  // The condensed Panel is the name and the glance: the wide Rail's head art, role line and
+  // build hint are what it sheds (#181 H3), and its cost row LEADS with the HUD's gem.
+  test('658×320: the condensed Panel sheds the head art, role line and build hint, and its cost row leads with the gem', async ({
+    page,
+  }) => {
+    await gotoAt(page, PHONE);
+    await armByHotkey(page, '9');
+    const m = await page.evaluate(() => {
+      const painted = (sel: string): boolean =>
+        getComputedStyle(document.querySelector(sel) as HTMLElement).display !== 'none';
+      const costRow = document.querySelector('.wy-stats-glance p') as HTMLElement;
+      return {
+        art: painted('.wy-panel-art'),
+        role: painted('.wy-panel-role'),
+        hint: painted('.wy-panel-hint'),
+        gemLeads: costRow.firstChild === costRow.querySelector('svg'),
+      };
+    });
+    expect(m, 'a 144px Rail paints the name and the glance alone').toEqual({
+      art: false,
+      role: false,
+      hint: false,
+      gemLeads: true,
+    });
+  });
+
+  // Compact PINS the Panel at every text size (ui.css's Compact fork), and a pinned Panel is
+  // always the condensed one: the shed keys on `.wy-rail-panel-pinned`, not on the Rail's width.
+  // That matters because above 125% text a Compact Rail's content box can pass 160px (658×320
+  // from 126% to 151%; 740×360 and wider through 200%), where a width-keyed shed would show the
+  // wide form. A pinned Panel must still show the armed tower's whole name, never scrolling it
+  // sideways out of a box too narrow for the wide form's head art beside it.
+  for (const [label, size, zoom] of [
+    ['658×320', PHONE, 150],
+    ['740×360', { width: 740, height: 360 }, 200],
+  ] as const) {
+    test(`${label} at ${zoom}% text: the pinned Panel shows the armed tower's whole name and never scrolls sideways`, async ({
+      page,
+    }) => {
+      await gotoAt(page, size);
+      await page.addStyleTag({ content: `:root { font-size: ${zoom}% }` });
+      await armByHotkey(page, '3'); // Splash Tower
+      const m = await page.evaluate(() => {
+        const rail = document.querySelector('.wy-rail') as HTMLElement;
+        const rcs = getComputedStyle(rail);
+        const panel = document.querySelector('.wy-panel') as HTMLElement;
+        const scroll = panel.querySelector('.wy-panel-scroll') as HTMLElement;
+        const range = document.createRange();
+        range.selectNodeContents(panel.querySelector('.wy-panel-name') as HTMLElement);
+        const sr = scroll.getBoundingClientRect();
+        return {
+          // The Rail's CONTENT box: what the 160px condensed query reads.
+          content:
+            rail.getBoundingClientRect().width -
+            parseFloat(rcs.paddingLeft) -
+            parseFloat(rcs.paddingRight),
+          position: getComputedStyle(panel).position,
+          nameRight: Math.max(...[...range.getClientRects()].map((r) => r.right)),
+          clipRight: sr.left + scroll.clientLeft + scroll.clientWidth,
+          sideways: scroll.scrollWidth - scroll.clientWidth,
+        };
+      });
+      expect(m.position, 'the premise: Compact pins the Panel').toBe('sticky');
+      expect(
+        m.content,
+        'the premise: the Rail is wider than the 160px condensed query',
+      ).toBeGreaterThan(160);
+      expect(
+        m.nameRight,
+        "the armed tower's name must not run under the Panel's edge",
+      ).toBeLessThanOrEqual(m.clipRight + 0.5);
+      expect(m.sideways, 'the pinned Panel must not scroll sideways').toBe(0);
+    });
+  }
+
+  test('1000×720: a wide Rail paints the label-value rows and drops the glance entirely; the sentences stay the accessible text', async ({
     page,
   }) => {
     await gotoAt(page, { width: 1000, height: 720 });
@@ -1228,15 +1332,24 @@ test.describe('M2-S12a: the condensed Panel and the Rail affordance', () => {
     const m = await page.evaluate(() => {
       const glance = document.querySelector('.wy-stats-glance') as HTMLElement;
       const full = document.querySelector('.wy-stats-full') as HTMLElement;
+      const rows = document.querySelector('.wy-stats-rows') as HTMLElement;
       return {
         glanceDisplay: getComputedStyle(glance).display,
+        rowsDisplay: getComputedStyle(rows).display,
+        rowsHeight: rows.getBoundingClientRect().height,
+        rowsAriaHidden: rows.getAttribute('aria-hidden'),
         fullPosition: getComputedStyle(full).position,
+        fullWidth: full.getBoundingClientRect().width,
         panelPosition: getComputedStyle(document.querySelector('.wy-panel') as HTMLElement)
           .position,
       };
     });
-    // A Rail wide enough to render the full sentences never pays for the glance block.
+    // A Rail wide enough for the docked Panel's label-value rows (#181 H3) never pays for the
+    // glance block — the rows are the painted form, presentation only.
     expect(m.glanceDisplay).toBe('none');
+    expect(m.rowsDisplay).not.toBe('none');
+    expect(m.rowsHeight, 'the rows must actually be painted').toBeGreaterThan(40);
+    expect(m.rowsAriaHidden).toBe('true');
     // ...and an UNPINNED scrollport must not carry a tab stop. Deleting
     // `.wy-panel-scroll > .wy-sr-only { top: 0 }` leaves the Upgrade description at the end
     // of the content instead of its origin — ~5px of phantom scroll extent, enough for the
@@ -1249,7 +1362,11 @@ test.describe('M2-S12a: the condensed Panel and the Rail affordance', () => {
     await page.keyboard.press('Enter');
     await expect(page.locator('.wy-panel').getByRole('button', { name: /^Sell/ })).toBeVisible();
     await expect(page.locator('.wy-panel-scroll')).not.toHaveAttribute('tabindex');
-    expect(m.fullPosition, 'the full block is in normal flow here').toBe('static');
+    // Since #181 the full sentences are visually hidden here too — and still the Panel's
+    // accessible text. Out of flow in an UNPINNED Panel, which is exactly where a phantom
+    // extent would hand the scrollport the tab stop the assertion above forbids.
+    expect(m.fullPosition, 'the full block is visually hidden at every width').toBe('absolute');
+    expect(m.fullWidth).toBeLessThanOrEqual(2);
     // And the non-pinned branch stays reachable — this is the shape that still owns the
     // scroll + reveal machinery (`arming.spec.ts`).
     expect(m.panelPosition).toBe('static');
@@ -1283,7 +1400,7 @@ test.describe('M2-S12a: the condensed Panel and the Rail affordance', () => {
       const shown =
         getComputedStyle(panel.querySelector('.wy-stats-glance') as HTMLElement).display !== 'none'
           ? (panel.querySelector('.wy-stats-glance') as HTMLElement)
-          : (panel.querySelector('.wy-stats-full') as HTMLElement);
+          : (panel.querySelector('.wy-stats-rows') as HTMLElement);
       return {
         railScrollTop: (document.querySelector('.wy-rail') as HTMLElement).scrollTop,
         pinned: getComputedStyle(panel).position === 'sticky',
@@ -1342,72 +1459,103 @@ test.describe('M2-S12a: the condensed Panel and the Rail affordance', () => {
   // bottom — the exact edge native focus scrolling parks a Card against. Before the band was
   // reserved this covered 24px of a 58.4px Card, erasing its bottom border and the lower
   // legs of its 3px focus outline. Asserted in both states, because the band has two homes.
-  for (const [label, armFirst] of [
-    ['Panel closed', false],
-    ['Panel pinned open', true],
+  //
+  // The Panel-closed case runs at DOUBLED text zoom since #181 (L2): at default size the phone
+  // rail fits all nine Cards, so with the Panel closed nothing scrolls, the band never paints,
+  // and the assertion below would hold vacuously. At 200% the same Rail still scrolls with the
+  // Panel closed, so the Rail's own band is exercised there. (`painted` below proves it was.)
+  for (const [label, armFirst, zoom] of [
+    ['Panel closed, 200% text', false, 200],
+    ['Panel pinned open', true, 100],
   ] as const) {
     test(`658×320 (${label}): the scroll fade never covers a focused Card`, async ({ page }) => {
       await gotoAt(page, PHONE);
+      if (zoom === 200) await page.addStyleTag({ content: ':root { font-size: 200% }' });
       if (armFirst) await armByHotkey(page, '1');
+      let painted = 0;
       const covered: number[] = [];
       for (let i = 0; i < 9; i++) {
         await page.locator('.wy-card').nth(i).focus();
         await settleRailScroll(page);
-        covered.push(
-          await page.evaluate((n) => {
-            const rail = document.querySelector('.wy-rail') as HTMLElement;
-            const card = (
-              document.querySelectorAll('.wy-card')[n] as HTMLElement
-            ).getBoundingClientRect();
-            const panel = document.querySelector('.wy-panel') as HTMLElement;
-            const pinned = !panel.hidden && getComputedStyle(panel).position === 'sticky';
-            // Read the PAINTED pseudo-element, never the token. `--wy-rail-fade-h` is an
-            // unregistered custom property, so `getComputedStyle` returns the literal token
-            // stream "1.5rem" and `parseFloat` keeps the 1.5 while silently dropping the
-            // unit — a 16x under-measure that made this assertion unfailable.
-            const band = pinned
-              ? getComputedStyle(panel, '::before')
-              : getComputedStyle(rail, '::after');
-            // A band at `opacity: 0` paints nothing, so it occludes nothing. Not a
-            // convenience: at maximum scroll the last Card's bottom sits inside the band's
-            // geometry while `wy-rail-has-more` is false, so measuring geometry alone would
-            // report a defect where no pixel is drawn.
-            if (band.opacity === '0' || band.display === 'none') return 0;
-            const fadeH = parseFloat(band.height);
-            // The occluding band rides the Panel's top edge when pinned, and the Rail's own
-            // CONTENT-box bottom otherwise — not the scrollport's. Unpinned the band is a
-            // flex item, so it is laid out inside the padding, and reading
-            // `rail.bottom` put this measurement 8px too low: the exact width of the overlap
-            // it exists to catch, which is how a reserve short by the Rail's bottom padding
-            // held nine zeroes here while 7.6px of Cards 3 and 6 painted under the gradient.
-            const bandBottom = pinned
-              ? panel.getBoundingClientRect().top
-              : rail.getBoundingClientRect().bottom -
-                parseFloat(getComputedStyle(rail).paddingBottom);
-            return Math.max(
+        const stop = await page.evaluate((n) => {
+          const rail = document.querySelector('.wy-rail') as HTMLElement;
+          const card = (
+            document.querySelectorAll('.wy-card')[n] as HTMLElement
+          ).getBoundingClientRect();
+          const panel = document.querySelector('.wy-panel') as HTMLElement;
+          const pinned = !panel.hidden && getComputedStyle(panel).position === 'sticky';
+          // Read the PAINTED pseudo-element, never the token. `--wy-rail-fade-h` is an
+          // unregistered custom property, so `getComputedStyle` returns the literal token
+          // stream "1.5rem" and `parseFloat` keeps the 1.5 while silently dropping the
+          // unit — a 16x under-measure that made this assertion unfailable.
+          const band = pinned
+            ? getComputedStyle(panel, '::before')
+            : getComputedStyle(rail, '::after');
+          // A band at `opacity: 0` paints nothing, so it occludes nothing. Not a
+          // convenience: at maximum scroll the last Card's bottom sits inside the band's
+          // geometry while `wy-rail-has-more` is false, so measuring geometry alone would
+          // report a defect where no pixel is drawn.
+          if (band.opacity === '0' || band.display === 'none')
+            return { covered: 0, painted: false };
+          const fadeH = parseFloat(band.height);
+          // The occluding band rides the Panel's top edge when pinned, and the Rail's own
+          // CONTENT-box bottom otherwise — not the scrollport's. Unpinned the band is a
+          // flex item, so it is laid out inside the padding, and reading
+          // `rail.bottom` put this measurement 8px too low: the exact width of the overlap
+          // it exists to catch, which is how a reserve short by the Rail's bottom padding
+          // held nine zeroes here while 7.6px of Cards 3 and 6 painted under the gradient.
+          const bandBottom = pinned
+            ? panel.getBoundingClientRect().top
+            : rail.getBoundingClientRect().bottom -
+              parseFloat(getComputedStyle(rail).paddingBottom);
+          return {
+            covered: Math.max(
               0,
               Math.min(card.bottom, bandBottom) - Math.max(card.top, bandBottom - fadeH),
-            );
-          }, i),
-        );
+            ),
+            painted: true,
+          };
+        }, i);
+        covered.push(stop.covered);
+        if (stop.painted) painted++;
       }
       expect(covered, 'no focused Card may sit under the fade band').toEqual(
         Array.from({ length: 9 }, () => 0),
       );
+      // Not vacuous: at some stop the band was actually painted.
+      expect(painted, 'the fade band never painted, so nothing was checked').toBeGreaterThan(0);
     });
   }
 
   test('658×320: the scroll affordance appears only while Cards remain below', async ({ page }) => {
     await gotoAt(page, PHONE);
     const rail = page.locator('.wy-rail');
-    // At rest, with five of nine Cards below a 0px-scrollbar-gutter fold.
-    await expect(rail).toHaveClass(/wy-rail-has-more/);
     const fadeAt = () =>
       page.evaluate(
         () =>
           getComputedStyle(document.querySelector('.wy-rail') as HTMLElement, '::after').opacity,
       );
-    expect(await fadeAt()).toBe('1');
+    // At rest every Card is on screen (#181 L2: the phone rail, where five of nine used to sit
+    // below a 0px-scrollbar-gutter fold), so there is nothing below to cue.
+    await expect(rail).not.toHaveClass(/wy-rail-has-more/);
+    expect(await fadeAt(), 'no cue where nothing is below').toBe('0');
+
+    // Arming pins the Panel over the Rail's lower Cards, which are then below it: the cue
+    // appears, and rides the PANEL's top edge rather than the Rail's — the Rail's own edge is
+    // occupied.
+    await armByHotkey(page, '1');
+    await expect(rail).toHaveClass(/wy-rail-has-more/);
+    const panelFade = () =>
+      page.evaluate(() => {
+        const before = getComputedStyle(
+          document.querySelector('.wy-panel') as HTMLElement,
+          '::before',
+        );
+        return { opacity: before.opacity, height: before.height };
+      });
+    const placement = await panelFade();
+    expect(placement.opacity, "the Panel's own fade must be showing").toBe('1');
+    expect(parseFloat(placement.height)).toBeGreaterThan(0);
 
     // At the end of the scroll there is nothing below, so the affordance must go.
     await page.evaluate(() => {
@@ -1415,65 +1563,117 @@ test.describe('M2-S12a: the condensed Panel and the Rail affordance', () => {
       r.scrollTop = r.scrollHeight;
     });
     await expect(rail).not.toHaveClass(/wy-rail-has-more/);
-    expect(await fadeAt(), 'the fade must be gone at the end of the scroll').toBe('0');
+    expect((await panelFade()).opacity, 'the fade must be gone at the end of the scroll').toBe('0');
 
     // And it returns on the way back up.
     await page.evaluate(() => ((document.querySelector('.wy-rail') as HTMLElement).scrollTop = 0));
     await expect(rail).toHaveClass(/wy-rail-has-more/);
-
-    // Opening the Panel does not disturb it, and the fade then rides the PANEL's top edge
-    // rather than the Rail's — the Rail's own edge is occupied.
-    await armByHotkey(page, '1');
-    await expect(rail).toHaveClass(/wy-rail-has-more/);
-    const placement = await page.evaluate(() => {
-      const panel = document.querySelector('.wy-panel') as HTMLElement;
-      const before = getComputedStyle(panel, '::before');
-      return { opacity: before.opacity, height: before.height };
-    });
-    expect(placement.opacity, "the Panel's own fade must be showing").toBe('1');
-    expect(parseFloat(placement.height)).toBeGreaterThan(0);
+    expect((await panelFade()).opacity).toBe('1');
   });
 
-  test('658×320: the Rail at rest is untouched — the affordance costs no scroll extent and no Card', async ({
+  // The RAIL's own cue (`.wy-rail::after`), with the Panel closed, where the Rail still
+  // scrolls at rest: the same phone at doubled text zoom. The case above can no longer reach it
+  // at default size, since nothing is below a resting phone rail there.
+  test('658×320 at 200% text zoom: the Rail’s own cue appears only while Cards remain below', async ({
     page,
   }) => {
     await gotoAt(page, PHONE);
-    const m = await page.evaluate(() => {
-      const rail = document.querySelector('.wy-rail') as HTMLElement;
-      const rr = rail.getBoundingClientRect();
-      return {
-        cardsFullyVisible: [...document.querySelectorAll('.wy-card')].filter((c) => {
-          const b = c.getBoundingClientRect();
-          return b.top >= rr.top - 0.5 && b.bottom <= rr.bottom + 0.5;
-        }).length,
-        overflow: rail.scrollHeight - rail.clientHeight,
-        panelHidden: (document.querySelector('.wy-panel') as HTMLElement).hidden,
-        contentEndsAtLastChild: (() => {
-          const kids = [...rail.children] as HTMLElement[];
-          const last = kids.filter((k) => !k.hidden).at(-1) as HTMLElement;
-          const padBottom = parseFloat(getComputedStyle(rail).paddingBottom);
-          return (
-            Math.abs(rail.scrollHeight - (last.offsetTop + last.offsetHeight + padBottom)) <= 1
-          );
-        })(),
-      };
+    await page.addStyleTag({ content: ':root { font-size: 200% }' });
+    const rail = page.locator('.wy-rail');
+    const fadeAt = () =>
+      page.evaluate(
+        () =>
+          getComputedStyle(document.querySelector('.wy-rail') as HTMLElement, '::after').opacity,
+      );
+    await expect(rail).toHaveClass(/wy-rail-has-more/);
+    expect(await fadeAt()).toBe('1');
+    await page.evaluate(() => {
+      const r = document.querySelector('.wy-rail') as HTMLElement;
+      r.scrollTop = r.scrollHeight;
     });
-    expect(m.panelHidden, 'at rest means Panel closed').toBe(true);
-    // Reachability floor: browsing must not get worse than it already was. Measured before
-    // the story at this viewport: 4 Cards, 358px of overflow.
-    expect(
-      m.cardsFullyVisible,
-      'at-rest Card reachability must not regress',
-    ).toBeGreaterThanOrEqual(4);
-    // The fade cancels its own box AND the flex gap before it, so the quantity the
-    // has-more computation reads is the same one it read before the affordance existed —
-    // otherwise the fade would become a reason the fade is shown. Asserted as the INVARIANT
-    // rather than as the 358px this happens to measure today: a pixel total would break on
-    // any legitimate Card-height change while saying nothing about the property. The
-    // scrollable content must end exactly at the last REAL child plus the Rail's own bottom
-    // padding, leaving no room for a pseudo-element to have contributed.
-    expect(m.contentEndsAtLastChild, 'the affordance must not add scroll extent').toBe(true);
+    await expect(rail).not.toHaveClass(/wy-rail-has-more/);
+    expect(await fadeAt(), 'the fade must be gone at the end of the scroll').toBe('0');
+    await page.evaluate(() => ((document.querySelector('.wy-rail') as HTMLElement).scrollTop = 0));
+    await expect(rail).toHaveClass(/wy-rail-has-more/);
+    expect(await fadeAt()).toBe('1');
   });
+
+  // THE PHONE RAIL (#181 L2): every Card on screen at rest, at the phone sizes and at the
+  // Standard tablet that carries the same 144px Rail. 658×320 is the tight one: five rows of
+  // 56px tiles and four 6px gaps fill its 304px content box exactly, so a single extra pixel of
+  // Card or gap would push the last row under the fold.
+  for (const [label, size] of [
+    ['658×320', PHONE],
+    ['640×360', { width: 640, height: 360 }],
+    ['568×320', NARROW],
+    ['640×560 (Standard)', TABLET],
+  ] as const) {
+    test(`${label}: all nine Cards are on screen at rest, two to a row, and the affordance costs no scroll extent`, async ({
+      page,
+    }) => {
+      await gotoAt(page, size);
+      const m = await page.evaluate(() => {
+        const rail = document.querySelector('.wy-rail') as HTMLElement;
+        const rr = rail.getBoundingClientRect();
+        const cards = [...document.querySelectorAll('.wy-card')] as HTMLElement[];
+        const kids = [...rail.children] as HTMLElement[];
+        const last = kids.filter((k) => !k.hidden).at(-1) as HTMLElement;
+        const padBottom = parseFloat(getComputedStyle(rail).paddingBottom);
+        // In the scrollport's own coordinates (from its padding-box top, as `scrollHeight` is),
+        // whichever ancestor happens to be the offset parent.
+        const contentEnd =
+          last.getBoundingClientRect().bottom -
+          (rr.top + rail.clientTop) +
+          rail.scrollTop +
+          padBottom;
+        return {
+          total: cards.length,
+          cardsFullyVisible: cards.filter((c) => {
+            const b = c.getBoundingClientRect();
+            return b.top >= rr.top - 0.5 && b.bottom <= rr.bottom + 0.5;
+          }).length,
+          columns: new Set(cards.map((c) => Math.round(c.getBoundingClientRect().left))).size,
+          minCardSide: Math.min(
+            ...cards.map((c) => {
+              const b = c.getBoundingClientRect();
+              return Math.min(b.width, b.height);
+            }),
+          ),
+          artVisible: cards.every((c) => {
+            const art = c.querySelector('.wy-card-swatch') as HTMLElement;
+            return (
+              getComputedStyle(art).display !== 'none' && art.getBoundingClientRect().width > 20
+            );
+          }),
+          overflow: rail.scrollHeight - rail.clientHeight,
+          hasMore: rail.classList.contains('wy-rail-has-more'),
+          panelHidden: (document.querySelector('.wy-panel') as HTMLElement).hidden,
+          contentEndsAtLastChild:
+            Math.abs(rail.scrollHeight - Math.max(rail.clientHeight, contentEnd)) <= 1,
+        };
+      });
+      expect(m.panelHidden, 'at rest means Panel closed').toBe(true);
+      expect(m.total, 'the shipped catalog renders nine Cards').toBe(9);
+      // Was a floor of 4 (measured before the phone rail at 658×320: 4 Cards, 358px of
+      // overflow). Every Card, now — the L2 outcome — with its art showing.
+      expect(m.cardsFullyVisible, 'every Card must be on screen at rest').toBe(9);
+      expect(m.columns, 'the icon-form Cards sit two to a row').toBe(2);
+      expect(m.artVisible, 'each icon-form Card shows its tower').toBe(true);
+      expect(m.minCardSide, 'every Card keeps the 44px tap floor').toBeGreaterThanOrEqual(
+        TARGET_MIN_PX,
+      );
+      expect(m.overflow, 'nothing to scroll at rest').toBe(0);
+      expect(m.hasMore, 'and so no cue').toBe(false);
+      // The fade cancels its own box AND the flex gap before it, so the quantity the
+      // has-more computation reads is the same one it read before the affordance existed —
+      // otherwise the fade would become a reason the fade is shown. Asserted as the
+      // INVARIANT: the scrollable content ends exactly at the last REAL child plus the Rail's
+      // own bottom padding (or at the scrollport's own height, where the Cards leave room),
+      // leaving no room for a pseudo-element to have contributed. At 658×320 the Cards fill the
+      // Rail exactly, so even a sub-pixel of extent from the fade would show here as overflow.
+      expect(m.contentEndsAtLastChild, 'the affordance must not add scroll extent').toBe(true);
+    });
+  }
 
   // The scrollport's tab stop is revoked when it stops overflowing — but revoking
   // `tabindex` from the FOCUSED element makes it unfocusable, and Chromium then resets
@@ -1676,11 +1876,14 @@ test.describe('M2-S12a: the condensed Panel and the Rail affordance', () => {
     );
   });
 
-  // The two-column Rail (>=1280w, aspect >= 16/10) is a GRID, where the fade needs its own
-  // construction. It genuinely never overflows at 100% — but it does at 200% text zoom,
-  // which this project commits to supporting, and an earlier draft switched the fade off
-  // here on the false premise that it never overflows at all.
-  test('1440x900 two-column: the fade is absent at 100% and present at 200% zoom', async ({
+  // The two-column Rail (>=1280w, aspect >= 16/10, >=501px tall) was once a GRID, where the
+  // fade needed its own construction; since #181 the grid is the Cards' own box and the Rail
+  // stays a flex column. It genuinely never overflows at 100% — but it does at 200% text
+  // zoom, which this project commits to supporting, and an earlier draft switched the fade
+  // off here on the false premise that it never overflows at all. Since #181's shorter Cards,
+  // doubled text still fits at 1440x900 and overflows lower in the band (163px at 1440x560),
+  // so the 200% half runs there.
+  test('1440-wide two-column: the fade is absent at 100% and present at 200% zoom, one column by then (1440x560)', async ({
     page,
   }) => {
     await gotoAt(page, { width: 1440, height: 900 });
@@ -1690,7 +1893,11 @@ test.describe('M2-S12a: the condensed Panel and the Rail affordance', () => {
         const r = document.querySelector('.wy-rail') as HTMLElement;
         const after = getComputedStyle(r, '::after');
         return {
-          columns: getComputedStyle(r).gridTemplateColumns.split(' ').length,
+          // Since #181 the Cards' own box is the grid; the Rail stays a flex column.
+          columns: getComputedStyle(
+            document.querySelector('.wy-cards') as HTMLElement,
+          ).gridTemplateColumns.split(' ').length,
+          railDisplay: getComputedStyle(r).display,
           overflow: r.scrollHeight - r.clientHeight,
           hasMore: r.classList.contains('wy-rail-has-more'),
           display: after.display,
@@ -1700,9 +1907,11 @@ test.describe('M2-S12a: the condensed Panel and the Rail affordance', () => {
 
     const at100 = await state();
     expect(at100.columns, 'this viewport must actually be the two-column Rail').toBe(2);
-    // Swept across the two-column band, not measured once: the 0.5rem this fade costs can
-    // only bite in the `overflow in (0, 8px]` regime, so a single height would leave the
-    // property the CSS comment leans on ungated.
+    expect(at100.railDisplay, 'the Rail itself stays the flex column the fade is built on').toBe(
+      'flex',
+    );
+    // Swept across the two-column band, not measured once: the Rail's tightest fit is at its
+    // shortest height, and a single height would leave the rest of the band ungated.
     for (const h of [501, 620, 760, 900]) {
       await page.setViewportSize({ width: 1440, height: h });
       const s = await state();
@@ -1711,18 +1920,23 @@ test.describe('M2-S12a: the condensed Panel and the Rail affordance', () => {
       expect(s.hasMore, `1440x${h} must show no cue`).toBe(false);
     }
     await page.setViewportSize({ width: 1440, height: 900 });
-    // The fade costs 0.5rem of scroll extent here (a grid track clamps at zero where a flex
-    // line does not), so the load-bearing assertion is that it never becomes its own cause.
+    // The fade's flex cancellation costs no scroll extent (when the Rail itself was the grid it
+    // cost 0.5rem, a grid track clamping at zero), so it can never become its own cause.
     expect(at100.overflow, 'the two-column Rail must not overflow at 100%').toBe(0);
     expect(at100.hasMore, 'no cue where there is nothing below').toBe(false);
     expect(at100.opacity).toBe('0');
 
+    await page.setViewportSize({ width: 1440, height: 560 });
     await page.addStyleTag({ content: ':root { font-size: 200% }' });
     await expect(rail).toHaveClass(/wy-rail-has-more/);
     const at200 = await state();
+    // One column: at heavy text the two-column grid falls back to one (ui.css, the container
+    // query in the two-column block), because a Card's name no longer fits beside the corner
+    // hotkey. The Rail still overflows, and the fade is what marks it.
+    expect(at200.columns, '1440x560 at 200% falls back to one column').toBe(1);
     expect(at200.overflow, 'the two-column Rail DOES overflow at 200%').toBeGreaterThan(0);
     // The box must be GENERATED, not merely opaque — `display: none` here was the defect.
-    expect(at200.display, 'the fade must exist as a box in the grid').not.toBe('none');
+    expect(at200.display, 'the fade must exist as a box in the Rail').not.toBe('none');
     expect(at200.opacity, 'and be painted').toBe('1');
   });
 

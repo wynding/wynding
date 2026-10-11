@@ -442,7 +442,9 @@ export function createApp(doc: Document, root: HTMLElement, deps: AppDeps): AppH
   /** The Cards' footprint-glyph tiles (playtest round, `swatch.ts`) — painted at boot and
    *  again on a colour-mode change, never per frame. The wave strip's creep icons (#181 L1)
    *  ride the same hook: the overlay inks them from the boot mode itself and re-inks them in
-   *  place on a change. */
+   *  place on a change. So does the open Panel's art (#181 H3): `overlay.setColourMode`
+   *  repaints it in the new mode, and a closed Panel paints it in that mode when it next
+   *  opens. */
   const paintSwatches = (): void => {
     for (const c of shell.cards) paintSwatch(c.swatch, c.towerId, colourMode);
   };
@@ -451,8 +453,9 @@ export function createApp(doc: Document, root: HTMLElement, deps: AppDeps): AppH
     // Write-through (#142). First, and unconditionally: persistence must not depend on
     // which of the two settings moved, and it must not be skipped by the memo below.
     deps.settingsPersistence?.write(s);
-    // The swatches' (and the strip icons') one palette input — repainted only when the mode
-    // actually moved, so a reduced-motion toggle never repaints nine canvases for nothing.
+    // The one palette input of the swatches, the strip icons and the open Panel's art —
+    // repainted only when the mode actually moved, so a reduced-motion toggle never repaints
+    // nine canvases (ten with the Panel open) for nothing.
     const modeChanged = s.colourMode !== colourMode;
     colourMode = s.colourMode;
     reducedMotion = s.reducedMotion;
@@ -1154,7 +1157,8 @@ export function createApp(doc: Document, root: HTMLElement, deps: AppDeps): AppH
       handle.destroy();
       surveyForm?.destroy();
       overlay.destroy();
-      // The Cards' swatch observers (#181): disconnected before the canvases are removed.
+      // The Cards' swatch observers (#181): disconnected before the canvases are removed. (The
+      // Panel's art is the overlay's to paint, and `overlay.destroy()` above releases it.)
       for (const c of shell.cards) releaseSwatch(c.swatch);
       shell.destroy();
       // Remove the rotate element too — overlay.destroy()/shell.destroy() only remove

@@ -1169,6 +1169,55 @@ describe('overlay — Card/Panel/live region (PLAN.md P2)', () => {
     expect(card.root.hasAttribute('aria-keyshortcuts')).toBe(false);
   });
 
+  // #181 H3: the corner was drawn for a digit. A label that is not one is visually hidden
+  // (`wy-card-hotkey--long`) and stays the tail of the Card's name, and a key rebound back to a
+  // digit is painted again — the class comes OFF as well as on.
+  it('hides a word label in the Card corner, and paints the digit again once the key is rebound to one (#181 H3)', () => {
+    const { overlay, card, settingsBtn } = setup();
+    settingsBtn.click();
+    const rebind = (code: string): void => {
+      overlay.settingsEl
+        .querySelector<HTMLButtonElement>('[aria-label="Rebind Arm tower 1"]')!
+        .click();
+      document.dispatchEvent(new KeyboardEvent('keydown', { code }));
+    };
+    const hidden = (): boolean => card.hotkey.classList.contains('wy-card-hotkey--long');
+    expect(hidden(), 'the default digit is painted').toBe(false);
+    rebind('BracketLeft');
+    expect(card.hotkey.textContent).toBe('BracketLeft');
+    expect(hidden(), 'a word is visually hidden').toBe(true);
+    rebind('Digit1');
+    expect(card.hotkey.textContent).toBe('1');
+    expect(hidden(), 'the digit is painted again').toBe(false);
+  });
+
+  it('marks a letter or function-key label wide, not long: hidden on the icon form only (#181 H3)', () => {
+    const { overlay, card, settingsBtn } = setup();
+    settingsBtn.click();
+    const rebind = (code: string): void => {
+      overlay.settingsEl
+        .querySelector<HTMLButtonElement>('[aria-label="Rebind Arm tower 1"]')!
+        .click();
+      document.dispatchEvent(new KeyboardEvent('keydown', { code }));
+    };
+    const marks = (): { long: boolean; wide: boolean } => ({
+      long: card.hotkey.classList.contains('wy-card-hotkey--long'),
+      wide: card.hotkey.classList.contains('wy-card-hotkey--wide'),
+    });
+    for (const [code, label] of [
+      ['F1', 'F1'],
+      ['KeyW', 'W'],
+    ] as const) {
+      rebind(code);
+      expect(card.hotkey.textContent).toBe(label);
+      expect(marks(), label).toEqual({ long: false, wide: true });
+    }
+    rebind('BracketLeft');
+    expect(marks(), 'a word').toEqual({ long: true, wide: true });
+    rebind('Digit1');
+    expect(marks(), 'a digit').toEqual({ long: false, wide: false });
+  });
+
   // PLAN.md P6, M2-S5a: the slot-wiring generalization. `setup()`'s bundled ruleset has
   // four catalog towers (basic/slow/splash/venom, M2-S5a's P5), so card 4 (index 3,
   // `armTower4`/Digit4) is now wired for real — not a synthetic fixture.
@@ -1297,9 +1346,13 @@ describe('overlay — Card/Panel/live region (PLAN.md P2)', () => {
     expect(buffedText).toContain('Poison: 6 damage every');
     // The Poison row carries its OWN boosted label — it is buffed independently of the
     // Damage row, and a bundle whose direct amount floors unchanged while its DoT does
-    // not would otherwise print a silently-raised number.
+    // not would otherwise print a silently-raised number. Counted per form (#181): the
+    // sentences assistive tech reads, and the label-value rows a wide Rail paints.
     expect(buffedText).toContain('(boosted)');
-    expect(buffedText.match(/\(boosted\)/g)).toHaveLength(2);
+    const boostedIn = (selector: string): number =>
+      panel.root.querySelector(selector)!.textContent!.match(/\(boosted\)/g)?.length ?? 0;
+    expect(boostedIn('.wy-stats-full')).toBe(2);
+    expect(boostedIn('.wy-stats-rows')).toBe(2);
     // Cadence and duration are NOT buffed (m2.md: non-damage magnitudes and durations are
     // never buffed) — so the same row must still read the catalog's own timings.
     expect(buffedText).toContain('every 0.5s for 3.0s');
@@ -1534,29 +1587,37 @@ describe('overlay — Card/Panel/live region (PLAN.md P2)', () => {
     const glanceRows = glance.querySelectorAll('p').length;
     expect(
       fullRows,
-      "the catalog's densest tower: cost, damage, range, rate, targets, blast, slow",
-    ).toBe(7);
+      "the catalog's densest tower: role (#181), cost, damage, range, rate, targets, blast, slow",
+    ).toBe(8);
     expect(glanceRows, 'cost+damage and range+rate each collapse to one line').toBe(5);
     expect(glanceRows).toBeLessThan(fullRows);
     // The labels the glance drops BECAUSE the line already implies them.
     const g = glance.textContent!;
+    expect(g).not.toContain('Role:');
     expect(g).not.toContain('Cost:');
     expect(g).not.toContain('Damage:');
     expect(g).not.toContain('Range:');
     expect(g).not.toContain('Fire rate:');
     expect(g).not.toContain('Targets:');
-    // Cost keeps the `◈` vocabulary the Compact bounty chip teaches — never a `g` suffix,
-    // which reintroduces the gold metaphor CONTEXT.md's Bounty entry avoids.
-    expect(g).toContain('◈16');
+    // Cost keeps the gem the bounty chip teaches — since #181 the HUD's own inline-SVG gem,
+    // leading the cost row, where it was the `◈` glyph — and never a `g` suffix, which
+    // reintroduces the gold metaphor CONTEXT.md's Bounty entry avoids.
+    const costRow = glance.querySelector('p')!;
+    expect(costRow.firstElementChild!.getAttribute('class')).toContain('wy-icon--bounty');
+    expect(costRow.textContent).toMatch(/^16 · /);
+    // LEADING it: the gem is the row's first node, ahead of the text — `firstElementChild`
+    // alone also passes with the gem appended after the row's text.
+    expect(costRow.firstChild).toBe(costRow.firstElementChild);
+    expect(g).not.toContain('◈'); // one mark, never the glyph beside the icon
     expect(g).not.toMatch(/\b16g\b/);
   });
 
   // The glance form must be defined for the catalog's REAL shapes, not just the ordinary
-  // one — a single template with optional slots produces "◈15 ·  dmg" for a beacon and a
+  // one — a single template with optional slots produces "15 ·  dmg" for a beacon and a
   // phantom fire rate for a mine.
   it('the glance form covers a support tower (no attack) and a burst tower (no fire rate)', () => {
     const { overlay, panel } = setup();
-    const glanceOf = (towerId: string): string => {
+    const glanceOf = (towerId: string): { text: string; costRow: string } => {
       overlay.update({
         hud: hud(),
         paused: false,
@@ -1564,25 +1625,26 @@ describe('overlay — Card/Panel/live region (PLAN.md P2)', () => {
         ui: uiState({ armed: towerId }),
         refund: 0,
       });
-      return panel.root.querySelector('.wy-stats-glance')!.textContent!;
+      const glance = panel.root.querySelector('.wy-stats-glance')!;
+      // The cost row leads with the gem icon (#181), which carries no text of its own.
+      return { text: glance.textContent!, costRow: glance.querySelector('p')!.textContent! };
     };
 
     // `beacon` has no attack at all: cost and support, nothing else.
     const beacon = glanceOf('beacon');
-    expect(beacon).toContain('◈15');
-    expect(beacon).toContain('+50.0% dmg, shared edge');
+    expect(beacon.text).toContain('+50.0% dmg, shared edge');
     // A beacon has no Damage row, so its cost line is the BARE cost form — never the
     // cost+damage one. Asserted on that shape rather than on the absence of the word "dmg",
     // which the Support row legitimately carries now that it names what its percentage
     // modifies.
-    expect(beacon).not.toMatch(/◈15\s*·/);
-    expect(beacon).not.toContain('tiles'); // no range
-    expect(beacon).not.toContain('/s'); // no fire rate
-    expect(beacon).not.toContain('Hits'); // no target domain
+    expect(beacon.costRow).toBe('15');
+    expect(beacon.text).not.toContain('tiles'); // no range
+    expect(beacon.text).not.toContain('/s'); // no fire rate
+    expect(beacon.text).not.toContain('Hits'); // no target domain
 
     // `mine` is burst: a TRIGGER range, a blast, single-use, and NO fire rate.
-    const mine = glanceOf('mine');
-    expect(mine).toContain('◈6 · 45 dmg');
+    const { text: mine, costRow: mineCost } = glanceOf('mine');
+    expect(mineCost).toBe('6 · 45 dmg');
     expect(mine).toContain('Trigger 2.3 tiles');
     expect(mine).toContain('Blast 2.5 tiles');
     expect(mine).toContain('One shot');
@@ -4411,5 +4473,298 @@ describe('overlay — the countdown dial and the early-call note (#181 H1)', () 
       expect(sh.dock.dial.root.hidden).toBe(true);
       sh.dock.dial.root.hidden = true;
     });
+  });
+});
+
+// #181 (H3/L2): the Rail's Cards as the style frame draws them, and the Panel docked below.
+// jsdom applies no stylesheet, so these pin the DOM contract — which parts exist, what they
+// say, and which ones assistive tech reads. The e2e suites assert what a browser paints.
+describe('overlay — the Rail’s Cards and docked Panel (#181 H3/L2)', () => {
+  /** The text assistive tech reads out of a subtree: every text node outside an
+   *  `aria-hidden` or `hidden` subtree, joined the way the name computation joins blocks. */
+  const accessibleText = (root: Element): string => {
+    const parts: string[] = [];
+    const walk = (node: Node): void => {
+      if (node instanceof HTMLElement || node instanceof SVGElement) {
+        if (node.getAttribute('aria-hidden') === 'true') return;
+        if (node instanceof HTMLElement && node.hidden) return;
+        for (const child of node.childNodes) walk(child);
+      } else if (node.nodeType === Node.TEXT_NODE && node.textContent!.trim() !== '') {
+        parts.push(node.textContent!.trim());
+      }
+    };
+    walk(root);
+    return parts.join(' ');
+  };
+
+  const SHORT: Readonly<Record<string, string>> = {
+    basic: 'Basic',
+    slow: 'Slow',
+    splash: 'Splash',
+    venom: 'Venom',
+    stun: 'Stun',
+    antiair: 'Anti-Air',
+    beacon: 'Beacon',
+    mine: 'Mine',
+    'frost-splash': 'Frost Splash',
+  };
+
+  const atBounty = (overlay: ReturnType<typeof setup>['overlay'], bounty: number): void => {
+    overlay.update({ hud: hud({ bounty }), paused: false, speed: 1, ui: uiState(), refund: 0 });
+  };
+
+  it('every Card paints its short name, the gem and the cost — and its accessible name is unchanged', () => {
+    const { shell } = setup();
+    expect(shell.cards).toHaveLength(9);
+    for (const [i, card] of shell.cards.entries()) {
+      const cost = ruleset.towerById[card.towerId]!.cost;
+      expect(card.label.textContent, card.towerId).toBe(SHORT[card.towerId]);
+      expect(card.costValue.textContent).toBe(String(cost));
+      // The name every Card has always had: the full name, the full cost message, the hotkey.
+      expect(accessibleText(card.root)).toBe(`${card.name.textContent} Cost: ${cost} ${i + 1}`);
+      // The painted short name is the START of that name (WCAG 2.5.3: a speech-input user
+      // says what they see).
+      expect(card.name.textContent!.startsWith(card.label.textContent!)).toBe(true);
+    }
+  });
+
+  it('a Card the Bounty cannot pay for dims, says "need N", and carries the shortfall as its DESCRIPTION — never its name', () => {
+    const { overlay, shell } = setup();
+    atBounty(overlay, 7);
+    const byId = (id: string) => shell.cards.find((c) => c.towerId === id)!;
+    // basic (5) is affordable at 7.
+    const basic = byId('basic');
+    expect(basic.root.classList.contains('wy-card--short')).toBe(false);
+    expect(basic.needText.data).toBe('');
+    expect(basic.root.hasAttribute('aria-describedby')).toBe(false);
+    for (const [id, need] of [
+      ['slow', 1],
+      ['splash', 5],
+      ['frost-splash', 9],
+    ] as const) {
+      const card = byId(id);
+      expect(card.root.classList.contains('wy-card--short'), id).toBe(true);
+      expect(card.needText.data).toBe(`need ${need}`);
+      expect(card.root.getAttribute('aria-describedby')).toBe(card.desc.id);
+      expect(card.descText.data).toBe(`Not enough Bounty: ${need} more needed.`);
+      // The description is a hidden sentence the Card points at; the name is untouched.
+      expect(card.desc.hidden).toBe(true);
+      expect(accessibleText(card.root)).toBe(
+        `${card.name.textContent} Cost: ${ruleset.towerById[id]!.cost} ${card.hotkey.textContent}`,
+      );
+    }
+  });
+
+  it('the can’t-afford state follows the Bounty in place — the same nodes, rewritten, never rebuilt (#98)', () => {
+    const { overlay, shell } = setup();
+    const slow = shell.cards[1]!;
+    const before = {
+      kids: [...slow.root.childNodes],
+      need: slow.need.firstChild,
+      desc: slow.desc.firstChild,
+      value: slow.costValue.firstChild,
+    };
+    atBounty(overlay, 3); // slow costs 8: 5 short
+    expect(slow.needText.data).toBe('need 5');
+    atBounty(overlay, 6); // 2 short — the same node, its data rewritten
+    expect(slow.needText.data).toBe('need 2');
+    expect(slow.descText.data).toBe('Not enough Bounty: 2 more needed.');
+    atBounty(overlay, 80); // affordable again
+    expect(slow.root.classList.contains('wy-card--short')).toBe(false);
+    expect(slow.root.hasAttribute('aria-describedby')).toBe(false);
+    expect(slow.needText.data).toBe('');
+    expect(slow.descText.data).toBe('');
+    // Nothing under the press was replaced at any step.
+    expect([...slow.root.childNodes]).toEqual(before.kids);
+    expect(slow.need.firstChild).toBe(before.need);
+    expect(slow.desc.firstChild).toBe(before.desc);
+    expect(slow.costValue.firstChild).toBe(before.value);
+  });
+
+  it('a refresh that moves no Card across its cost writes nothing to any Card (#98)', () => {
+    const { overlay, shell } = setup();
+    atBounty(overlay, 7);
+    const observer = new MutationObserver(() => {});
+    for (const card of shell.cards) {
+      observer.observe(card.root, {
+        childList: true,
+        subtree: true,
+        attributes: true,
+        characterData: true,
+      });
+    }
+    // Calibration: the observer sees a Card's text written and its attributes set, even to
+    // the values they already hold — exactly the writes a quiet refresh must not make.
+    shell.cards[1]!.needText.data = 'need 1';
+    shell.cards[1]!.root.setAttribute('aria-pressed', 'false');
+    expect(observer.takeRecords()).toHaveLength(2);
+    // The same Bounty again: nothing changed, so nothing is written — not the shortfalls, not
+    // `aria-pressed`.
+    atBounty(overlay, 7);
+    expect(observer.takeRecords()).toEqual([]);
+    // A Bounty that changes some shortfalls rewrites only those Cards: basic (5) is affordable
+    // at 7 and at 6, so it is never touched.
+    atBounty(overlay, 6);
+    const records = observer.takeRecords();
+    expect(records.length).toBeGreaterThan(0);
+    expect(records.some((r) => shell.cards[0]!.root.contains(r.target))).toBe(false);
+    observer.disconnect();
+  });
+
+  it('a Card that cannot be afforded still arms — it is a live button, and placement is what refuses the build', () => {
+    const { overlay, shell, actions } = setup();
+    atBounty(overlay, 0);
+    const splash = shell.cards[2]!;
+    expect(splash.root.classList.contains('wy-card--short')).toBe(true);
+    splash.root.click();
+    expect(actions).toContainEqual({ type: 'armTower', tower: 'splash' });
+  });
+
+  it('the role leads the full sentences; the role line under the name is presentation', () => {
+    const { overlay, panel } = setup();
+    for (const [id, role, line] of [
+      ['venom', 'Poison', 'Poison · Ground'],
+      ['antiair', 'Anti-air', 'Anti-air · Air'],
+      ['slow', 'Control', 'Control · Ground + Air'],
+      ['mine', 'Burst', 'Burst · Ground'],
+      ['beacon', 'Support', 'Support'], // attacks nothing: the role alone
+      ['basic', 'Damage', 'Damage · Ground'],
+    ] as const) {
+      overlay.update({
+        hud: hud(),
+        paused: false,
+        speed: 1,
+        ui: uiState({ armed: id }),
+        refund: 0,
+      });
+      const full = panel.root.querySelector('.wy-stats-full')!;
+      expect(full.querySelector('p')!.textContent, id).toBe(`Role: ${role}`);
+      const roleLine = panel.root.querySelector('.wy-panel-role')!;
+      expect(roleLine.textContent).toBe(line);
+      expect(roleLine.getAttribute('aria-hidden')).toBe('true');
+    }
+  });
+
+  it('an id this build cannot name gets no role — its line says only what the definition proves', () => {
+    const { overlay, panel } = setup();
+    // `basic`'s definition under an id the catalog has never named.
+    const forged = {
+      ...ruleset,
+      towerById: { ...ruleset.towerById, forged: ruleset.towerById.basic! },
+    };
+    const { overlay: forgedOverlay, panel: forgedPanel } = setup(undefined, undefined, {
+      ruleset: forged as typeof ruleset,
+    });
+    forgedOverlay.update({
+      hud: hud(),
+      paused: false,
+      speed: 1,
+      ui: uiState({ armed: 'forged' }),
+      refund: 0,
+    });
+    expect(forgedPanel.root.querySelector('.wy-stats-full p')!.textContent).toBe('Cost: 5');
+    expect(forgedPanel.root.querySelector('.wy-panel-role')!.textContent).toBe('Targets: Ground');
+    // (The shipped catalog's own Panel is unaffected.)
+    overlay.update({
+      hud: hud(),
+      paused: false,
+      speed: 1,
+      ui: uiState({ armed: 'basic' }),
+      refund: 0,
+    });
+    expect(panel.root.querySelector('.wy-stats-full p')!.textContent).toBe('Role: Damage');
+  });
+
+  it('the docked Panel paints label-value rows — aria-hidden, over the same numbers as the sentences', () => {
+    const { overlay, panel } = setup();
+    overlay.update({
+      hud: hud(),
+      paused: false,
+      speed: 1,
+      ui: uiState({ selection: { col: 1, row: 1, id: 7, towerId: 'venom', buffMulFp: 384 } }),
+      refund: 4,
+    });
+    const rows = panel.root.querySelector('.wy-stats-rows')!;
+    expect(rows.getAttribute('aria-hidden')).toBe('true');
+    const pairs = [...rows.querySelectorAll('.wy-stat')].map((p) => [
+      p.querySelector('.wy-stat-label')?.textContent ?? null,
+      p.querySelector('.wy-stat-value')!.textContent,
+    ]);
+    expect(pairs).toEqual([
+      ['Cost', '9'],
+      ['Damage', '3 (boosted)'],
+      ['Range', '4.0 tiles'],
+      ['Fire rate', '0.7/s'],
+      ['Poison', '6 every 0.5s for 3.0s (boosted)'],
+    ]);
+    // The same facts, as sentences, are the Panel's accessible text.
+    const full = panel.root.querySelector('.wy-stats-full')!.textContent!;
+    expect(full).toContain('Damage: 3 (boosted)');
+    expect(full).toContain('Poison: 6 damage every 0.5s for 3.0s (boosted)');
+    // Siblings in a fixed order: full, glance, rows.
+    expect(
+      [...panel.root.querySelector('.wy-panel-stats')!.children].map((c) => c.className),
+    ).toEqual(['wy-stats-full', 'wy-stats-glance', 'wy-stats-rows']);
+  });
+
+  it('a burst tower’s rows relabel its range as a trigger and carry the single-use note unlabelled', () => {
+    const { overlay, panel } = setup();
+    overlay.update({
+      hud: hud(),
+      paused: false,
+      speed: 1,
+      ui: uiState({ armed: 'mine' }),
+      refund: 0,
+    });
+    const rows = [...panel.root.querySelectorAll('.wy-stats-rows .wy-stat')];
+    const labels = rows.map((p) => p.querySelector('.wy-stat-label')?.textContent ?? null);
+    expect(labels).toContain('Trigger range');
+    expect(labels).not.toContain('Range');
+    expect(labels).not.toContain('Fire rate');
+    const note = rows.find((p) => p.classList.contains('wy-stat--note'))!;
+    expect(note.querySelector('.wy-stat-label')).toBeNull();
+    expect(note.textContent).toBe('Destroyed when it fires');
+  });
+
+  it('the build hint shows while a tower is armed, never on a placed tower', () => {
+    const { overlay, panel } = setup();
+    overlay.update({
+      hud: hud(),
+      paused: false,
+      speed: 1,
+      ui: uiState({ armed: 'basic' }),
+      refund: 0,
+    });
+    expect(panel.root.querySelector('.wy-panel-hint')!.textContent).toBe(
+      'Choose a cell to build · Esc to cancel',
+    );
+    overlay.update({
+      hud: hud(),
+      paused: false,
+      speed: 1,
+      ui: uiState({ selection: { col: 1, row: 1, id: 7, towerId: 'basic', buffMulFp: 256 } }),
+      refund: 4,
+    });
+    expect(panel.root.querySelector('.wy-panel-hint')).toBeNull();
+  });
+
+  it('the Panel’s art is ONE canvas, re-homed into every rebuilt Panel and gone with it when the Panel closes', () => {
+    const { overlay, panel } = setup();
+    const art = panel.art;
+    for (const towerId of ['basic', 'venom', 'beacon']) {
+      overlay.update({
+        hud: hud(),
+        paused: false,
+        speed: 1,
+        ui: uiState({ armed: towerId }),
+        refund: 0,
+      });
+      // The same node every time, at the head of the rebuilt Panel.
+      expect(panel.root.querySelector('.wy-panel-head')!.firstElementChild).toBe(art);
+      expect(panel.root.querySelectorAll('canvas')).toHaveLength(1);
+    }
+    overlay.update({ hud: hud(), paused: false, speed: 1, ui: uiState(), refund: 0 });
+    expect(panel.root.hidden).toBe(true);
+    expect(panel.root.contains(art)).toBe(false);
   });
 });

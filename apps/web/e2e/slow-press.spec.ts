@@ -168,3 +168,80 @@ test('mid-run 220 ms press on Sell sells', async ({ page }) => {
   await expect(panel).toBeHidden();
   await expect.poll(readBounty).toBe(bountyBefore! + refund);
 });
+
+// #181 (H3): the Cards gained per-refresh writes of their own — the can't-afford state, which
+// follows the Bounty — so they join this spec. A steady refresh writes nothing to a Card, and
+// a refresh that DOES change it rewrites persistent text nodes in place, so a held press
+// straddles no replacement either way.
+
+test('mid-run 220 ms press on a Card arms it', async ({ page }) => {
+  await page.goto('/');
+  const board = page.locator('.wy-board');
+  await page.getByRole('button', { name: 'Start' }).click();
+  await expect(board).toHaveAttribute('data-started', 'true');
+  await expect
+    .poll(async () => Number(await board.getAttribute('data-sim-tick')))
+    .toBeGreaterThan(5);
+
+  const card = page.getByRole('button', { name: /^Basic Tower/ });
+  await expect(card).toHaveAttribute('aria-pressed', 'false');
+  await card.click({ delay: 220 });
+  await expect(card).toHaveAttribute('aria-pressed', 'true');
+});
+
+test("a 220 ms press on a Card whose can't-afford state flips UNDER the press still arms it", async ({
+  page,
+}) => {
+  await page.goto('/');
+  const board = page.locator('.wy-board');
+  const panel = page.locator('.wy-panel');
+  const grid = await projectedGrid(page);
+  const cell = (col: number, row: number) => ({
+    x: grid.x + ((col + 0.5) / GRID.cols) * grid.width,
+    y: grid.y + ((row + 0.5) / GRID.rows) * grid.height,
+  });
+  const bounty = page.locator('.wy-chip[data-wy-chip="bounty"] .wy-chip-full');
+
+  // Pre-start, spend the Bounty to 11 with pending builds (which it already counts as spent):
+  // four Frost Splash (16) and a Basic (5). Splash (12) is then short by one.
+  const builds: [string, number, number][] = [
+    ['9', 3, 3],
+    ['9', 6, 3],
+    ['9', 9, 3],
+    ['9', 12, 3],
+    ['1', 15, 3],
+  ];
+  for (const [key, col, row] of builds) {
+    await page.keyboard.press(key);
+    const p = cell(col, row);
+    await page.mouse.click(p.x, p.y);
+    await page.keyboard.press('Escape');
+  }
+  await expect(board).toHaveAttribute('data-pending-adds', String(builds.length));
+  await expect(bounty).toHaveText('Bounty: 11');
+  const splash = page.getByRole('button', { name: /^Splash Tower/ });
+  await expect(splash).toHaveClass(/wy-card--short/);
+
+  // Select the pending Basic, so the sell hotkey has a tower to sell.
+  const basicAt = cell(15, 3);
+  await page.mouse.click(basicAt.x, basicAt.y);
+  await expect(panel.getByRole('button', { name: /^Sell/ })).toBeVisible();
+
+  // The press: down on the short Card, a sell WHILE IT IS HELD (its refund lifts the Bounty
+  // past Splash's cost, so the Card's state is rewritten under the pointer), then up. The sell
+  // hotkey is the board's own key handler, so it is dispatched to the board directly: a real
+  // key press would go wherever the engine put focus on the press — the Card in Chromium,
+  // not in WebKit — and what is under test is the press, not the key's routing.
+  const box = (await splash.boundingBox())!;
+  await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2);
+  await page.mouse.down();
+  await board.dispatchEvent('keydown', { code: 'KeyX', key: 'x', bubbles: true });
+  await expect(splash).not.toHaveClass(/wy-card--short/); // flipped mid-press
+  await expect(bounty).not.toHaveText('Bounty: 11');
+  // The rest of the hold — the same 220ms the other presses here take.
+  await page.waitForTimeout(220);
+  await page.mouse.up();
+
+  // Outcome: the release still lands as a click — the Card is armed.
+  await expect(splash).toHaveAttribute('aria-pressed', 'true');
+});

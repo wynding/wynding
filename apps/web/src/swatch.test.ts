@@ -361,6 +361,80 @@ describe('paintSwatch', () => {
     expect([canvas.width, canvas.height]).toEqual([39, 39]);
   });
 
+  /** The one transform the art is drawn under when fitted to a `size` CSS px tile. */
+  const fittedTransform = (size: number): string => {
+    const fit = towerArtFit(size);
+    const unit = fit.footprintPx / 64;
+    return `transform(${unit},0,0,${unit},${fit.x},${fit.y})`;
+  };
+
+  /** A canvas whose page box the test moves (`box`), in a window at `dpr`. */
+  const boxedCanvas = (
+    ctx: CanvasRenderingContext2D,
+    dpr: number,
+    view?: object,
+  ): {
+    canvas: HTMLCanvasElement;
+    box: { left: number; top: number; width: number; height: number };
+  } => {
+    const box = { left: 0, top: 0, width: 0, height: 0 };
+    const canvas = fakeCanvas(ctx, { dpr, view });
+    (canvas as unknown as { getBoundingClientRect: () => typeof box }).getBoundingClientRect =
+      () => ({ ...box });
+    return { canvas, box };
+  };
+
+  // #181 (H3/L2): the tile is whatever box `ui.css` gives it — 56px on a full Card, 34px on an
+  // icon-form one, 40px in the Panel's head — and the whole tower is fitted to THAT box, not
+  // to a size fixed here, so the art fills each tile at the board's own proportions.
+  for (const size of [56, 34, 40]) {
+    it(`fits the art to the tile’s laid-out box: a ${size}px tile is drawn into ${size} pixels at dpr 1, the whole tower fitted to it`, () => {
+      const { ctx, ops } = recordingCtx();
+      const { canvas, box } = boxedCanvas(ctx, 1);
+      Object.assign(box, { width: size, height: size });
+      paintSwatch(canvas, 'slow', 'default', recordingPaths().makePath);
+      expect([canvas.width, canvas.height]).toEqual([size, size]);
+      const transforms = ops.filter((o) => o.startsWith('transform('));
+      expect(transforms.length).toBeGreaterThan(0);
+      for (const t of transforms) expect(t).toBe(fittedTransform(size));
+      // The ground still covers the whole tile.
+      expect(ops).toContain(`rect(0,0,${size},${size})`);
+    });
+  }
+
+  it('refits the art when the tile’s box changes size — a Card moving between its full and icon forms', () => {
+    const { view, observers } = observingView(false);
+    const { ctx, ops } = recordingCtx();
+    const { canvas, box } = boxedCanvas(ctx, 1, view);
+    Object.assign(box, { width: 56, height: 56 });
+    paintSwatch(canvas, 'venom', 'default', recordingPaths().makePath);
+    expect(ops.filter((o) => o.startsWith('transform(')).at(-1)).toBe(fittedTransform(56));
+    Object.assign(box, { width: 34, height: 34 }); // the narrow Rail's icon form
+    observers[0]!.callback([entry(null)], {} as ResizeObserver);
+    expect([canvas.width, canvas.height]).toEqual([34, 34]);
+    expect(ops.filter((o) => o.startsWith('transform(')).at(-1)).toBe(fittedTransform(34));
+  });
+
+  it('refits even when the new box needs the same store — the fit follows the box, not only the pixel count', () => {
+    const { view, observers } = observingView(false);
+    const { ctx, ops } = recordingCtx();
+    const { canvas, box } = boxedCanvas(ctx, 1, view);
+    Object.assign(box, { width: 56, height: 56 });
+    paintSwatch(canvas, 'basic', 'default', recordingPaths().makePath);
+    const paints = (): number => ops.filter((o) => o.startsWith('setTransform(')).length;
+    const painted = paints();
+    // 56.4 CSS px at x 0 is still drawn into 56 device pixels: the same store ...
+    Object.assign(box, { width: 56.4, height: 56.4 });
+    observers[0]!.callback([entry(null)], {} as ResizeObserver);
+    expect([canvas.width, canvas.height]).toEqual([56, 56]);
+    // ... but a bigger tile, so the tower is fitted to it again.
+    expect(paints()).toBe(painted + 1);
+    expect(ops.filter((o) => o.startsWith('transform(')).at(-1)).toBe(fittedTransform(56.4));
+    // And the same box again repaints nothing.
+    observers[0]!.callback([entry(null)], {} as ResizeObserver);
+    expect(paints()).toBe(painted + 1);
+  });
+
   it("releaseSwatch disconnects the tile's observer, and a later paint observes it afresh", () => {
     const { view, instances } = observingView(true);
     const { ctx } = recordingCtx();

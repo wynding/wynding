@@ -15,12 +15,14 @@ import { FP_ONE } from '@wynding/engine';
 import {
   COLOUR_MODES,
   resolvePalette,
+  towerRoleFor,
   type HudVM,
   type HudPreview,
   type PreviewEntryVM,
   type ColourMode,
   type CreepStatusCounts,
   type Palette,
+  type TowerRole,
 } from '@wynding/render';
 import {
   MS_PER_TICK,
@@ -35,8 +37,9 @@ import type { SettingsStore } from './settings';
 import { ARM_TOWER_ACTIONS, GAME_ACTIONS, type GameAction, type Keymap } from './keymap';
 import { formatKeyLabel } from './keylabel';
 import { createModalOwner, type ModalOverlay, type ModalOwner } from './modal';
-import { dialDash, creepIcon, paintCreepIcon } from './hud-icons';
+import { chipIcon, dialDash, creepIcon, paintCreepIcon } from './hud-icons';
 import { dockButtonParts, type ShellChip, type ShellHandle } from './shell';
+import { paintSwatch, releaseSwatch } from './swatch';
 import { createResultsPanel } from './results-panel';
 import type { InstallHandle, InstallState } from './install';
 import type { ArmedTower, UiState, PlacementOutcome, RunStats } from './controller';
@@ -85,9 +88,10 @@ export interface Overlay {
    *  second, disconnected one. */
   readonly modal: ModalOwner;
   update(view: HudView): void;
-  /** Re-ink the wave strip's creep icons for a colour-vision mode change (#181 L1) — the
-   *  same hook `main.ts` repaints the Card swatches from. Repaints in place; never rebuilds
-   *  the strip's rows. */
+  /** Re-ink the wave strip's creep icons for a colour-vision mode change (#181 L1), and
+   *  repaint the open Panel's art in the new mode (#181 H3; a closed Panel paints it in that
+   *  mode when it next opens) — the same hook `main.ts` repaints the Card swatches from.
+   *  Repaints in place; never rebuilds the strip's rows. */
   setColourMode(mode: ColourMode): void;
   /** Open the leave-this-run confirm dialog. PRESENTATION ONLY — the decision to open it
    *  (the modified-activation check and the live-run state read) is `main.ts`'s, which owns
@@ -232,7 +236,46 @@ function towerName(towerId: string): string {
   return t('tower.unknown.name', { id: towerId });
 }
 
-/** Glance-form glyphs for the Dock buttons (Story 11 P1) and the Panel's cost row.
+/** The SHORT names a Card paints (#181 H3) — the style frame's card labels. A full name such
+ *  as "Frost Splash Tower" wrapped to three lines beside the art; the short one keeps two at
+ *  most. Presentation only: the Card's accessible name still leads with the full name, so the
+ *  painted label is always the start of what assistive tech and speech input hear (WCAG
+ *  2.5.3). Same null-prototype, literal-key shape as `TOWER_NAME`; an id this build does not
+ *  name paints its full fallback name rather than invent a short one. */
+const TOWER_SHORT_NAME: Readonly<Partial<Record<string, () => string>>> = Object.assign(
+  Object.create(null) as Partial<Record<string, () => string>>,
+  {
+    basic: () => t('tower.basic.short'),
+    slow: () => t('tower.slow.short'),
+    splash: () => t('tower.splash.short'),
+    venom: () => t('tower.venom.short'),
+    stun: () => t('tower.stun.short'),
+    antiair: () => t('tower.antiair.short'),
+    beacon: () => t('tower.beacon.short'),
+    mine: () => t('tower.mine.short'),
+    'frost-splash': () => t('tower.frost-splash.short'),
+  } satisfies Record<string, () => string>,
+);
+
+function towerShortName(towerId: string): string {
+  return TOWER_SHORT_NAME[towerId]?.() ?? towerName(towerId);
+}
+
+/** A tower ROLE's name for players (#181 H3 — the Panel's role line). The role itself is the
+ *  render package's (`towerRoleFor`: the head's colour), so the words and the colour can never
+ *  disagree. Exhaustive over `TowerRole`, so a seventh role is a compile error here. `air` is
+ *  "Anti-air" to players: the role line pairs it with the targets, and "Air · Air" says
+ *  nothing. */
+const ROLE_NAME: Readonly<Record<TowerRole, () => string>> = {
+  damage: () => t('tower.role.damage'),
+  control: () => t('tower.role.control'),
+  poison: () => t('tower.role.poison'),
+  air: () => t('tower.role.air'),
+  support: () => t('tower.role.support'),
+  burst: () => t('tower.role.burst'),
+};
+
+/** Glance-form glyphs for the Dock buttons (Story 11 P1) and the install banner.
  *
  *  These are PRESENTATION, not copy: every node they are written into is `aria-hidden`, and
  *  the full localized message sits alongside it as the element's actual accessible text. A
@@ -242,11 +285,9 @@ function towerName(towerId: string): string {
  *  genuinely WORDED glance part, the countdown's unit, goes through the catalog, as
  *  `hud.wave.glance.unit` — a static companion `shell.ts` writes once, like the stars' "/ 3".
  *
- *  The HUD chips no longer draw from here: since #181 (H1) their glances lead with inline-SVG
- *  icons (`hud-icons.ts`, built once by `shell.ts`). `bounty` stays for the Panel's cost row,
- *  which the rail's own redesign owns. */
+ *  The bounty mark no longer comes from here: since #181 the HUD chips (H1), the Cards' cost
+ *  and the Panel's cost row (H3) all lead with the same inline-SVG gem (`hud-icons.ts`). */
 const ICONS = {
-  bounty: '◈',
   settings: '⚙',
   pause: '⏸',
   resume: '⏵',
@@ -285,6 +326,17 @@ function setLabel(el: Element, text: string): boolean {
   el.textContent = text;
   return true;
 }
+
+/** `setLabel`'s stronger sibling for a text that changes WHILE a control is being pressed: it
+ *  rewrites a persistent Text node's data in place, so the node under the pointer is never
+ *  replaced at all (#98) — and, like `setLabel`, writes nothing when the value is unchanged. */
+function setText(node: Text, text: string): void {
+  if (node.data !== text) node.data = text;
+}
+
+/** The class a Card wears while the bounty is short of its cost (#181 H3) — `ui.css` dims its
+ *  art and shows "need N" on it. */
+const CARD_SHORT_CLASS = 'wy-card--short';
 
 function button(doc: Document, className: string, label: string): HTMLButtonElement {
   const b = doc.createElement('button');
@@ -385,11 +437,45 @@ export function createOverlay(
   const hotkeyActionForCardIndex = (index: number): GameAction | null =>
     ARM_HOTKEY_ACTIONS[index] ?? null;
 
-  for (const c of cards) {
+  /** Each Card's cost, read once: a catalog's costs never change during a run. An id this
+   *  build's catalog does not resolve costs 0 here, as the Card's text has always said. */
+  const cardCosts: readonly number[] = cards.map((c) => ruleset.towerById[c.towerId]?.cost ?? 0);
+  for (const [i, c] of cards.entries()) {
+    const cost = cardCosts[i] ?? 0;
     c.name.textContent = towerName(c.towerId);
-    const cost = ruleset.towerById[c.towerId]?.cost ?? 0;
+    c.label.textContent = towerShortName(c.towerId);
     c.cost.textContent = t('panel.cost', { cost });
+    c.costValue.textContent = String(cost);
     c.root.addEventListener('click', () => onAction({ type: 'armTower', tower: c.towerId }));
+  }
+
+  /** The shortfall each Card last rendered (`null` until the first refresh, so the first one
+   *  always writes). */
+  const cardShortfall: (number | null)[] = cards.map(() => null);
+
+  /** The can't-afford state (#181 H3): while the bounty is below a Card's cost, the Card dims
+   *  its art, paints "need N" and carries the shortfall as its accessible DESCRIPTION — its
+   *  name never changes. It stays a live button: arming it still shows the tower's stats, and
+   *  placement already refuses a build the bounty cannot pay for.
+   *
+   *  Runs on every HUD refresh (~20×/s through a wave), so it is CHANGE-GATED per Card on the
+   *  shortfall, and writes nothing on the common frame where the bounty did not cross a cost.
+   *  When it does write, the two texts are rewritten IN PLACE (`Text.data` on the persistent
+   *  nodes `shell.ts` built) — never by `textContent`, which replaces the node. #98's lesson:
+   *  WebKit does not synthesize a `click` for a press whose node is replaced under the pointer,
+   *  and a Card is pressed exactly when the bounty is moving. Nothing is rebuilt. */
+  function renderAffordability(bounty: number): void {
+    for (const [i, c] of cards.entries()) {
+      const short = Math.max(0, (cardCosts[i] ?? 0) - bounty);
+      if (cardShortfall[i] === short) continue;
+      cardShortfall[i] = short;
+      const unaffordable = short > 0;
+      c.root.classList.toggle(CARD_SHORT_CLASS, unaffordable);
+      setText(c.needText, unaffordable ? t('card.need', { need: short }) : '');
+      setText(c.descText, unaffordable ? t('card.unaffordable', { need: short }) : '');
+      if (unaffordable) c.root.setAttribute('aria-describedby', c.desc.id);
+      else c.root.removeAttribute('aria-describedby');
+    }
   }
 
   /** Refresh card at `index`'s live hotkey badge — a card past the last hotkey slot
@@ -410,7 +496,16 @@ export function createOverlay(
       return;
     }
     const label = formatKeyLabel(keymap.codeFor(action));
-    c.hotkey.textContent = label ?? t('settings.unbound');
+    const text = label ?? t('settings.unbound');
+    c.hotkey.textContent = text;
+    // The corner was drawn for a digit. A label longer than two characters (a rebound key's
+    // word, or "Unbound") would paint over the name or the art, so it is visually hidden on
+    // every Card; any other label but a digit (a letter, "F1") fits the full form's corner but
+    // not the icon form's, beside its 34px art, so it is hidden there (`--wide`). A digit is
+    // hidden there too on a tile too narrow for it, by `ui.css` alone, from the tile's own
+    // width. Each stays in the Card's accessible name.
+    c.hotkey.classList.toggle('wy-card-hotkey--long', text.length > 2);
+    c.hotkey.classList.toggle('wy-card-hotkey--wide', !/^\d$/.test(text));
     if (label !== null) c.root.setAttribute('aria-keyshortcuts', label);
     else c.root.removeAttribute('aria-keyshortcuts');
   }
@@ -990,6 +1085,15 @@ export function createOverlay(
 
   interface TowerStats {
     readonly name: string;
+    /** The tower's ROLE, named for players (#181 H3): the render package's (`towerRoleFor`),
+     *  the one its head is coloured by. `null` for an id this build does not name, where the
+     *  role would be a guess — `towerRoleFor` falls back to `basic`'s. */
+    readonly role: string | null;
+    /** The line under the Panel's name (#181 H3): the role and what it targets ("Poison ·
+     *  Ground"), or the role alone for a tower that attacks nothing ("Support"). Without a
+     *  role it says only what the definition proves ("Targets: Ground"), and is `null` when
+     *  that is nothing. Presentation: the role and the targets are each a full sentence. */
+    readonly roleLine: string | null;
     readonly cost: number;
     /** M2-S8: `null` for a SUPPORT tower, whose bundle carries no attack at all — the
      *  Damage/Range/Fire rate/Targets rows are OMITTED rather than shown as zeros, the
@@ -1119,8 +1223,20 @@ export function createOverlay(
     const dotEffect = def?.effects.find((e) => e.kind === 'dot');
     const stunEffect = def?.effects.find((e) => e.kind === 'stun');
     const slowEffect = def?.effects.find((e) => e.kind === 'slow');
+    const targets = def?.attack === undefined ? null : targetsFor(def.attack.domain);
+    const known = TOWER_NAME[towerId] !== undefined;
+    const role = known ? ROLE_NAME[towerRoleFor(towerId)]() : null;
     return {
       name: towerName(towerId),
+      role,
+      roleLine:
+        role === null
+          ? targets === null
+            ? null
+            : t('panel.targets', { targets })
+          : targets === null
+            ? role
+            : t('panel.roleLine', { role, targets }),
       cost: def?.cost ?? 0,
       damage,
       buffed: damage !== null && baseDamage !== null && damage > baseDamage,
@@ -1145,7 +1261,7 @@ export function createOverlay(
       // `antiair` would honestly-falsely display "Targets: Ground". `def === undefined`
       // (a forged/unresolved towerId) falls back to `'ground'`, the same totality rail
       // every other field in this function already takes on an absent definition.
-      targets: def?.attack === undefined ? null : targetsFor(def.attack.domain),
+      targets,
       blastRadiusTiles: aoeEffect === undefined ? null : formatNumber(aoeEffect.radiusFp / FP_ONE),
       dot:
         dotEffect === undefined
@@ -1192,6 +1308,9 @@ export function createOverlay(
 
   function fullStatRows(stats: TowerStats): readonly string[] {
     return [
+      // The role leads (#181 H3), as the role line under the Panel's name leads what a sighted
+      // player reads. That line is presentation; this sentence is what assistive tech hears.
+      ...(stats.role === null ? [] : [t('panel.role', { role: stats.role })]),
       t('panel.cost', { cost: stats.cost }),
       // M2-S8: each attack-derived row is present iff the tower actually attacks. A
       // support tower shows the Support row in their place — the same omit-rather-than-
@@ -1276,32 +1395,18 @@ export function createOverlay(
    *  every variant reports as dead. */
   function glanceStatRows(stats: TowerStats): readonly string[] {
     const rows: string[] = [];
-    // Cost leads, with the `◈` glyph and never a `g` suffix, which reintroduces exactly the
-    // gold/coin metaphor `docs/CONTEXT.md`'s Bounty entry avoids.
-    // The glyph comes from `ICONS`, which this file documents as owning it — never baked
-    // into the catalog string. A glyph has no language, so a copy in `en.json` is not a
-    // translation, it is a SECOND source of truth. The HUD's bounty chip no longer follows
-    // `ICONS.bounty`: it draws `hud-icons.ts`'s SVG gem. The Panel's cost row keeps `◈` because
-    // the rail-cards change (#181, D3) owns that row, so changing `ICONS.bounty` moves the
-    // Panel's glyph alone, not the chip.
+    // Cost leads, and FIRST, always: `appendStatRows` leads this row with the HUD's own gem
+    // (#181) — the mark the bounty chip and every Card's cost show — never a `g` suffix,
+    // which reintroduces exactly the gold/coin metaphor `docs/CONTEXT.md`'s Bounty entry
+    // avoids. The mark is an icon beside the text, never baked into the catalog string: a
+    // glyph has no language, and a copy of it in `en.json` would be a second source of truth
+    // that drifts from the HUD's.
     if (stats.damage === null) {
-      rows.push(t('panel.glance.cost', { bounty: ICONS.bounty, cost: stats.cost }));
+      rows.push(t('panel.glance.cost', { cost: stats.cost }));
     } else if (stats.buffed) {
-      rows.push(
-        t('panel.glance.costDamageBuffed', {
-          bounty: ICONS.bounty,
-          cost: stats.cost,
-          damage: stats.damage,
-        }),
-      );
+      rows.push(t('panel.glance.costDamageBuffed', { cost: stats.cost, damage: stats.damage }));
     } else {
-      rows.push(
-        t('panel.glance.costDamage', {
-          bounty: ICONS.bounty,
-          cost: stats.cost,
-          damage: stats.damage,
-        }),
-      );
+      rows.push(t('panel.glance.costDamage', { cost: stats.cost, damage: stats.damage }));
     }
     if (stats.rangeTiles !== null) {
       if (stats.attackMode === 'burst') {
@@ -1359,6 +1464,87 @@ export function createOverlay(
     return rows;
   }
 
+  /** One painted LABEL-VALUE row of the docked Panel (#181 H3): "Damage" beside "2". A row
+   *  with no label (the burst tower's "Destroyed when it fires") spans the row. */
+  interface StatPair {
+    readonly label: string | null;
+    readonly value: string;
+  }
+
+  /** THE VISIBLE FORM on a wide Rail (#181 H3) — the style frame's stat rows, a label and its
+   *  value, over the same struct the full sentences read. Presentation only, like the glance
+   *  below: the block is `aria-hidden`, and the full sentences stay the Panel's accessible
+   *  text at every width (Act 1 ruling 1).
+   *
+   *  The targets are not a row here: they are on the role line under the name, as the frame
+   *  draws them. Each label and each value is its own literal key at its own call, for the
+   *  reason `glanceStatRows` gives. */
+  function pairStatRows(stats: TowerStats): readonly StatPair[] {
+    const rows: StatPair[] = [{ label: t('panel.label.cost'), value: String(stats.cost) }];
+    if (stats.damage !== null) {
+      rows.push({
+        label: t('panel.label.damage'),
+        value: stats.buffed
+          ? t('panel.value.boosted', { value: String(stats.damage) })
+          : String(stats.damage),
+      });
+    }
+    if (stats.rangeTiles !== null) {
+      rows.push({
+        // A burst tower's range is the ring that SETS IT OFF, not one it fires within.
+        label:
+          stats.attackMode === 'burst' ? t('panel.label.triggerRange') : t('panel.label.range'),
+        value: t('panel.value.tiles', { tiles: stats.rangeTiles }),
+      });
+    }
+    if (stats.fireRate !== null) {
+      rows.push({
+        label: t('panel.label.fireRate'),
+        value: t('panel.value.rate', { rate: stats.fireRate }),
+      });
+    }
+    if (stats.supportPercent !== null) {
+      rows.push({
+        label: t('panel.label.support'),
+        value: t('panel.value.support', { percent: stats.supportPercent }),
+      });
+    }
+    if (stats.blastRadiusTiles !== null) {
+      rows.push({
+        label: t('panel.label.blastRadius'),
+        value: t('panel.value.tiles', { tiles: stats.blastRadiusTiles }),
+      });
+    }
+    if (stats.attackMode === 'burst') rows.push({ label: null, value: t('panel.singleUse') });
+    if (stats.dot !== null) {
+      const dot = t('panel.value.dot', {
+        damage: stats.dot.damage,
+        cadence: stats.dot.cadence,
+        duration: stats.dot.duration,
+      });
+      rows.push({
+        label: t('panel.label.poison'),
+        value: stats.dot.buffed ? t('panel.value.boosted', { value: dot }) : dot,
+      });
+    }
+    if (stats.stun !== null) {
+      rows.push({
+        label: t('panel.label.stun'),
+        value: t('panel.value.stun', { chance: stats.stun.chance, duration: stats.stun.duration }),
+      });
+    }
+    if (stats.slow !== null) {
+      rows.push({
+        label: t('panel.label.slow'),
+        value: t('panel.value.slow', {
+          percent: stats.slow.percent,
+          duration: stats.slow.duration,
+        }),
+      });
+    }
+    return rows;
+  }
+
   function appendRowsTo(block: HTMLElement, rows: readonly string[]): void {
     for (const text of rows) {
       const p = doc.createElement('p');
@@ -1367,10 +1553,29 @@ export function createOverlay(
     }
   }
 
-  /** Both forms, as SIBLING BLOCKS — `ui.css`'s container query decides which one is
-   *  visible, and the default outside it is the full form. The glance block carries
-   *  `aria-hidden` permanently, so the accessible text is the full sentence set at every
-   *  width and only the presentation forks (#130's shipped pattern). */
+  function appendPairsTo(block: HTMLElement, rows: readonly StatPair[]): void {
+    for (const { label, value } of rows) {
+      const p = doc.createElement('p');
+      p.className = label === null ? 'wy-stat wy-stat--note' : 'wy-stat';
+      if (label !== null) {
+        const l = doc.createElement('span');
+        l.className = 'wy-stat-label';
+        l.textContent = label;
+        p.append(l);
+      }
+      const v = doc.createElement('span');
+      v.className = 'wy-stat-value';
+      v.textContent = value;
+      p.append(v);
+      block.appendChild(p);
+    }
+  }
+
+  /** All three forms, as SIBLING BLOCKS. The full sentences are the Panel's accessible text
+   *  at every width, and since #181 (H3) they are visually hidden at every width too: what is
+   *  painted is the label-value rows on a wide Rail, or the condensed glance on a narrow one —
+   *  `ui.css`'s container query decides which. Both painted blocks carry `aria-hidden`
+   *  permanently, so only the presentation forks (#130's shipped pattern). */
   function appendStatRows(container: HTMLElement, stats: TowerStats): void {
     const full = doc.createElement('div');
     full.className = 'wy-stats-full';
@@ -1379,7 +1584,13 @@ export function createOverlay(
     glance.className = 'wy-stats-glance';
     glance.setAttribute('aria-hidden', 'true');
     appendRowsTo(glance, glanceStatRows(stats));
-    container.append(full, glance);
+    // The glance's first row is the cost (`glanceStatRows`), led by the HUD's gem.
+    glance.firstElementChild?.prepend(chipIcon(doc, 'bounty'));
+    const pairs = doc.createElement('div');
+    pairs.className = 'wy-stats-rows';
+    pairs.setAttribute('aria-hidden', 'true');
+    appendPairsTo(pairs, pairStatRows(stats));
+    container.append(full, glance, pairs);
   }
 
   function clearChildren(el: HTMLElement): void {
@@ -1437,20 +1648,49 @@ export function createOverlay(
    *  and the footer is never in the overflow to begin with.
    *
    *  Returned rather than closed over so the caller decides what else belongs inside — the
-   *  armed form has no action row. */
-  function appendScrollport(stats: TowerStats): { scroll: HTMLElement; statsEl: HTMLElement } {
+   *  armed form has no action row, and carries the build hint instead (`hint`). */
+  function appendScrollport(
+    stats: TowerStats,
+    hint: boolean,
+  ): { scroll: HTMLElement; statsEl: HTMLElement } {
     const scroll = doc.createElement('div');
     scroll.className = 'wy-panel-scroll';
+    // The head (#181 H3): the tower's art beside its name and role line, as the style frame
+    // draws the docked Panel. The art is the Shell's ONE Panel canvas, re-homed here on every
+    // rebuild and painted by `renderPanel` once the Panel is laid out.
+    const head = doc.createElement('div');
+    head.className = 'wy-panel-head';
+    const titles = doc.createElement('div');
+    titles.className = 'wy-panel-titles';
     const heading = doc.createElement('p');
     heading.className = 'wy-panel-name';
     heading.textContent = stats.name;
+    titles.append(heading);
+    if (stats.roleLine !== null) {
+      // Presentation, like the stat rows: the role and the targets are each one of the full
+      // sentences, which are what assistive tech reads.
+      const role = doc.createElement('p');
+      role.className = 'wy-panel-role';
+      role.setAttribute('aria-hidden', 'true');
+      role.textContent = stats.roleLine;
+      titles.append(role);
+    }
+    head.append(panel.art, titles);
     // The rows keep a container of their OWN inside the scrollport: the live aura patch
     // below clears it, and clearing the scrollport would take the heading and the buttons
     // (and any focus inside them) with it.
     const statsEl = doc.createElement('div');
     statsEl.className = 'wy-panel-stats';
     appendStatRows(statsEl, stats);
-    scroll.append(heading, statsEl);
+    scroll.append(head, statsEl);
+    if (hint) {
+      // What to do next, while armed — the frame's build hint. Real text, not decoration:
+      // it is the one place the Panel says how a build happens and how to back out.
+      const note = doc.createElement('p');
+      note.className = 'wy-panel-hint';
+      note.textContent = t('panel.hint.armed');
+      scroll.append(note);
+    }
     panel.root.appendChild(scroll);
     // BOTH handles returned, neither latched here. This used to assign `panelScrollEl` and
     // `panelStatsEl` as a side effect while also returning the node — three responsibilities,
@@ -1556,6 +1796,12 @@ export function createOverlay(
   /** The multiplier `panelStatsEl`'s rows were last rendered at, so the patch above is a
    *  no-op on the overwhelmingly common frame where the aura has not moved. */
   let panelStatsBuffMulFp = SUPPORT_MUL_IDENTITY;
+  /** The tower the Panel's art shows (#181 H3), `null` while the Panel is closed — what a
+   *  colour-mode change repaints the art as. */
+  let panelTowerId: string | null = null;
+  /** The colour-vision mode the Panel's art is painted in: the store's at boot, then each
+   *  mode `setColourMode` is handed (`main.ts` owns the settings subscription). */
+  let artMode: ColourMode = settings.get().colourMode;
   // The live region's last-announced outcome sequence (Fix A) — `null` so the very first
   // `update()` call always announces, even when the initial outcome is `null` (message '').
   let lastAnnouncedSeq: number | null = null;
@@ -1730,12 +1976,15 @@ export function createOverlay(
     panelStatsBuffMulFp = SUPPORT_MUL_IDENTITY;
     clearChildren(panel.root);
     if (ui.armed !== null) {
-      ({ scroll: panelScrollEl, statsEl: panelStatsEl } = appendScrollport(towerStats(ui.armed)));
+      ({ scroll: panelScrollEl, statsEl: panelStatsEl } = appendScrollport(
+        towerStats(ui.armed),
+        true,
+      ));
       appendCloseButton(panel.root);
       panel.root.hidden = false;
     } else if (ui.selection !== null) {
       const stats = towerStats(ui.selection.towerId, ui.selection.buffMulFp);
-      const built = appendScrollport(stats);
+      const built = appendScrollport(stats, false);
       panelScrollEl = built.scroll;
       panelStatsEl = built.statsEl;
       panelStatsBuffMulFp = ui.selection.buffMulFp;
@@ -1745,6 +1994,11 @@ export function createOverlay(
     } else {
       panel.root.hidden = true;
     }
+    // The head's art, painted now that the Panel is laid out, so its store is sized from the
+    // box it is drawn into on the first paint (`swatch.ts`). Rebuild path only — never per
+    // frame.
+    panelTowerId = ui.armed ?? ui.selection?.towerId ?? null;
+    if (panelTowerId !== null) paintSwatch(panel.art, panelTowerId, artMode);
     // The rebuild-path half of the auto-reveal — the WHY (and the acts that must never
     // scroll) is documented on `revealPanel` above.
     if (revealRequested) revealPanel();
@@ -2454,9 +2708,17 @@ export function createOverlay(
         announcedStarted = true;
         live.textContent = t('live.started');
       }
+      // Written only when it changes, like everything else this refresh writes to a Card
+      // (#98's rule): this runs ~20×/s through a wave, while the player is pressing Cards.
       for (const c of cards) {
-        c.root.setAttribute('aria-pressed', String(view.ui.armed === c.towerId));
+        const pressed = String(view.ui.armed === c.towerId);
+        if (c.root.getAttribute('aria-pressed') !== pressed) {
+          c.root.setAttribute('aria-pressed', pressed);
+        }
       }
+      // The bounty the HUD shows is the one placement checks — it already counts the builds
+      // still Pending — so a Card reads "need N" exactly when a build would be refused.
+      renderAffordability(hud.bounty);
       // Home link auto-hide. VISIBLE while the run is held pre-start, while paused, and once
       // it resolves; HIDDEN for any started-and-unpaused moment — including the started
       // wave-1 countdown, which is why this reads `ui.started` rather than the sim phase
@@ -2540,6 +2802,10 @@ export function createOverlay(
       for (const icon of previewEl.list.querySelectorAll<SVGSVGElement>('.wy-creep-icon')) {
         paintCreepIcon(icon, palette);
       }
+      // The open Panel's art follows the mode like the Card swatches (#181 H3); a closed one
+      // is painted in this mode when it next opens.
+      artMode = mode;
+      if (panelTowerId !== null) paintSwatch(panel.art, panelTowerId, mode);
     },
     destroy(): void {
       cancelCapture?.(); // drop any in-flight rebind listener so it can't outlive the UI
@@ -2553,6 +2819,11 @@ export function createOverlay(
       railAffordanceObserver = null;
       stripObserver?.disconnect();
       stripObserver = null;
+      // The Panel art's box observer (#181 H3, `swatch.ts`): this overlay paints that canvas,
+      // so it releases it, as `main.ts` releases the Cards' — before the Shell removes it.
+      // Here and only here: the one canvas lives through every Panel rebuild, and so does its
+      // one observer.
+      releaseSwatch(panel.art);
       resultsPanel.destroy();
       modal.destroy();
       results.remove();

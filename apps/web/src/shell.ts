@@ -15,9 +15,9 @@
 //   └── div.wy-main
 //       ├── div.wy-stage   (position: relative)
 //       │   └── div.wy-board  (canvas mounts here, as before)
-//       └── aside.wy-rail  (button.wy-card + div.wy-panel, PLAN.md P2 — the Panel opens
-//                            below the Card; the Card stays visible/clickable while it's
-//                            open)
+//       └── aside.wy-rail  (div.wy-cards holding every button.wy-card, then div.wy-panel —
+//                            PLAN.md P2: the Panel opens below the Cards; a Card stays
+//                            visible/clickable while it's open)
 //
 // **The Dock lives in `header.wy-status`, in BOTH layouts** (Story 11's two-layouts
 // contract §1 — the first of exactly two deliberate topology amendments). An ancestor grid
@@ -45,6 +45,9 @@
 import { t } from './i18n/t';
 import { REGION_ATTR } from './layout';
 import { chipIcon, countdownDial, type ChipIconKind, type CountdownDialParts } from './hud-icons';
+
+/** Counts the Shells built in this realm, so each one's Card description ids are its own. */
+let shellSerial = 0;
 
 /** One status readout in the Shell (contract §4 — dual-form chips, ADR 0004-safe).
  *
@@ -105,15 +108,39 @@ export interface ShellDock {
 
 /** One tower Card (PLAN.md P2, M2-S3: one per catalog tower) — a whole clickable/
  *  focusable button so its name/cost/hotkey children never need their own separate hit
- *  targets. */
+ *  targets.
+ *
+ *  DUAL-FORM since #181 (H3/L2), on the chips' contract: the Card's ACCESSIBLE NAME is
+ *  still exactly what it always was — the full name, the full cost message and the hotkey,
+ *  in that order ("Basic Tower Cost: 5 1") — carried by `name`, `cost` and `hotkey`; what is
+ *  PAINTED is the style frame's card: the tower art, the short `label`, the gem and the cost
+ *  number. The painted parts are `aria-hidden`, so assistive tech hears each fact once.
+ *  `ui.css` decides per layout which painted parts show (the icon form keeps the art and the
+ *  cost only). */
 export interface ShellCard {
   readonly root: HTMLButtonElement;
-  /** The footprint-glyph tile (playtest round) — painted by `swatch.ts` (initial +
-   *  colour-mode changes), `aria-hidden` (the Card's text is its accessible name). */
+  /** The tower art (#181: the board's own art, `swatch.ts`) — painted at boot and on
+   *  colour-mode changes, `aria-hidden` (the Card's text is its accessible name). */
   readonly swatch: HTMLCanvasElement;
+  /** The full localized name, visually hidden — the head of the accessible name. */
   readonly name: HTMLSpanElement;
+  /** The short name the Card paints (`aria-hidden`), so a long name never wraps to three
+   *  lines beside the art. */
+  readonly label: HTMLSpanElement;
+  /** The full cost message ("Cost: 5"), visually hidden — part of the accessible name. */
   readonly cost: HTMLSpanElement;
+  /** The painted cost number beside the gem (`aria-hidden`). */
+  readonly costValue: HTMLSpanElement;
+  /** The painted "need N" while the bounty is short of the cost (`aria-hidden`). Its text is
+   *  `needText`, one persistent node rewritten in place — never replaced (#98). */
+  readonly need: HTMLSpanElement;
+  readonly needText: Text;
   readonly hotkey: HTMLSpanElement;
+  /** The can't-afford sentence (`hidden`): the Card's `aria-describedby` target while the
+   *  bounty is short, so the shortfall is its accessible DESCRIPTION and its name never
+   *  changes. Its text is `descText`, persistent like `needText`. */
+  readonly desc: HTMLSpanElement;
+  readonly descText: Text;
   /** The catalog tower id this Card arms (M2-S3). */
   readonly towerId: string;
 }
@@ -122,6 +149,10 @@ export interface ShellCard {
  *  `overlay.ts` rebuilds its content on every armed/selection change. */
 export interface ShellPanel {
   readonly root: HTMLElement;
+  /** The Panel's tower art (#181 H3), `aria-hidden`. ONE canvas for the Panel's whole life,
+   *  re-homed into each rebuilt Panel and repainted for its tower, so a rebuild never leaves a
+   *  painted canvas (and the observer `swatch.ts` keeps on it) behind. */
+  readonly art: HTMLCanvasElement;
 }
 
 /** The install suggestion strip (Story 11 P3) — a reserved `.wy-shell` row, `hidden` unless
@@ -167,6 +198,8 @@ export interface ShellHandle {
   /** The Rail's Cards, one per catalog tower (M2-S3), in catalog order — widened from
    *  the M1-era single `card` (shell receives the card-descriptor list from `main.ts`). */
   readonly cards: readonly ShellCard[];
+  /** The box the Cards are laid out in (`div.wy-cards`, #181), the Rail's first child. */
+  readonly cardsBox: HTMLElement;
   readonly panel: ShellPanel;
   readonly banner: ShellBanner;
   /** The assistive `aria-live` announcer (PLAN.md P2) — armed/disarmed, placement
@@ -584,46 +617,93 @@ export function createShell(
   rail.className = 'wy-rail';
   rail.setAttribute(REGION_ATTR, 'rail');
 
-  // --- Cards: one per catalog tower (M2-S3, PLAN.md P2), catalog order. Name/cost/hotkey
-  // content and aria-pressed/aria-keyshortcuts are filled in by overlay.ts (dynamic: the
-  // hotkey badge is live, re-rendered after rebinding). DOM per card is unchanged from the
-  // M1 single-Card shape. ---
-  const cards: ShellCard[] = cardDescriptors.map(({ towerId }) => {
+  // --- Cards: one per catalog tower (M2-S3, PLAN.md P2), catalog order. Their text and
+  // aria-pressed/aria-keyshortcuts are filled in by overlay.ts (dynamic: the hotkey badge is
+  // live, re-rendered after rebinding; the can't-afford parts follow the bounty). ---
+  // Unique per Shell, so a second Shell in the same document (the unit suites build several)
+  // can never point a Card's description at another Shell's sentence.
+  const descIdBase = `wy-card-desc-${++shellSerial}`;
+  const cards: ShellCard[] = cardDescriptors.map(({ towerId }, index) => {
     const root = doc.createElement('button');
     root.type = 'button';
     root.className = 'wy-card';
     root.setAttribute('aria-pressed', 'false');
-    // The footprint-glyph swatch (playtest round): a mini board tile painted by
-    // `swatch.ts` with the tower's own `TowerFootprintMark` through the board's single
-    // mark dispatch (#89) — the Card teaches the exact shape the placed tower shows.
-    // Presentation only: the Card's accessible name is its text (the glyph is a redundant
-    // visual channel, never the sole one — ADR 0003), so AT skips the canvas entirely.
+    // The tower art (#181): the board's own vector art, painted by `swatch.ts` through the
+    // board's painter (#89) — the Card teaches the exact tower the board shows. Presentation
+    // only: the Card's accessible name is its text (the art is a redundant visual channel,
+    // never the sole one — ADR 0003), so AT skips the canvas entirely.
     const swatch = doc.createElement('canvas');
     swatch.className = 'wy-card-swatch';
     swatch.setAttribute('aria-hidden', 'true');
+    // Every part below is a flex item or out of flow, so each is its own block for the
+    // accessible-name computation: the name reads "Basic Tower Cost: 5 1", word for word as
+    // before #181, never run together.
     const name = doc.createElement('span');
     name.className = 'wy-card-name';
+    const label = doc.createElement('span');
+    label.className = 'wy-card-label';
+    label.setAttribute('aria-hidden', 'true');
     const cost = doc.createElement('span');
     cost.className = 'wy-card-cost';
-    // Name + cost wrapped so the Card can lay out as [swatch][text column][hotkey] — the
-    // wrapper adds no text of its own, so the button's accessible name (its subtree text)
-    // is unchanged.
+    // The painted cost: the HUD's own gem (`hud-icons.ts`, the bounty chip's icon) and the
+    // number, then "need N" while the bounty is short.
+    const costGlance = doc.createElement('span');
+    costGlance.className = 'wy-card-cost-glance';
+    costGlance.setAttribute('aria-hidden', 'true');
+    const costValue = doc.createElement('span');
+    costValue.className = 'wy-card-cost-value';
+    const need = doc.createElement('span');
+    need.className = 'wy-card-need';
+    const needText = doc.createTextNode('');
+    need.append(needText);
+    costGlance.append(chipIcon(doc, 'bounty'), costValue, need);
+    // Name + cost wrapped so the Card can lay out as [art][text column] — the wrapper adds no
+    // text of its own.
     const text = doc.createElement('span');
     text.className = 'wy-card-text';
-    text.append(name, cost);
+    text.append(name, label, cost, costGlance);
     const hotkey = doc.createElement('span');
     hotkey.className = 'wy-card-hotkey';
-    root.append(swatch, text, hotkey);
-    return { root, swatch, name, cost, hotkey, towerId };
+    const desc = doc.createElement('span');
+    desc.className = 'wy-card-desc';
+    desc.id = `${descIdBase}-${index}`;
+    desc.hidden = true;
+    const descText = doc.createTextNode('');
+    desc.append(descText);
+    root.append(swatch, text, hotkey, desc);
+    return {
+      root,
+      swatch,
+      name,
+      label,
+      cost,
+      costValue,
+      need,
+      needText,
+      hotkey,
+      desc,
+      descText,
+      towerId,
+    };
   });
+
+  // The Cards' own box (#181): the grid that lays them out — one column or two, full or
+  // icon-first, per layout (`ui.css`). Inside the Rail, so the Rail itself stays the flex
+  // column every Rail rule is written against (its scroll fade cancels its own extent there).
+  const cardsBox = doc.createElement('div');
+  cardsBox.className = 'wy-cards';
+  cardsBox.append(...cards.map((c) => c.root));
 
   // --- Panel: opens below the Cards, inside the Rail (PLAN.md P2). Empty scaffolding —
   // overlay.ts rebuilds its content per armed/selection change and toggles `hidden`. ---
   const panel = doc.createElement('div');
   panel.className = 'wy-panel';
   panel.hidden = true;
+  const panelArt = doc.createElement('canvas');
+  panelArt.className = 'wy-panel-art';
+  panelArt.setAttribute('aria-hidden', 'true');
 
-  rail.append(...cards.map((c) => c.root), panel);
+  rail.append(cardsBox, panel);
 
   // --- Assistive live region (PLAN.md P2): visually hidden, always present in the DOM so
   // a screen reader picks up the very first announcement (a region inserted only when
@@ -658,7 +738,8 @@ export function createShell(
       dial,
     },
     cards,
-    panel: { root: panel },
+    cardsBox,
+    panel: { root: panel, art: panelArt },
     banner: {
       root: banner,
       text: bannerText,
