@@ -74,8 +74,13 @@ export function artColour(token: ArtColour, pal: Palette, role: TowerRole): numb
       return ART_CRACK;
     case 'family':
     case 'airborne':
-      // A creep's colours (`creepArtColour`, `creep-art.ts`): no tower art asks for them, and
-      // art is code, so one that did is a bug to surface, not a colour to guess.
+    case 'core':
+    case 'flash':
+    case 'glyph':
+    case 'gem':
+      // A creep's colours (`creepArtColour`, `creep-art.ts`) and the effects' (`effectArtColour`,
+      // `effect-art.ts`): no tower art asks for them, and art is code, so one that did is a bug
+      // to surface, not a colour to guess.
       throw new Error(`tower art has no '${token}' colour`);
   }
 }

@@ -55,6 +55,8 @@ const frame = (): void => {
     colourMode: control.colourMode,
     reducedMotion: false,
     tracers: [],
+    kills: [],
+    leaks: 0,
   };
   handle.draw(prev, cur, 1, overlay);
   prev = cur;

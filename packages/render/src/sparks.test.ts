@@ -1,6 +1,6 @@
 // sparks.test.ts — impact-spark lifetimes: held before the game clock runs, stamped on intake,
 // faded and dropped by age (shorter under reduced motion), drawn newest first, and bounded
-// even when nothing draws them.
+// even when nothing draws them — and a flyer's spark keeping the look it struck (C2).
 
 import { describe, it, expect } from 'vitest';
 import { createSparkStore, sparkLifeMs, SPARK_MS } from './sparks';
@@ -70,5 +70,18 @@ describe('createSparkStore', () => {
     expect(s.size).toBe(0);
     s.intake([], 1, false);
     expect(s.live(1, false)).toEqual([]);
+  });
+
+  it('keeps the look of the flyer a spark struck, held or lit, so it is drawn on the flyer’s lifted body (C2)', () => {
+    const s = createSparkStore();
+    const flyer = { creepId: 'armored-flyer', boss: false };
+    s.hold([{ ...hit(1), flyer }]);
+    s.intake([{ ...hit(2), flyer: { creepId: 'flying', boss: true } }, hit(3)], 0, false);
+    const live = s.live(0, false);
+    expect(live.map((p) => [p.x, p.flyer])).toEqual([
+      [3, undefined],
+      [2, { creepId: 'flying', boss: true }],
+      [1, flyer],
+    ]);
   });
 });

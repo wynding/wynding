@@ -89,6 +89,11 @@ export interface Overlay {
    *  same hook `main.ts` repaints the Card swatches from. Repaints in place; never rebuilds
    *  the strip's rows. */
   setColourMode(mode: ColourMode): void;
+  /** Show or clear the lives chip's leak cue (#181 C1): `data-wy-leak` on the chip, which
+   *  `ui.css` draws as a shake, or a red tint under Reduce motion. PRESENTATION ONLY — when it
+   *  shows, and how often, is `main.ts`'s (`leak-cue.ts`). Decorative: the chip's full message
+   *  and its count stay the lives' accessible source. */
+  setLeakCue(on: boolean): void;
   /** Open the leave-this-run confirm dialog. PRESENTATION ONLY — the decision to open it
    *  (the modified-activation check and the live-run state read) is `main.ts`'s, which owns
    *  the guard; this just shows the dialog and calls `onConfirm` if the player commits. */
@@ -2540,6 +2545,9 @@ export function createOverlay(
       for (const icon of previewEl.list.querySelectorAll<SVGSVGElement>('.wy-creep-icon')) {
         paintCreepIcon(icon, palette);
       }
+    },
+    setLeakCue(on: boolean): void {
+      hudEls.lives.root.toggleAttribute('data-wy-leak', on);
     },
     destroy(): void {
       cancelCapture?.(); // drop any in-flight rebind listener so it can't outlive the UI

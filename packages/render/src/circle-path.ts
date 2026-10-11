@@ -16,9 +16,13 @@
 // the outer edge up to half the stroke's width deep, which 4x MSAA largely hides.
 // Phaser-free: `board-frame.ts`'s `createPolygonLiveLayers` hands each live layer's Graphics
 // to `polygonCircles`, and `scene.ts` calls that.
-// Its sibling `circle-polygon.ts` (T3) draws the shots' muzzle flashes and ring pulses through
-// `fillPoints`/`strokePoints`, which this leaves alone: this covers every live `strokeCircle`
-// and `fillCircle`, that only the circles drawn through its own helpers.
+//
+// ONE SIDE-COUNT RULE FOR THE BOARD (R5, #181): `circleSegments` is it. Its sibling
+// `circle-polygon.ts` (T3) draws the shots' muzzle flashes and ring pulses through
+// `fillPoints`/`strokePoints`, which this leaves alone — this covers every live `strokeCircle`
+// and `fillCircle`, that only the circles drawn through its own helpers — and takes its side
+// count from here too, so every circle the board draws live is within the same quarter of a
+// device pixel of its true circle.
 
 /** The most a polygon's edge may fall inside its circle, in device pixels — a quarter of
  *  one, which no anti-aliased fill or path can show. */

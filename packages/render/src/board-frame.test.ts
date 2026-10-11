@@ -1,12 +1,14 @@
-// board-frame.test.ts — one frame of the board, drawn into three recording layers and seven
+// board-frame.test.ts — one frame of the board, drawn into three recording layers and ten
 // recording sprite layers: what goes into WHICH live layer (the aura shells into `shells` and
 // nowhere else — M2-S8's guarantee that no shell stripes a tower body, now held by the layer
-// order — the selection and tracers into `effects`, every creep cue, the ghost and the sparks
-// into `cues`, in that order), what each sprite layer is shown — a spent mine's scorch on the
-// frame's own clock among them — where the board image sits, that a reset hides everything,
-// that an arrived tracer lands exactly on its creep, and how the heads aim and each shot shows
-// (T3): turned toward where the target is drawn, onto a shot's bearing the moment it is seen,
-// knocked back, flashed or pulsed, on render time, and still under Reduce motion.
+// order — the selection, the fire feedback and the shots' live parts into `effects`, every creep
+// cue, the ghost, the sparks and combat feedback into `cues`, in that order), what each sprite
+// layer is shown — a spent mine's scorch on the frame's own clock, each tower's own shot, a hit
+// creep's flash and a kill's bounty pop among them — where the board image sits, that a reset
+// hides everything, that an arrived shot lands exactly on the body it struck, a flyer's lifted
+// one included (C2), and how the heads aim and each shot shows (T3): turned toward where the
+// target is drawn, onto a shot's bearing the moment it is seen, knocked back, flashed or pulsed,
+// on render time, and still under Reduce motion.
 
 import { describe, it, expect } from 'vitest';
 import {
@@ -14,21 +16,27 @@ import {
   createPolygonLiveLayers,
   createSpriteLayers,
   drawBoardFrame,
+  drawFeedbackStrokes,
   drawFireFeedback,
+  drawShots,
   forEachLayerSprite,
   resetBoardFrame,
   type BoardFrameInput,
   type BoardTargets,
 } from './board-frame';
-import { circleSegments, type PathGraphics } from './circle-path';
+import { CIRCLE_MIN_SEGMENTS, circleSegments, type PathGraphics } from './circle-path';
 import { createSpritePool } from './sprite-pool';
 import {
   artUnit,
   atlasFrameSpecs,
+  creepFrameKeys,
+  GEM_FRAME_KEY,
+  glyphFrameKey,
   PAD_FRAME_KEY,
   PLATE_FRAME_KEY,
   RIM_RUNS_FRAME_KEY,
   SCORCH_FRAME_KEY,
+  shotFrameKeys,
   type FrameSpec,
 } from './art-frames';
 import { AURA_SHELL_ALPHA } from './board-draw';
@@ -36,7 +44,12 @@ import { snapToDevicePx } from './device-px';
 import { layerDepth } from './layers';
 import { resolvePalette } from './palette';
 import { createProjection, type Projection } from './projection';
-import { placeTowers, type CreepPlacement, type SpritePlacement } from './placement';
+import {
+  creepBodyCentre,
+  placeTowers,
+  type CreepPlacement,
+  type SpritePlacement,
+} from './placement';
 import { createScorchTracker } from './scorches';
 import { renderTimeOf } from './tracers';
 import type { LiveSpark } from './sparks';
@@ -44,8 +57,18 @@ import { ART_FLASH, ART_INK, FIRE_PULSE_RINGS, MUZZLE_FLASH, RECOIL_DEPTH } from
 import { circlePoints } from './circle-polygon';
 import { AIM_TURN_PER_TICK, aimAngle, createAimTracker } from './tower-aim';
 import { createFireTracker, flashAt } from './tower-fire';
+import {
+  BOUNTY_POP_MS,
+  createFeedbackTracker,
+  HIT_FLASH_ALPHA,
+  HIT_FLASH_MS,
+  KILL_BURST_MS,
+} from './combat-feedback';
+import { ART_HIT_FLASH, ART_LIVES } from './art-ink';
+import { fxUnit, KILL_BURST, LEAK_RINGS } from './effect-art';
+import { creepColour } from './palette';
 import { recordingLayer, type Call } from './test-support/recording-graphics';
-import type { CreepVM, RenderOverlay, RenderVM, TowerVM, TracerVM } from './types';
+import type { CreepVM, KillVM, RenderOverlay, RenderVM, TowerVM, TracerVM } from './types';
 
 /** Each drawing call of a layer as `method colour` — the fill or line colour in force. */
 function drawn(layer: { calls: Call[] }): string[] {
@@ -95,10 +118,16 @@ function targets() {
     rims: recordingSprites(),
     pending: recordingSprites(),
     creepShadows: recordingSprites(),
+    shots: recordingSprites(),
     creeps: recordingSprites(),
+    flashes: recordingSprites(),
+    pops: recordingSprites(),
   };
   return { t: t satisfies BoardTargets, board };
 }
+
+/** The board's exit cell in these frames: the east wall's opening. */
+const EXIT = { col: 27, row: 11 } as const;
 
 const PAL = resolvePalette('default');
 const hex = (n: number): string => n.toString(16);
@@ -143,6 +172,8 @@ const OVERLAY: RenderOverlay = {
   colourMode: 'default',
   reducedMotion: false,
   tracers: [],
+  kills: [],
+  leaks: 0,
 };
 
 const vm = (towers: readonly TowerVM[], creeps: readonly CreepVM[]): RenderVM => ({
@@ -181,10 +212,13 @@ function busyFrame(projection = PROJECTION): BoardFrameInput {
     },
     projection,
     frames: framesFor(projection),
+    exit: EXIT,
+    nowMs: 0,
     sparks,
     scorches: createScorchTracker(),
     aim: createAimTracker(),
     fire: createFireTracker(),
+    feedback: createFeedbackTracker(),
   };
 }
 
@@ -334,8 +368,9 @@ describe('drawBoardFrame — the sprite layers and the board image', () => {
       scorches: { reset: () => resets.push('scorches') },
       aim: { reset: () => resets.push('aim') },
       fire: { reset: () => resets.push('fire') },
+      feedback: { reset: () => resets.push('feedback') },
     });
-    expect(resets.sort()).toEqual(['aim', 'fire', 'scorches']); // each one, once
+    expect(resets.sort()).toEqual(['aim', 'feedback', 'fire', 'scorches']); // each one, once
     for (const layer of [t.layers.shells, t.layers.effects, t.layers.cues]) {
       expect(layer.calls[layer.calls.length - 1]!.method).toBe('clear');
     }
@@ -347,12 +382,16 @@ describe('drawBoardFrame — the sprite layers and the board image', () => {
       t.rims.hidden,
       t.pending.hidden,
       t.creepShadows.hidden,
+      t.shots.hidden,
       t.creeps.hidden,
-    ]).toEqual([1, 1, 1, 1, 1, 1, 1]);
+      t.flashes.hidden,
+      t.pops.hidden,
+    ]).toEqual([1, 1, 1, 1, 1, 1, 1, 1, 1, 1]);
     drawBoardFrame(t, busyFrame());
     expect(board.visible).toEqual([true, false, true]);
-    expect(t.creeps.syncs).toHaveLength(2);
-    expect(t.creepShadows.syncs).toHaveLength(2);
+    for (const layer of [t.creeps, t.creepShadows, t.shots, t.flashes, t.pops]) {
+      expect(layer.syncs).toHaveLength(2);
+    }
   });
 });
 
@@ -476,8 +515,204 @@ describe('drawBoardFrame — the ghost, the sparks and reduced motion (drawn in 
   });
 });
 
-describe('drawBoardFrame — a tracer converges on where its creep is DRAWN', () => {
-  it('an arrived tracer sits exactly on its target creep’s snapped centre at a fractional dpr', () => {
+describe('drawBoardFrame — combat feedback: a hit’s flash, a kill’s burst and pop, a leak’s pulse (C1)', () => {
+  /** Frames drawn on one set of trackers, as the scene draws them, each at a wall-clock time. */
+  function feed() {
+    const { t } = targets();
+    const trackers = {
+      scorches: createScorchTracker(),
+      aim: createAimTracker(),
+      fire: createFireTracker(),
+      feedback: createFeedbackTracker(),
+    };
+    const draw = (
+      nowMs: number,
+      renderTick: number,
+      creeps: readonly CreepVM[],
+      over: Partial<RenderOverlay> = {},
+      sparks: LiveSpark[] = [],
+    ): void =>
+      fedFrame(t, {
+        prevVm: { ...vm([], creeps), tick: Math.floor(renderTick) },
+        curVm: { ...vm([], creeps), tick: Math.floor(renderTick) + 1 },
+        alpha: renderTick - Math.floor(renderTick),
+        overlay: { ...OVERLAY, ...over },
+        projection: PROJECTION,
+        frames: framesFor(PROJECTION),
+        exit: EXIT,
+        nowMs,
+        sparks,
+        ...trackers,
+      });
+    return { t, draw };
+  }
+
+  const KILL: KillVM = {
+    id: 9,
+    x: 10 * 256,
+    y: 6 * 256,
+    creepId: 'fast',
+    domain: 'ground',
+    boss: false,
+    bounty: 4,
+  };
+
+  it('a shot reaching a creep still drawn flashes it: its look’s silhouette in the flashes layer, over its body, fading on the wall clock', () => {
+    const { t, draw } = feed();
+    const target = creep({ creepId: 'swarm' });
+    // From no tower: the shot's look does not matter here, only where and when it lands.
+    const arriving: TracerVM = {
+      kind: 'targeted',
+      originX: 2 * 256,
+      originY: 2 * 256,
+      targetId: 7,
+      launchTick: 10,
+      impactTick: 11,
+    };
+    draw(1000, 10.5, [target], { tracers: [arriving] });
+    expect(t.flashes.syncs.at(-1)).toEqual([]); // in flight
+    draw(1025, 11, [target], { tracers: [arriving] }); // lands
+    const [flash] = t.flashes.syncs.at(-1)!;
+    expect(flash!.frame).toBe(creepFrameKeys('swarm', false, false).flash);
+    expect(flash!.alpha).toBe(HIT_FLASH_ALPHA);
+    draw(1025 + HIT_FLASH_MS / 2, 11.5, [target]);
+    expect(t.flashes.syncs.at(-1)![0]!.alpha).toBeCloseTo(HIT_FLASH_ALPHA / 2, 12);
+    draw(1025 + HIT_FLASH_MS, 12, [target]);
+    expect(t.flashes.syncs.at(-1)).toEqual([]); // over
+  });
+
+  it('a kill bursts in the cues — after the sparks — about its body’s centre, and pops its bounty in the pops layer', () => {
+    const { t, draw } = feed();
+    draw(500, 10, [], { kills: [KILL] }, [{ x: 3 * 256, y: 3 * 256, radiusFp: 0, k: 1 }]);
+    const cues = t.layers.cues.calls.filter((c) => c.method !== 'clear');
+    const spark = cues.findIndex((c) => c.method === 'fillCircle');
+    const at = creepBodyCentre(KILL.x, KILL.y, KILL, PROJECTION, framesFor(PROJECTION));
+    const u = fxUnit(PROJECTION.cellPx) * 0.95; // the fast family's size step
+    // The ring, white, then the seven shards in the family's hue — all after the spark.
+    const ring = cues.findIndex((c) => c.method === 'strokeCircle');
+    expect(ring).toBeGreaterThan(spark);
+    expect(cues[ring - 1]).toEqual({
+      method: 'lineStyle',
+      args: [KILL_BURST.ring.width * u, ART_HIT_FLASH, KILL_BURST.ring.alpha],
+    });
+    expect(cues[ring]!.args).toEqual([at.x, at.y, KILL_BURST.ring.r * u]);
+    const shards = cues.filter((c) => c.method === 'lineBetween');
+    expect(shards).toHaveLength(KILL_BURST.shards.count);
+    expect(
+      cues.filter((c) => c.method === 'lineStyle' && c.args[1] === creepColour(PAL, 'fast')),
+    ).toHaveLength(KILL_BURST.shards.count);
+    // The pop: the gem, a plus and the bounty, over everything.
+    expect(t.pops.syncs.at(-1)!.map((p) => p.frame)).toEqual([
+      GEM_FRAME_KEY,
+      glyphFrameKey('+'),
+      glyphFrameKey('4'),
+    ]);
+  });
+
+  it('plays a kill out on the wall clock, whatever the frames after it carry: the burst first, then the pop', () => {
+    const { t, draw } = feed();
+    draw(500, 10, [], { kills: [KILL] });
+    draw(500 + KILL_BURST_MS, 10, []); // paused: render time holds, the clock does not
+    const cues = t.layers.cues.calls;
+    expect(cues.slice(cues.map((c) => c.method).lastIndexOf('clear') + 1)).toEqual([]);
+    expect(t.pops.syncs.at(-1)).toHaveLength(3);
+    draw(500 + BOUNTY_POP_MS, 10, []);
+    expect(t.pops.syncs.at(-1)).toEqual([]);
+  });
+
+  it('a leak pulses the exit: the frame’s two rings in the lives colour, about the exit cell’s centre', () => {
+    const { t, draw } = feed();
+    draw(0, 10, [], { leaks: 1 });
+    const exit = PROJECTION.cellToPixel(EXIT.col, EXIT.row);
+    const half = PROJECTION.cellPx / 2;
+    const u = fxUnit(PROJECTION.cellPx);
+    expect(t.layers.cues.calls.filter((c) => c.method !== 'clear')).toEqual(
+      LEAK_RINGS.flatMap((r) => [
+        { method: 'lineStyle', args: [r.width * u, ART_LIVES, r.alpha] },
+        { method: 'strokeCircle', args: [exit.x + half, exit.y + half, r.r * u] },
+      ]),
+    );
+  });
+
+  it('under Reduce motion a kill’s burst is its ring alone, and the exit’s pulse holds its rings’ size', () => {
+    const { t, draw } = feed();
+    draw(0, 10, [], { kills: [KILL], leaks: 1, reducedMotion: true });
+    draw(100, 10, [], { reducedMotion: true });
+    const cues = t.layers.cues.calls.slice(
+      t.layers.cues.calls.map((c) => c.method).lastIndexOf('clear'),
+    );
+    expect(cues.some((c) => c.method === 'lineBetween')).toBe(false); // no shard flies
+    const u = fxUnit(PROJECTION.cellPx);
+    expect(cues.filter((c) => c.method === 'strokeCircle').map((c) => c.args[2])).toEqual([
+      KILL_BURST.ring.r * (u * 0.95), // the ring, at its own size (the fast family's step)
+      ...LEAK_RINGS.map((r) => r.r * u), // the exit's rings, at theirs
+    ]);
+    expect(t.pops.syncs.at(-1)).toHaveLength(3); // the pop still shows, fading in place
+  });
+
+  it('draws a flyer’s spark on its lifted body — where a flyer at that point is drawn — and every other spark at its point', () => {
+    const { t, draw } = feed();
+    const flyer = creep({ id: 3, creepId: 'flying', domain: 'air' });
+    draw(0, 10, [flyer], {}, [
+      { x: flyer.x, y: flyer.y, radiusFp: 0, k: 1, flyer: { creepId: 'flying', boss: false } },
+      { x: flyer.x, y: flyer.y, radiusFp: 0, k: 1 },
+    ]);
+    const body = t.creeps.syncs.at(-1)![0] as CreepPlacement;
+    const dots = t.layers.cues.calls.filter((c) => c.method === 'fillCircle');
+    expect(dots.map((c) => c.args.slice(0, 2))).toEqual([
+      [body.cx, body.cy],
+      [PROJECTION.fpToPixel(flyer.x, flyer.y).x, PROJECTION.fpToPixel(flyer.x, flyer.y).y],
+    ]);
+  });
+});
+
+describe('drawShots / drawFeedbackStrokes — thin executors of their plans', () => {
+  it('drawShots strokes a solid line through its points, a dashed one as every other segment, then fills each dot', () => {
+    const g = recordingLayer();
+    const pts = [
+      { x: 0, y: 0 },
+      { x: 1, y: 1 },
+      { x: 2, y: 0 },
+      { x: 3, y: 1 },
+      { x: 4, y: 0 },
+    ];
+    drawShots(g, {
+      strokes: [
+        { points: pts, dashed: false, width: 2, colour: 0x123456, alpha: 0.5 },
+        { points: pts, dashed: true, width: 1, colour: 0x654321, alpha: 1 },
+      ],
+      dots: [{ x: 9, y: 8, r: 2, colour: 0xabcdef }],
+    });
+    expect(g.calls).toEqual([
+      { method: 'lineStyle', args: [2, 0x123456, 0.5] },
+      { method: 'strokePoints', args: [pts, false, false] },
+      { method: 'lineStyle', args: [1, 0x654321, 1] },
+      { method: 'lineBetween', args: [0, 0, 1, 1] },
+      { method: 'lineBetween', args: [2, 0, 3, 1] },
+      { method: 'fillStyle', args: [0xabcdef, 1] },
+      { method: 'fillCircle', args: [9, 8, 2] },
+    ]);
+  });
+
+  it('drawFeedbackStrokes strokes a ring as a circle and a shard as a line, each in its own style', () => {
+    const g = recordingLayer();
+    drawFeedbackStrokes(g, [
+      { kind: 'ring', x: 1, y: 2, r: 3, width: 1.5, colour: 0x111111, alpha: 0.6 },
+      { kind: 'shard', x1: 4, y1: 5, x2: 6, y2: 7, width: 2, colour: 0x222222, alpha: 1 },
+    ]);
+    expect(g.calls).toEqual([
+      { method: 'lineStyle', args: [1.5, 0x111111, 0.6] },
+      { method: 'strokeCircle', args: [1, 2, 3] },
+      { method: 'lineStyle', args: [2, 0x222222, 1] },
+      { method: 'lineBetween', args: [4, 5, 6, 7] },
+    ]);
+  });
+});
+
+describe('drawBoardFrame — a shot converges on where its creep is DRAWN', () => {
+  // The busy frame's shot leaves from a point no tower stands on, so it is drawn as the dot a
+  // shot of an unknown tower keeps (C2): a point to read the shot's position off.
+  it('an arrived shot sits on its target creep’s snapped centre at a fractional dpr', () => {
     for (const dpr of [1.25, 1.5]) {
       const projection = createProjection({
         cols: 28,
@@ -492,30 +727,30 @@ describe('drawBoardFrame — a tracer converges on where its creep is DRAWN', ()
       drawBoardFrame(t, { ...frame, curVm: vm([], [c]) });
       const placed = t.creeps.syncs[0]![0] as CreepPlacement;
       const dot = t.layers.effects.calls.find((call) => call.method === 'fillCircle')!;
-      expect(dot.args.slice(0, 2)).toEqual([placed.cx, placed.cy]);
+      // To float precision: the shot's point is where the body is drawn, taken through the
+      // projection and back (`creepAimPoints`).
+      expect(dot.args[0]).toBeCloseTo(placed.cx, 9);
+      expect(dot.args[1]).toBeCloseTo(placed.cy, 9);
       // The creep's true point is between device pixels here, so the snap is doing the work.
       const raw = projection.fpToPixel(c.x, c.y);
       expect([raw.x, raw.y]).not.toEqual([placed.cx, placed.cy]);
     }
   });
 
-  it('at a flyer, it arrives at the flyer’s TRUE position — where its shadow lies, below its lifted body', () => {
-    // Recorded as it is, not endorsed: tracers converge on the sim's point, and a flyer's body
-    // is drawn lifted above it since C4 (#181). Where a tracer should meet a flyer is for the
-    // visual pass's shots (C2) to decide; this pins today's answer so a change is a decision.
+  it('at a flyer, it arrives at the flyer’s DRAWN body — lifted above where its shadow lies (C2)', () => {
+    // Visual pass C2 (#181) decided what R4 left pinned as "recorded, not endorsed": a shot at a
+    // flyer meets the body the player sees, not the sim's point under it, where its shadow is.
     const frame = busyFrame();
     const c = creep({ domain: 'air' });
     const { t } = targets();
     drawBoardFrame(t, { ...frame, curVm: vm([], [c]) });
+    const body = t.creeps.syncs[0]![0] as CreepPlacement;
+    const dot = t.layers.effects.calls.find((call) => call.method === 'fillCircle')!;
+    expect(dot.args[0]).toBeCloseTo(body.cx, 9);
+    expect(dot.args[1]).toBeCloseTo(body.cy, 9);
     const [shadow] = t.creepShadows.syncs[0]!;
     const shadowAnchor = frame.frames.get(shadow!.frame)!;
-    const dot = t.layers.effects.calls.find((call) => call.method === 'fillCircle')!;
-    expect(dot.args.slice(0, 2)).toEqual([
-      shadow!.x + shadowAnchor.anchorX,
-      shadow!.y + shadowAnchor.anchorY,
-    ]);
-    const body = t.creeps.syncs[0]![0] as CreepPlacement;
-    expect(body.cy).toBeLessThan(dot.args[1] as number); // the body, and its cues, above it
+    expect(body.cy).toBeLessThan(shadow!.y + shadowAnchor.anchorY); // lifted: the shadow below
   });
 });
 
@@ -537,6 +772,7 @@ describe('drawBoardFrame — a spent mine’s scorch, in the scorches layer, on 
     const scorches = createScorchTracker();
     const aim = createAimTracker();
     const fire = createFireTracker();
+    const feedback = createFeedbackTracker();
     // A mine anchored at (6, 2): its footprint centre — where its blast is anchored — is the
     // corner of cells (7, 3).
     const mine = tower(3, 'mine', 6);
@@ -553,7 +789,10 @@ describe('drawBoardFrame — a spent mine’s scorch, in the scorches layer, on 
       overlay: { ...OVERLAY, tracers },
       projection: PROJECTION,
       frames: framesFor(PROJECTION),
+      exit: EXIT,
+      nowMs: 0,
       sparks: [],
+      feedback,
       scorches,
       aim,
       fire,
@@ -599,6 +838,7 @@ describe('drawBoardFrame — a spent mine’s scorch, in the scorches layer, on 
     const scorches = createScorchTracker();
     const aim = createAimTracker();
     const fire = createFireTracker();
+    const feedback = createFeedbackTracker();
     const mine = tower(3, 'mine', 6); // footprint centre: the corner of cells (7, 3)
     const frame = (tick: number, towers: readonly TowerVM[], overlay: RenderOverlay) =>
       ({
@@ -608,10 +848,13 @@ describe('drawBoardFrame — a spent mine’s scorch, in the scorches layer, on 
         overlay,
         projection: PROJECTION,
         frames: framesFor(PROJECTION),
+        exit: EXIT,
+        nowMs: 0,
         sparks: [],
         scorches,
         aim,
         fire,
+        feedback,
       }) satisfies BoardFrameInput;
     fedFrame(t, frame(20, [mine], OVERLAY)); // the mine stands
     // Gone, with no tracer: only the blast's impact, at its footprint centre.
@@ -630,6 +873,7 @@ describe('drawBoardFrame — a spent mine’s scorch, in the scorches layer, on 
     const scorches = createScorchTracker();
     const aim = createAimTracker();
     const fire = createFireTracker();
+    const feedback = createFeedbackTracker();
     const centre = 7 * 256;
     const blast = {
       kind: 'blast' as const,
@@ -648,14 +892,17 @@ describe('drawBoardFrame — a spent mine’s scorch, in the scorches layer, on 
         overlay: { ...OVERLAY, tracers },
         projection: PROJECTION,
         frames: framesFor(PROJECTION),
+        exit: EXIT,
+        nowMs: 0,
         sparks: [],
         scorches,
         aim,
         fire,
+        feedback,
       }) satisfies BoardFrameInput;
     fedFrame(t, frame(21, [blast]));
     expect(t.scorches.syncs[0]).toHaveLength(1); // held
-    resetBoardFrame(t, { scorches, aim, fire });
+    resetBoardFrame(t, { scorches, aim, fire, feedback });
     fedFrame(t, frame(22, []));
     expect(t.scorches.syncs[1]).toEqual([]);
     expect(scorches.live(22)).toEqual([]);
@@ -676,6 +923,7 @@ describe('drawBoardFrame — towers that aim and fire (visual pass T3)', () => {
       scorches: createScorchTracker(),
       aim: createAimTracker(),
       fire: createFireTracker(),
+      feedback: createFeedbackTracker(),
     };
     /** A frame drawn at render tick `prevTick + alpha`: each creep moves from `prev` to
      *  `cur`, and the overlay carries `over`. */
@@ -693,6 +941,8 @@ describe('drawBoardFrame — towers that aim and fire (visual pass T3)', () => {
         overlay: { ...OVERLAY, ...over },
         projection: PROJECTION,
         frames: framesFor(PROJECTION),
+        exit: EXIT,
+        nowMs: 0,
         sparks: [],
         ...trackers,
       });
@@ -752,58 +1002,71 @@ describe('drawBoardFrame — towers that aim and fire (visual pass T3)', () => {
     expect(t.plates.syncs.at(-1)).toEqual(t.plates.syncs[0]);
   });
 
-  it('at a flyer, turns toward its TRUE position — where its shadow lies, below its lifted body — as its tracers arrive there', () => {
-    // Recorded as it is, not endorsed: a head takes the sim's point, as the tracers do, and a
-    // flyer's body is drawn its lift above that point (C4). Whether either should meet the
-    // lifted body is a UAT call; this pins today's answer so a change is a decision.
+  it('at a flyer, turns toward its DRAWN body — lifted above where its shadow lies — as its shots land there (C2)', () => {
+    // Visual pass C2 (#181) decided what R4 left pinned as "recorded, not endorsed": a head
+    // faces the body the player sees, and its shots land on it, not on the sim's point under it.
     const { t, draw } = run();
     const antiair = tower(2, 'antiair', 4, { targetId: 7 });
-    // Two cells right of the footprint centre, level with it: a quarter turn.
+    // Two cells right of the footprint centre, level with it: just short of a quarter turn,
+    // since the body is drawn its lift above that point.
     const right = [creep({ creepId: 'flying', domain: 'air', x: CX + 512, y: CY })];
-    for (let tick = 10; tick <= 20; tick++) draw(tick, 0, [antiair], { prev: right, cur: right });
+    const arrived = { ...shotFrom(antiair, 0), impactTick: 4 };
+    for (let tick = 10; tick <= 20; tick++) {
+      draw(tick, 0, [antiair], { prev: right, cur: right }, { tracers: [arrived] });
+    }
     const head = t.heads.syncs.at(-1)![0]!;
-    expect(head.rotation).toBeCloseTo(aimAngle(CX, CY, CX + 512, CY)!, 9);
     const centre = { x: corner.x + PROJECTION.cellPx, y: corner.y + PROJECTION.cellPx };
+    const body = t.creeps.syncs.at(-1)![0] as CreepPlacement;
+    expect(head.rotation).toBeCloseTo(aimAngle(centre.x, centre.y, body.cx, body.cy)!, 9);
+    // The shot, Anti-air's streak, has arrived on the body's centre.
+    const [streak] = t.shots.syncs.at(-1)!;
+    expect(streak!.frame).toBe(shotFrameKeys('antiair').tracer);
+    expect(streak!.x).toBeCloseTo(body.cx, 9);
+    expect(streak!.y).toBeCloseTo(body.cy, 9);
+    // The sim's point, where the shadow lies, is its lift below: the head does not face it.
     const [shadow] = t.creepShadows.syncs.at(-1)!;
     const shadowAnchor = framesFor(PROJECTION).get(shadow!.frame)!;
-    expect(head.rotation).toBeCloseTo(
-      aimAngle(
-        centre.x,
-        centre.y,
-        shadow!.x + shadowAnchor.anchorX,
-        shadow!.y + shadowAnchor.anchorY,
-      )!,
-      9,
+    const truePoint = { x: shadow!.x + shadowAnchor.anchorX, y: shadow!.y + shadowAnchor.anchorY };
+    expect(body.cy).toBeLessThan(truePoint.y);
+    expect(head.rotation).not.toBeCloseTo(
+      aimAngle(centre.x, centre.y, truePoint.x, truePoint.y)!,
+      2,
     );
-    // The body, and its cues, are drawn its lift above that point, so the head does not face it.
-    const body = t.creeps.syncs.at(-1)![0] as CreepPlacement;
-    expect(body.cy).toBeLessThan(shadow!.y + shadowAnchor.anchorY);
-    expect(head.rotation).not.toBeCloseTo(aimAngle(centre.x, centre.y, body.cx, body.cy)!, 2);
   });
 
-  it('between ticks, a creep is PLACED where its head aims and its tracer lands — one interpolated point', () => {
-    const { t, draw } = run();
-    const basic = tower(2, 'basic', 4, { targetId: 7 });
-    const creeps = {
-      prev: [creep({ x: CX + 512, y: CY })],
-      cur: [creep({ x: CX + 512, y: CY + 512 })],
-    };
-    const arrived = { ...shotFrom(basic, 0), impactTick: 4 };
-    for (let tick = 10; tick <= 30; tick++)
-      draw(tick, 0.5, [basic], creeps, { tracers: [arrived] });
-    const mid = PROJECTION.fpToPixel(CX + 512, CY + 256);
-    const at = [snapToDevicePx(mid.x, PROJECTION.dpr), snapToDevicePx(mid.y, PROJECTION.dpr)];
-    const [shadow] = t.creepShadows.syncs.at(-1)!;
-    const sa = framesFor(PROJECTION).get(shadow!.frame)!;
-    expect([shadow!.x + sa.anchorX, shadow!.y + sa.anchorY]).toEqual(at);
-    const body = t.creeps.syncs.at(-1)![0] as CreepPlacement;
-    expect([body.cx, body.cy]).toEqual(at);
-    const dot = lastFrame(t.layers.effects).calls.find((c) => c.method === 'fillCircle')!;
-    expect(dot.args.slice(0, 2)).toEqual(at);
-    expect(t.heads.syncs.at(-1)![0]!.rotation).toBeCloseTo(
-      aimAngle(CX, CY, CX + 512, CY + 256)!,
-      9,
-    );
+  it('between ticks, a creep is PLACED where its head aims and its shot lands — one interpolated point, a flyer’s lifted', () => {
+    for (const domain of ['ground', 'air'] as const) {
+      const { t, draw } = run();
+      const basic = tower(2, domain === 'air' ? 'antiair' : 'basic', 4, { targetId: 7 });
+      const creepId = domain === 'air' ? 'flying' : 'normal';
+      const creeps = {
+        prev: [creep({ creepId, domain, x: CX + 512, y: CY })],
+        cur: [creep({ creepId, domain, x: CX + 512, y: CY + 512 })],
+      };
+      const arrived = { ...shotFrom(basic, 0), impactTick: 4 };
+      for (let tick = 10; tick <= 30; tick++)
+        draw(tick, 0.5, [basic], creeps, { tracers: [arrived] });
+      // The shadow lies on the interpolated point, snapped — neither end of the creep's step.
+      const mid = PROJECTION.fpToPixel(CX + 512, CY + 256);
+      const at = [snapToDevicePx(mid.x, PROJECTION.dpr), snapToDevicePx(mid.y, PROJECTION.dpr)];
+      const [shadow] = t.creepShadows.syncs.at(-1)!;
+      const sa = framesFor(PROJECTION).get(shadow!.frame)!;
+      expect([shadow!.x + sa.anchorX, shadow!.y + sa.anchorY]).toEqual(at);
+      // The body is centred there — a flyer's lifted straight up from it.
+      const body = t.creeps.syncs.at(-1)![0] as CreepPlacement;
+      expect(body.cx).toBe(at[0]);
+      if (domain === 'ground') expect(body.cy).toBe(at[1]);
+      else expect(body.cy).toBeLessThan(at[1]!);
+      // Its shot lands on the body's centre, and its head faces it.
+      const [shot] = t.shots.syncs.at(-1)!;
+      expect(shot!.x, domain).toBeCloseTo(body.cx, 9);
+      expect(shot!.y, domain).toBeCloseTo(body.cy, 9);
+      const centre = { x: corner.x + PROJECTION.cellPx, y: corner.y + PROJECTION.cellPx };
+      expect(t.heads.syncs.at(-1)![0]!.rotation, domain).toBeCloseTo(
+        aimAngle(centre.x, centre.y, body.cx, body.cy)!,
+        9,
+      );
+    }
   });
 
   it('sweeps rather than snaps: the first frames turn it a bounded step at a time', () => {
@@ -841,13 +1104,14 @@ describe('drawBoardFrame — towers that aim and fire (visual pass T3)', () => {
     expect(t.rims.syncs[2]).toEqual([]);
   });
 
-  it('a shot: the aiming head recoils and flashes at its muzzle — in effects after the selection, before the tracer', () => {
+  it('a shot: the aiming head recoils and flashes at its muzzle — in effects after the selection, under its bolt in the shots layer', () => {
     const { t, draw } = run();
     const basic = tower(2, 'basic', 4, { targetId: 7 });
     const above = [creep({ x: CX, y: CY - 600 })]; // straight up: the head stays unturned
     const selection = { col: 4, row: 2, rangeFp: 1024, blastRadiusFp: null, towerId: 'basic' };
     draw(10, 0, [basic], { prev: above, cur: above }, { selection });
     expect(drawn(lastFrame(t.layers.effects))).toEqual([`strokeCircle ${hex(PAL.range)}`]);
+    expect(t.shots.syncs.at(-1)).toEqual([]);
     draw(
       11,
       0,
@@ -858,8 +1122,14 @@ describe('drawBoardFrame — towers that aim and fire (visual pass T3)', () => {
     expect(drawn(lastFrame(t.layers.effects))).toEqual([
       `strokeCircle ${hex(PAL.range)}`, // the selection
       `fillPoints ${hex(ART_FLASH)}`, // the muzzle flash, a polygon
-      `fillCircle ${hex(PAL.tracer)}`, // the tracer
     ]);
+    // The shot itself is Basic's bolt (C2), a sprite in the shots layer — over the effects, so
+    // over the flash — leaving the footprint centre, headed straight up at its creep.
+    const [bolt] = t.shots.syncs.at(-1)!;
+    expect(bolt!.frame).toBe(shotFrameKeys('basic').tracer);
+    expect(bolt!.x).toBeCloseTo(corner.x + PROJECTION.cellPx, 9);
+    expect(bolt!.y).toBeCloseTo(corner.y + PROJECTION.cellPx, 9);
+    expect(bolt!.rotation).toBeCloseTo(-Math.PI / 2, 12);
     const flash = circleOf(
       lastFrame(t.layers.effects).calls.find((c) => c.method === 'fillPoints')!,
     );
@@ -876,13 +1146,15 @@ describe('drawBoardFrame — towers that aim and fire (visual pass T3)', () => {
     expect(head.x).toBe(rest.x);
     expect(head.y).toBeCloseTo(rest.y + snapToDevicePx(RECOIL_DEPTH * unit, 1), 9);
     expect(head.rotation).toBeUndefined();
-    // It settles: once the recoil is over, the head is back where it was.
+    // It settles: once the recoil is over, the head is back where it was, the flash is gone, and
+    // the bolt flies on.
     draw(15, 0, [basic], { prev: above, cur: above }, { tracers: [shotFrom(basic, 11)] });
     expect(t.heads.syncs[2]![0]).toEqual(rest);
-    expect(drawn(lastFrame(t.layers.effects))).toEqual([`fillCircle ${hex(PAL.tracer)}`]);
+    expect(drawn(lastFrame(t.layers.effects))).toEqual([]);
+    expect(t.shots.syncs.at(-1)!.map((s) => s.frame)).toEqual([shotFrameKeys('basic').tracer]);
   });
 
-  it('a tower that does not aim pulses two rings in its role colour, before the tracer — and its head never moves', () => {
+  it('a tower that does not aim pulses two rings in its role colour, under its shot — and its head never moves', () => {
     const { t, draw } = run();
     const slow = tower(2, 'slow', 4, { targetId: 7 });
     const right = [creep({ x: CX + 600, y: CY })];
@@ -891,8 +1163,11 @@ describe('drawBoardFrame — towers that aim and fire (visual pass T3)', () => {
     expect(drawn(lastFrame(t.layers.effects))).toEqual([
       `strokePoints ${hex(PAL.roleControl)}`, // the two rings, polygons
       `strokePoints ${hex(PAL.roleControl)}`,
-      `fillCircle ${hex(PAL.tracer)}`,
     ]);
+    // The shot is Slow's ice shard (C2), in the shots layer over the rings, headed right.
+    const [shard] = t.shots.syncs.at(-1)!;
+    expect(shard!.frame).toBe(shotFrameKeys('slow').tracer);
+    expect(shard!.rotation).toBeCloseTo(0, 12);
     // Both about the footprint centre — the snapped corner plus a cell — at their radii.
     const rings = lastFrame(t.layers.effects)
       .calls.filter((c) => c.method === 'strokePoints')
@@ -934,6 +1209,7 @@ describe('drawBoardFrame — towers that aim and fire (visual pass T3)', () => {
     }
     for (const heads of t.heads.syncs) expect(heads).toEqual([atRest(basic), atRest(slow)]);
     expect(t.layers.effects.calls.filter((c) => c.method !== 'clear')).toEqual([]);
+    for (const shots of t.shots.syncs) expect(shots).toEqual([]); // nor any shot (C2)
   });
 
   it('shows no shot for a tower whose sell is pending — it is drawn as already gone', () => {
@@ -951,7 +1227,10 @@ describe('drawBoardFrame — towers that aim and fire (visual pass T3)', () => {
       },
     );
     expect(t.heads.syncs[0]).toEqual([]);
-    expect(drawn(lastFrame(t.layers.effects))).toEqual([`fillCircle ${hex(PAL.tracer)}`]); // its tracer only
+    // No flash — its shot only, still in its tower's style: the tower stands until its sell
+    // commits.
+    expect(drawn(lastFrame(t.layers.effects))).toEqual([]);
+    expect(t.shots.syncs[0]!.map((s) => s.frame)).toEqual([shotFrameKeys('basic').tracer]);
   });
 
   it('holds still while render time does: a paused frame draws the same head and the same flash', () => {
@@ -992,7 +1271,9 @@ describe('drawBoardFrame — towers that aim and fire (visual pass T3)', () => {
     draw(10, 0, [basic], { prev: right, cur: right });
     draw(11, 0, [basic], { prev: right, cur: right }, { ...shot, reducedMotion: true });
     draw(11, 0.5, [basic], { prev: right, cur: right }, shot); // released inside the feedback
-    expect(drawn(lastFrame(t.layers.effects))).toEqual([`fillCircle ${hex(PAL.tracer)}`]);
+    expect(drawn(lastFrame(t.layers.effects))).toEqual([]); // no flash...
+    // ... and its shot, taken in under Reduce motion, is drawn as its tower's once released.
+    expect(t.shots.syncs.at(-1)!.map((s) => s.frame)).toEqual([shotFrameKeys('basic').tracer]);
     // The head sweeps from facing up, half a tick's turn, with no knock-back.
     const head = t.heads.syncs.at(-1)![0]!;
     expect(head.rotation).toBeCloseTo(AIM_TURN_PER_TICK / 2, 12);
@@ -1049,23 +1330,32 @@ describe('drawBoardFrame — towers that aim and fire (visual pass T3)', () => {
     expect(t.heads.syncs[2]![0]!.rotation).toBeCloseTo(bearing - AIM_TURN_PER_TICK, 12);
   });
 
-  it('draws each planned op as planned: a flash at its alpha and radius, a ring at its width, alpha and radius — each a polygon', () => {
-    const g = recordingLayer();
-    drawFireFeedback(g, [
-      { kind: 'flash', x: 10, y: 20, r: 4.5, colour: ART_FLASH, alpha: 0.5 },
-      { kind: 'ring', x: 30, y: 40, r: 24, width: 2.6, colour: PAL.roleControl, alpha: 0.25 },
-    ]);
-    expect(g.calls).toEqual([
-      { method: 'fillStyle', args: [ART_FLASH, 0.5] },
-      { method: 'fillPoints', args: [circlePoints(10, 20, 4.5), true] },
-      { method: 'lineStyle', args: [2.6, PAL.roleControl, 0.25] },
-      { method: 'strokePoints', args: [circlePoints(30, 40, 24), false, true] },
-    ]);
-    // The polygons are the ops' circles: centred where planned, at the radius planned.
-    const flash = circleOf(g.calls[1]!);
-    const ring = circleOf(g.calls[3]!);
-    expect([flash.x, flash.y, flash.r].map((v) => +v.toFixed(9))).toEqual([10, 20, 4.5]);
-    expect([ring.x, ring.y, ring.r].map((v) => +v.toFixed(9))).toEqual([30, 40, 24]);
+  it('draws each planned op as planned: a flash at its alpha and radius, a ring at its width, alpha and radius — each a polygon with the sides the board’s one rule gives it at the dpr', () => {
+    for (const dpr of [1, 2]) {
+      const g = recordingLayer();
+      drawFireFeedback(
+        g,
+        [
+          { kind: 'flash', x: 10, y: 20, r: 4.5, colour: ART_FLASH, alpha: 0.5 },
+          { kind: 'ring', x: 30, y: 40, r: 24, width: 2.6, colour: PAL.roleControl, alpha: 0.25 },
+        ],
+        dpr,
+      );
+      expect(g.calls).toEqual([
+        { method: 'fillStyle', args: [ART_FLASH, 0.5] },
+        { method: 'fillPoints', args: [circlePoints(10, 20, 4.5, dpr), true] },
+        { method: 'lineStyle', args: [2.6, PAL.roleControl, 0.25] },
+        { method: 'strokePoints', args: [circlePoints(30, 40, 24, dpr), false, true] },
+      ]);
+      // The polygons are the ops' circles: centred where planned, at the radius planned, with
+      // as many sides as every other live circle of their size gets at that dpr.
+      const flash = circleOf(g.calls[1]!);
+      const ring = circleOf(g.calls[3]!);
+      expect([flash.x, flash.y, flash.r].map((v) => +v.toFixed(9))).toEqual([10, 20, 4.5]);
+      expect([ring.x, ring.y, ring.r].map((v) => +v.toFixed(9))).toEqual([30, 40, 24]);
+      expect((g.calls[1]!.args[0] as unknown[]).length).toBe(circleSegments(4.5, dpr));
+      expect((g.calls[3]!.args[0] as unknown[]).length).toBe(circleSegments(24, dpr));
+    }
   });
 
   it('draws a flash or a ring whose radius is not a number without throwing — never an empty polygon, which Phaser cannot draw', () => {
@@ -1079,12 +1369,17 @@ describe('drawBoardFrame — towers that aim and fire (visual pass T3)', () => {
       strokePoints: (pts: readonly { x: number; y: number }[]) => sides.push(pts.length, pts[0]!.x),
     };
     expect(() =>
-      drawFireFeedback(phaserLike, [
-        { kind: 'flash', x: 10, y: 20, r: NaN, colour: ART_FLASH, alpha: 0.5 },
-        { kind: 'ring', x: 30, y: 40, r: NaN, width: 2.6, colour: PAL.roleControl, alpha: 0.25 },
-      ]),
+      drawFireFeedback(
+        phaserLike,
+        [
+          { kind: 'flash', x: 10, y: 20, r: NaN, colour: ART_FLASH, alpha: 0.5 },
+          { kind: 'ring', x: 30, y: 40, r: NaN, width: 2.6, colour: PAL.roleControl, alpha: 0.25 },
+        ],
+        1,
+      ),
     ).not.toThrow();
-    expect(sides).toEqual([12, NaN, 12, NaN]); // the smallest polygon, each, though placed nowhere
+    // The smallest polygon, each, though placed nowhere.
+    expect(sides).toEqual([CIRCLE_MIN_SEGMENTS, NaN, CIRCLE_MIN_SEGMENTS, NaN]);
   });
 
   it('a head released from Reduce motion sweeps from facing up — the frame hands the aim tracker Reduce motion', () => {
@@ -1138,7 +1433,7 @@ describe('createLiveLayers / createSpriteLayers — each layer made under its ow
     ]);
   });
 
-  it('forEachLayerSprite visits every sprite of all seven sprite layers — what a rebake repoints at its new atlas', () => {
+  it('forEachLayerSprite visits every sprite of all ten sprite layers — what a rebake repoints at its new atlas', () => {
     // As `scene.ts` makes them: a pool per layer, each sprite knowing which layer made it.
     const layers = createSpriteLayers((layer) =>
       createSpritePool((p) => ({
@@ -1163,7 +1458,10 @@ describe('createLiveLayers / createSpriteLayers — each layer made under its ow
       'rims',
       'pending',
       'creepShadows',
+      'shots',
       'creeps',
+      'flashes',
+      'pops',
     ] as const;
     for (const name of names) {
       layers[name].sync([0, 1].map((i) => ({ frame: `${name}:${i}`, x: 0, y: 0 })));
@@ -1183,11 +1481,25 @@ describe('createLiveLayers / createSpriteLayers — each layer made under its ow
       layers.rims.name,
       layers.pending.name,
       layers.creepShadows.name,
+      layers.shots.name,
       layers.creeps.name,
-    ]).toEqual(['scorches', 'plates', 'heads', 'rims', 'pending', 'creepShadows', 'creeps']);
+      layers.flashes.name,
+      layers.pops.name,
+    ]).toEqual([
+      'scorches',
+      'plates',
+      'heads',
+      'rims',
+      'pending',
+      'creepShadows',
+      'shots',
+      'creeps',
+      'flashes',
+      'pops',
+    ]);
   });
 
-  it('so depths read from those names keep every shell under every plate and head (M2-S8), every scorch under every shell, every creep shadow under every creep, and the rest in order', () => {
+  it('so depths read from those names keep every shell under every plate and head (M2-S8), every scorch under every shell, every creep shadow under every creep, every shot under every creep and every flash over one, and the rest in order', () => {
     // How `scene.ts` makes them: each object's depth is `layerDepth` of the name it was made under.
     const live = createLiveLayers((name) =>
       Object.assign(recordingLayer(), { depth: layerDepth(name) }),
@@ -1203,9 +1515,12 @@ describe('createLiveLayers / createSpriteLayers — each layer made under its ow
       sprites.pending,
       sprites.creepShadows,
       live.effects.depth,
+      sprites.shots,
       sprites.creeps,
+      sprites.flashes,
       live.cues.depth,
-    ]).toEqual([0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10]);
+      sprites.pops,
+    ]).toEqual([0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13]);
   });
 });
 

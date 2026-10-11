@@ -1336,6 +1336,10 @@ cost; untraced runs are what size it.
   ring, that 1% is under a quarter of a pixel at the cell size a 1440×900 window plays at,
   thirty-three pixels, and at any smaller cell; at larger cells it grows with the ring, to just
   under half a pixel at sixty-pixel cells. A flash at thirty-three-pixel cells has thirteen sides.
+  _Updated by R5:_ the flash and the rings now take their side count from `circle-path.ts`'s
+  `circleSegments`, the rule R4 gave every other live circle, so the board has one rule: within a
+  quarter of a device pixel of the circle at the dpr. The counts above are R3's own rule's, not
+  the code's any more; `circle-polygon.test.ts` pins the current ones.
 
 **After (QC round 2, the code of `3d83684`).** Four runs of the record-only suite, gated, one
 worker, on AC power with the gate's fast policy throughout, alternating the head and T3 off

@@ -117,6 +117,9 @@
      as the surface its number is read on (text ≥ 4.5:1). */
   --wy-lives: #ff6b81;
   --wy-lives-pill: #3a1520;
+  /* The lives chip turning red as a creep gets through, under Reduce motion (#181 C1): the
+     pill's fill while the leak cue shows, gated as a surface its number is read on too. */
+  --wy-lives-leak: #8a1f33;
   --wy-bounty: #7fd3ff;
   --wy-stars: #ffd166;
   /* The gem's and star's outline and the gem's facets — ink ON the icon, gated against the
@@ -458,6 +461,48 @@ a.wy-home:focus-visible {
 .wy-chip-label,
 .wy-chip-suffix {
   color: var(--wy-fg-dim);
+}
+
+/* A LEAK ON THE LIVES CHIP (#181 C1). `main.ts` sets `data-wy-leak` on the lives chip for a
+   moment as a creep gets through, and `leak-cue.ts` keeps that to once a second at most (ADR
+   0003: no more than three flashes a second). The chip turns red and shakes side to side — or,
+   under Reduce motion in either branch (the setting below, the OS query at the end of this
+   file), turns red and holds still. Decorative: the count beside the heart is the lives'
+   value, and the chip's full message its accessible one. The selector outranks Standard's pill
+   fill, set inside its layout query below; the ring of the same red past the box makes a
+   padded pill in Compact, where the chip has none, without moving anything around it. */
+.wy-shell .wy-chip[data-wy-chip='lives'][data-wy-leak] .wy-chip-glance {
+  border-radius: 999px;
+  background: var(--wy-lives-leak);
+  box-shadow: 0 0 0 0.2em var(--wy-lives-leak);
+  animation: wy-lives-shake 360ms ease-in-out;
+}
+
+.wy-shell[data-wy-reduced-motion] .wy-chip[data-wy-chip='lives'][data-wy-leak] .wy-chip-glance {
+  animation: none;
+}
+
+@keyframes wy-lives-shake {
+  0%,
+  100% {
+    transform: translateX(0);
+  }
+
+  20% {
+    transform: translateX(-3px);
+  }
+
+  40% {
+    transform: translateX(3px);
+  }
+
+  60% {
+    transform: translateX(-2px);
+  }
+
+  80% {
+    transform: translateX(2px);
+  }
 }
 
 /* The chip icons (`hud-icons.ts`): the style frame's shapes, inked here so every colour is a

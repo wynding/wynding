@@ -271,6 +271,22 @@ describe('overlay — HUD readout', () => {
     expect(dockButtonParts(settingsBtn).icon.textContent).toBe('⚙');
     expect(dockButtonParts(settingsBtn).text.textContent).toBe('Settings');
   });
+
+  it('shows and clears the lives chip’s leak cue — an attribute on that chip alone, which ui.css draws (#181 C1)', () => {
+    const { overlay, shell } = setup();
+    overlay.update({ hud: hud(), paused: false, speed: 1, ui: uiState(), refund: 0 });
+    const lives = shell.hud.lives.root;
+    expect(lives.dataset.wyChip).toBe('lives');
+    const message = lives.textContent;
+    expect(lives.hasAttribute('data-wy-leak')).toBe(false);
+    overlay.setLeakCue(true);
+    expect(lives.hasAttribute('data-wy-leak')).toBe(true);
+    // Decoration: the chip's message — its accessible one — is what it was.
+    expect(lives.textContent).toBe(message);
+    expect(shell.hudBox.querySelectorAll('[data-wy-leak]')).toHaveLength(1);
+    overlay.setLeakCue(false);
+    expect(lives.hasAttribute('data-wy-leak')).toBe(false);
+  });
 });
 
 describe('overlay — the wave preview surface (M2-S2, PLAN.md P3 steps 16-17/19)', () => {

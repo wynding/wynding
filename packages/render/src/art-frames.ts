@@ -42,6 +42,25 @@ import {
 import { artBounds } from './art-geometry';
 import type { ArtColourResolver, ArtGraphics } from './art-paint';
 import {
+  effectArtColour,
+  fxUnit,
+  GEM_ART,
+  GEM_SCALE,
+  GLYPH_BOX,
+  GLYPH_CHARS,
+  glyphArt,
+  glyphUnit,
+  hitFlashArt,
+  LANDING_ART,
+  LOB_SHADOW_ART,
+  SHOT_ART,
+  SHOT_LOOKS_BAKED,
+  shotLookFor,
+  type GlyphChar,
+  type ShotLook,
+  type ShotStyle,
+} from './effect-art';
+import {
   alignArtToTexels,
   rectRadius,
   strokeWidthAt,
@@ -194,12 +213,17 @@ function creepShadowKey(family: CreepFamily, airborne: boolean): string {
   return `creep:shadow:${family}:${airborne ? 'air' : 'ground'}`;
 }
 
-/** A creep's frames for one id, role and domain: its look, the body frame it shows and the
- *  shadow frame under it. */
+function creepFlashKey(look: CreepLook): string {
+  return `creep:flash:${creepLookKey(look)}`;
+}
+
+/** A creep's frames for one id, role and domain: its look, the body frame it shows, the
+ *  shadow frame under it and the white silhouette its hit flash shows over it (C1). */
 export interface CreepFrameKeys {
   readonly look: CreepLook;
   readonly body: string;
   readonly shadow: string;
+  readonly flash: string;
 }
 
 /** A value per creep look, kept by creep id in four slots — [ground, air] × [not boss, boss] —
@@ -243,6 +267,7 @@ export function creepFrameKeys(creepId: string, boss: boolean, airborne: boolean
     look,
     body: creepBodyKey(look),
     shadow: creepShadowKey(look.family, airborne),
+    flash: creepFlashKey(look),
   });
 }
 
@@ -616,11 +641,171 @@ export function creepFrameSpecs(cellPx: number, scale: number): FrameSpec[] {
   return specs;
 }
 
-/** The whole atlas's frames: towers, the scorch, then creeps. */
+// ---- Shots and combat feedback (visual pass C1/C2) ----
+
+/** A shot's frames, by the id of the tower that fired it: the frame its tracer shows — none
+ *  for a tracer drawn live, the stun arc and an unknown id's dot — and, for a lob, the ring
+ *  marking where it lands. */
+export interface ShotFrameKeys {
+  readonly look: ShotLook;
+  readonly tracer: string | null;
+  readonly landing: string | null;
+}
+
+/** The frame a lob's shadow shows: one for every lob. */
+export const LOB_SHADOW_FRAME_KEY = 'fx:lob-shadow';
+
+/** The frame the bounty pop's gem shows. */
+export const GEM_FRAME_KEY = 'fx:gem';
+
+function tracerKey(look: ShotLook): string {
+  return `fx:shot:${look.style}:${look.role}`;
+}
+
+function landingKey(role: TowerRole): string {
+  return `fx:landing:${role}`;
+}
+
+/** Whether a shot of `style` has a baked tracer — every style but the two drawn live. */
+function bakesTracer(style: ShotStyle): style is keyof typeof SHOT_ART {
+  return style !== 'arc' && style !== 'dot';
+}
+
+const KEYS_BY_SHOT = new Map<string, ShotFrameKeys>();
+
+/** The frames a shot of a tower of `towerId` shows (undefined: a shot whose tower is not
+ *  known), built once per id. */
+export function shotFrameKeys(towerId: string | undefined): ShotFrameKeys {
+  const id = towerId ?? '';
+  let keys = KEYS_BY_SHOT.get(id);
+  if (keys === undefined) {
+    const look = shotLookFor(towerId);
+    keys = {
+      look,
+      tracer: bakesTracer(look.style) ? tracerKey(look) : null,
+      landing: look.style === 'lob' ? landingKey(look.role) : null,
+    };
+    KEYS_BY_SHOT.set(id, keys);
+  }
+  return keys;
+}
+
+const GLYPH_KEYS = new Map<GlyphChar, string>(GLYPH_CHARS.map((c) => [c, `fx:glyph:${c}`]));
+
+/** The frame the bounty pop shows for character `c`. */
+export function glyphFrameKey(c: GlyphChar): string {
+  return GLYPH_KEYS.get(c) as string;
+}
+
+/** The colour resolver for effect art of a tower of `role` in `pal`. */
+function effectColours(pal: Palette, role: TowerRole): ArtColourResolver {
+  return (token) => effectArtColour(token, pal, role);
+}
+
+/** Every effect frame at `cellPx` and `scale` texels per CSS px: each baked tracer,
+ *  pointing along +x and pivoting on its head, where the shot is; each lob's landing ring and
+ *  the one lob shadow, centred; each creep look's hit flash, anchored as its body is, at the
+ *  creep's true position (a flyer's `CREEP_LIFT` below it), so the flash lands on the body to
+ *  the texel; and the bounty pop's numerals and gem, centred. */
+export function effectFrameSpecs(cellPx: number, scale: number): FrameSpec[] {
+  const specs: FrameSpec[] = [];
+  const unit = fxUnit(cellPx);
+  const centre = [0, 0] as const;
+  for (const look of SHOT_LOOKS_BAKED) {
+    if (!bakesTracer(look.style)) continue;
+    const shapes = SHOT_ART[look.style];
+    specs.push(
+      artFrame(
+        tracerKey(look),
+        shapes,
+        cellPx,
+        scale,
+        centre,
+        (draw, _g, pal) => draw(shapes, effectColours(pal, look.role)),
+        unit,
+        centre,
+      ),
+    );
+    if (look.style === 'lob') {
+      specs.push(
+        artFrame(
+          landingKey(look.role),
+          LANDING_ART,
+          cellPx,
+          scale,
+          centre,
+          (draw, _g, pal) => draw(LANDING_ART, effectColours(pal, look.role)),
+          unit,
+          centre,
+        ),
+      );
+    }
+  }
+  specs.push(
+    artFrame(
+      LOB_SHADOW_FRAME_KEY,
+      LOB_SHADOW_ART,
+      cellPx,
+      scale,
+      centre,
+      (draw, _g, pal) => draw(LOB_SHADOW_ART, effectColours(pal, 'damage')),
+      unit,
+      centre,
+    ),
+  );
+  for (const look of CREEP_LOOKS) {
+    const shapes = hitFlashArt(look.shape);
+    specs.push(
+      artFrame(
+        creepFlashKey(look),
+        shapes,
+        cellPx,
+        scale,
+        [0, look.airborne ? CREEP_LIFT : 0],
+        (draw, _g, pal) => draw(shapes, effectColours(pal, 'damage')),
+        creepRadius(cellPx, look.family) / CREEP_ART_R,
+        CREEP_ART_CENTRE,
+      ),
+    );
+  }
+  const gu = glyphUnit(cellPx);
+  const box = [GLYPH_BOX.w / 2, GLYPH_BOX.h / 2] as const;
+  for (const c of GLYPH_CHARS) {
+    const shapes = glyphArt(c);
+    specs.push(
+      artFrame(
+        glyphFrameKey(c),
+        shapes,
+        cellPx,
+        scale,
+        box,
+        (draw, _g, pal) => draw(shapes, effectColours(pal, 'damage')),
+        gu,
+        box,
+      ),
+    );
+  }
+  specs.push(
+    artFrame(
+      GEM_FRAME_KEY,
+      GEM_ART,
+      cellPx,
+      scale,
+      centre,
+      (draw, _g, pal) => draw(GEM_ART, effectColours(pal, 'damage')),
+      gu * GEM_SCALE,
+      centre,
+    ),
+  );
+  return specs;
+}
+
+/** The whole atlas's frames: towers, the scorch, creeps, then shots and combat feedback. */
 export function atlasFrameSpecs(cellPx: number, scale: number): FrameSpec[] {
   return [
     ...towerFrameSpecs(cellPx, scale),
     scorchFrameSpec(cellPx, scale),
     ...creepFrameSpecs(cellPx, scale),
+    ...effectFrameSpecs(cellPx, scale),
   ];
 }

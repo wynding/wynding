@@ -55,6 +55,7 @@ import { createRotate, type MatchMediaFn, type RotateMediaQueryList } from './ro
 import { COMPACT_QUERY } from './layout';
 import { clearDockReserve, syncDockCue, syncDockReserve } from './dock-reserve';
 import { clearHudCut, syncHudCut } from './hud-cut';
+import { createLeakCue } from './leak-cue';
 import { paintSwatch, releaseSwatch } from './swatch';
 import { requestFullscreen } from './fullscreen';
 import { createWakeLock, type WakeLockApi } from './wakelock';
@@ -439,6 +440,15 @@ export function createApp(doc: Document, root: HTMLElement, deps: AppDeps): AppH
   let colourMode = initialSettings.colourMode;
   let reducedMotion = initialSettings.reducedMotion;
   reflectReducedMotion(reducedMotion); // initialize from the first snapshot, not just changes
+  /** The lives chip's leak cue (#181 C1) and whether the chip shows it now — written to the
+   *  chip only when that changes, by the frame loop below. Play again clears both. */
+  const leakCue = createLeakCue();
+  let leakCueShown = false;
+  const clearLeakCue = (): void => {
+    leakCue.reset();
+    if (leakCueShown) overlay.setLeakCue(false);
+    leakCueShown = false;
+  };
   /** The Cards' footprint-glyph tiles (playtest round, `swatch.ts`) — painted at boot and
    *  again on a colour-mode change, never per frame. The wave strip's creep icons (#181 L1)
    *  ride the same hook: the overlay inks them from the boot mode itself and re-inks them in
@@ -1036,6 +1046,7 @@ export function createApp(doc: Document, root: HTMLElement, deps: AppDeps): AppH
         controller.startRun(beginRun());
         input.reset(); // no armed gesture from the previous run identity carries over (#40)
         handle.reset();
+        clearLeakCue(); // nor the last run's leak on the lives chip (#181 C1)
         overlay.hideResults();
         // ADR 0014 §1: the single run-start choke point cancels the whole submission
         // operation, releases the region, and commits nothing.
@@ -1081,6 +1092,14 @@ export function createApp(doc: Document, root: HTMLElement, deps: AppDeps): AppH
     lastNow = now;
     controller.advance(dt);
     const f = controller.frame();
+    // Kills and leaks since the last frame (#181 C1): the board bursts and pulses for them, and
+    // the lives chip shows the leaks, no more often than its cue allows (`leak-cue.ts`).
+    const fed = controller.drainFeedback();
+    const leakShowing = leakCue.update(now, fed.leaks);
+    if (leakShowing !== leakCueShown) {
+      leakCueShown = leakShowing;
+      overlay.setLeakCue(leakShowing);
+    }
     // The scene draws every frame (interpolation depends on alpha)...
     const ov: RenderOverlay = {
       ghost: f.ghost,
@@ -1091,6 +1110,8 @@ export function createApp(doc: Document, root: HTMLElement, deps: AppDeps): AppH
       colourMode,
       reducedMotion,
       tracers: f.tracers,
+      kills: fed.kills,
+      leaks: fed.leaks,
     };
     handle.draw(f.prevVm, f.curVm, f.alpha, ov);
     // Observable sim clock for e2e test hooks (PLAN.md P4) — NOT user-facing, just plain

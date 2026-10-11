@@ -43,10 +43,13 @@ interface StampedSpark extends SparkPoint {
 export function createSparkStore(): SparkStore {
   let held: SparkPoint[] = [];
   let lit: StampedSpark[] = [];
+  // A flyer's spark keeps the look it struck (`SparkPoint.flyer`), so it is drawn on the
+  // flyer's lifted body; every spark carries the field, set or not, so all share one shape.
   const stamp = (p: SparkPoint, bornAt: number): StampedSpark => ({
     x: p.x,
     y: p.y,
     radiusFp: p.radiusFp,
+    flyer: p.flyer,
     bornAt,
   });
   const prune = (now: number, reducedMotion: boolean): void => {
@@ -55,7 +58,7 @@ export function createSparkStore(): SparkStore {
   };
   return {
     hold(points) {
-      for (const p of points) held.push({ x: p.x, y: p.y, radiusFp: p.radiusFp });
+      for (const p of points) held.push({ x: p.x, y: p.y, radiusFp: p.radiusFp, flyer: p.flyer });
     },
     intake(points, now, reducedMotion) {
       for (const p of held) lit.push(stamp(p, now));
@@ -69,7 +72,13 @@ export function createSparkStore(): SparkStore {
       const out: LiveSpark[] = [];
       for (let i = lit.length - 1; i >= 0; i--) {
         const s = lit[i] as StampedSpark;
-        out.push({ x: s.x, y: s.y, radiusFp: s.radiusFp, k: 1 - (now - s.bornAt) / life });
+        out.push({
+          x: s.x,
+          y: s.y,
+          radiusFp: s.radiusFp,
+          flyer: s.flyer,
+          k: 1 - (now - s.bornAt) / life,
+        });
       }
       return out;
     },

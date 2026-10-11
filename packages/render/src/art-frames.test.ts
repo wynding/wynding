@@ -14,16 +14,20 @@ import {
   creepFrameKeys,
   creepFrameSpecs,
   creepShadowFrameKey,
+  glyphFrameKey,
   groundFrameKey,
   headFrameKey,
   paintTowerArt,
   pendingFrameKey,
   scorchFrameSpec,
+  shotFrameKeys,
   towerAims,
   towerArtFit,
   towerFrameSpecs,
   towerHasPlate,
   FRAME_PAD_TEXELS,
+  GEM_FRAME_KEY,
+  LOB_SHADOW_FRAME_KEY,
   PAD_FRAME_KEY,
   PLATE_FRAME_KEY,
   RIM_RUNS_FRAME_KEY,
@@ -31,6 +35,7 @@ import {
   SCORCH_FRAME_KEY,
   type FrameSpec,
 } from './art-frames';
+import { GLYPH_CHARS, SHOT_LOOKS_BAKED } from './effect-art';
 import { artBounds, flattenPath, shapeOutline } from './art-geometry';
 import { artGraphics, type ArtColourResolver } from './art-paint';
 import { cssColour } from './canvas-graphics';
@@ -259,10 +264,24 @@ describe('atlasFrameSpecs — the whole catalogue', () => {
   const specs = atlasFrameSpecs(20, 1);
   const keys = new Set(specs.map((s) => s.key));
 
-  it('bakes every key placement can produce: the plate, the pad, the rim’s runs, each look × state, the scorch, each creep look and shadow', () => {
+  it('bakes every key placement can produce: the plate, the pad, the rim’s runs, each look × state, the scorch, each creep look and shadow, and the effects (C1/C2)', () => {
     expect(specs).toHaveLength(keys.size); // no duplicate keys
+    const tracers = SHOT_LOOKS_BAKED.filter((l) => l.style !== 'arc').length;
+    const landings = SHOT_LOOKS_BAKED.filter((l) => l.style === 'lob').length;
     expect(specs).toHaveLength(
-      3 + TOWER_LOOKS.length * 3 + 1 + CREEP_LOOKS.length + CREEP_FAMILIES.length * 2,
+      3 +
+        TOWER_LOOKS.length * 3 +
+        1 +
+        CREEP_LOOKS.length +
+        CREEP_FAMILIES.length * 2 +
+        // Each baked tracer and each lob's landing ring, the one lob shadow, each
+        // creep look's hit flash, the pop's numerals and its gem.
+        tracers +
+        landings +
+        1 +
+        CREEP_LOOKS.length +
+        GLYPH_CHARS.length +
+        1,
     );
     expect(keys.has(PLATE_FRAME_KEY)).toBe(true);
     expect(keys.has(PAD_FRAME_KEY)).toBe(true);
@@ -289,9 +308,53 @@ describe('atlasFrameSpecs — the whole catalogue', () => {
         for (const air of [false, true]) {
           expect(keys.has(creepFrameKey(id, boss, air)), `${id} ${boss} ${air}`).toBe(true);
           expect(keys.has(creepShadowFrameKey(id, boss, air)), `${id} ${boss} ${air}`).toBe(true);
+          // Its hit flash (C1), for whichever look it takes.
+          const flash = creepFrameKeys(id, boss, air).flash;
+          expect(keys.has(flash), `${id} ${boss} ${air}: ${flash}`).toBe(true);
         }
       }
     }
+    // Every shot a catalog tower fires, and one of a tower not known (C2): its tracer and
+    // its landing ring, where it has them — and the lob's shadow, the pop's gem and numerals.
+    for (const id of [...CATALOG_IDS, 'no-such-tower', '__proto__', '', undefined]) {
+      const shot = shotFrameKeys(id);
+      for (const key of [shot.tracer, shot.landing]) {
+        if (key !== null) expect(keys.has(key), `${id}: ${key}`).toBe(true);
+      }
+    }
+    for (const key of [LOB_SHADOW_FRAME_KEY, GEM_FRAME_KEY, ...GLYPH_CHARS.map(glyphFrameKey)]) {
+      expect(keys.has(key), key).toBe(true);
+    }
+  });
+
+  it('gives each catalog tower the style frame’s shot (C2) — a mine and a beacon none, an unknown id the dot', () => {
+    expect(Object.fromEntries(CATALOG_IDS.map((id) => [id, shotFrameKeys(id).look.style]))).toEqual(
+      {
+        basic: 'bolt',
+        slow: 'shard',
+        splash: 'lob',
+        venom: 'glob',
+        stun: 'arc',
+        antiair: 'streak',
+        beacon: 'dot',
+        mine: 'dot',
+        'frost-splash': 'lob',
+      },
+    );
+    // Drawn in its tower's role colour: Frost Splash's lob is a control lob, Splash's a damage one.
+    expect(shotFrameKeys('frost-splash').tracer).toBe('fx:shot:lob:control');
+    expect(shotFrameKeys('splash').tracer).toBe('fx:shot:lob:damage');
+    expect(shotFrameKeys('frost-splash').landing).toBe('fx:landing:control');
+    // Only a lob lands on a ring; the stun arc and the dot are drawn live, with no baked tracer.
+    expect(shotFrameKeys('basic').landing).toBeNull();
+    expect(shotFrameKeys('stun').tracer).toBeNull();
+    expect(shotFrameKeys(undefined).tracer).toBeNull();
+    // An id the table has never heard of keeps the dot, not Basic's bolt (its look's).
+    for (const id of ['no-such-tower', '__proto__', 'constructor', '']) {
+      expect(shotFrameKeys(id).look.style, id).toBe('dot');
+    }
+    // Built once per id, and handed back the same.
+    expect(shotFrameKeys('venom')).toBe(shotFrameKeys('venom'));
   });
 
   it('has one look per catalog tower — nine — the unknown id folded into basic’s', () => {

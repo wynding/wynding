@@ -25,6 +25,7 @@ import { createSparkStore } from './sparks';
 import { createScorchTracker } from './scorches';
 import { createAimTracker } from './tower-aim';
 import { createFireTracker } from './tower-fire';
+import { createFeedbackTracker } from './combat-feedback';
 import { renderTimeOf } from './tracers';
 import {
   createPolygonLiveLayers,
@@ -227,6 +228,10 @@ export function mount(el: HTMLElement, geometry: BoardGeometry): RenderHandle {
   // one whose whole flight falls between two frames does (`tower-fire.ts`).
   const aim = createAimTracker();
   const fire = createFireTracker();
+  // Which creeps flash, and the kills and leaks still showing (`combat-feedback.ts`): fed by every
+  // frame drawn, forgotten with the run. Kills and leaks arrive drained, like sparks; the few a
+  // frame before READY could hand it are dropped, as nothing is drawn to show them on.
+  const feedback = createFeedbackTracker();
   const now = (): number => game.getTime();
 
   // The art the sprites are showing this frame — what a sprite created mid-frame is given.
@@ -363,6 +368,7 @@ export function mount(el: HTMLElement, geometry: BoardGeometry): RenderHandle {
       maxTextureSize(),
     );
     if (art === null) return; // no bake has succeeded yet — `ensure` keeps trying (bake-runner.ts)
+    const nowMs = now();
     drawBoardFrame(targets, {
       prevVm,
       curVm,
@@ -370,10 +376,13 @@ export function mount(el: HTMLElement, geometry: BoardGeometry): RenderHandle {
       overlay,
       projection,
       frames: art.atlas.frames,
-      sparks: sparks.live(now(), overlay.reducedMotion),
+      exit: geometry.exit,
+      nowMs,
+      sparks: sparks.live(nowMs, overlay.reducedMotion),
       scorches,
       aim,
       fire,
+      feedback,
     });
   };
 
@@ -382,9 +391,10 @@ export function mount(el: HTMLElement, geometry: BoardGeometry): RenderHandle {
     reset(): void {
       sparks.clear();
       // Frames before READY feed the scorch tracker too, so it is forgotten whatever `targets` is.
-      // (Only a frame drawn feeds the aim and fire trackers, so before READY they hold nothing.)
+      // (Only a frame drawn feeds the aim, fire and feedback trackers, so before READY they hold
+      // nothing.)
       scorches.reset();
-      if (targets !== null) resetBoardFrame(targets, { scorches, aim, fire });
+      if (targets !== null) resetBoardFrame(targets, { scorches, aim, fire, feedback });
     },
     destroy(): void {
       destroyed = true;

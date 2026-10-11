@@ -1,26 +1,24 @@
-// circle-polygon.ts — a small circle drawn as a regular polygon (visual pass T3, #181; R4's
-// `circle-path.ts` already draws the live layers' circles as polygons, and R5 decides whether to
-// unify the two side-count rules). Phaser-free: anything with `fillPoints` and `strokePoints`
-// draws one — a live layer's Phaser `Graphics`, or the tests' recording layer.
+// circle-polygon.ts — a small circle drawn as a regular polygon through `fillPoints` and
+// `strokePoints` (visual pass T3, #181): the shots' muzzle flashes and ring pulses. Phaser-free:
+// anything with `fillPoints` and `strokePoints` draws one — a live layer's Phaser `Graphics`, or
+// the tests' recording layer.
 //
 // WHY: Phaser's WebGL Graphics draws every arc as 101 points, whatever its radius
 // (`GraphicsWebGLRenderer`, a fixed step of 0.01 of a turn). A filled circle is triangulated by
 // earcut over all of them, and a stroked one becomes 100 line quads. A muzzle flash a few
 // pixels across paid that in full on every frame it showed (ADR 0005, the T3 entry). A regular
-// polygon with as many sides as its size needs reads as a circle and costs a fraction of that:
-// enough sides that none is longer than 3 CSS px, from 12 for the smallest circles up to 24,
-// where a polygon strays from its circle by under 1% of its radius.
-// Its sibling `circle-path.ts` turns every live layer's `strokeCircle` and `fillCircle` into a
-// polygon sized to its radius at the dpr — every circle drawn live but these — and leaves
-// `fillPoints`/`strokePoints` alone, so a circle drawn here is never converted twice.
+// polygon with as many sides as its size needs reads as a circle and costs a fraction of that.
+//
+// ONE SIDE-COUNT RULE FOR THE BOARD (R5, #181). How many sides is `circle-path.ts`'s decision
+// (`circleSegments`): the fewest that keep the polygon within a quarter of a device pixel of its
+// circle at the board's dpr. Its `polygonCircles` turns every live layer's `strokeCircle` and
+// `fillCircle` into such a polygon; these helpers draw the same polygon through
+// `fillPoints`/`strokePoints`, which that wrapper leaves alone, so a circle drawn here is never
+// converted twice. (T3 first had a rule of its own here, 12 to 24 sides by a 3 CSS px side
+// length; R4 left the two side by side, and R5 made them one.) What stays this file's own is
+// where the corners sit: the first straight up from the centre, going clockwise.
 
-/** The fewest sides a circle's polygon has: the smallest circles still read as round. */
-export const MIN_CIRCLE_SIDES = 12;
-/** The most: a 24-sided polygon strays from its circle by under 1% of its radius, so a larger
- *  circle keeps 24 sides and its sides grow past `MAX_CIRCLE_SIDE_PX`. */
-export const MAX_CIRCLE_SIDES = 24;
-/** The longest side a circle's polygon is given before it gets another, CSS px. */
-export const MAX_CIRCLE_SIDE_PX = 3;
+import { circleSegments } from './circle-path';
 
 const TAU = 2 * Math.PI;
 
@@ -32,16 +30,6 @@ export interface PolygonGraphics {
     closeShape?: boolean,
     closePath?: boolean,
   ): unknown;
-}
-
-/** How many sides the polygon for a circle of radius `r` CSS px has: enough that no side is
- *  longer than `MAX_CIRCLE_SIDE_PX`, within `MIN_CIRCLE_SIDES`..`MAX_CIRCLE_SIDES`. A radius
- *  that is not a positive number, NaN included, is the smallest circle: `Math.max(0, NaN)` is
- *  NaN, which would give no sides at all, and an empty point list throws out of Phaser's
- *  `fillPoints` and `strokePoints` (they read the first point), stopping the frame. */
-export function circleSides(r: number): number {
-  const n = Math.ceil((TAU * (r > 0 ? r : 0)) / MAX_CIRCLE_SIDE_PX);
-  return Math.min(MAX_CIRCLE_SIDES, Math.max(MIN_CIRCLE_SIDES, n));
 }
 
 /** Each side count's corners on the unit circle, computed once. */
@@ -61,21 +49,41 @@ function cornersOf(n: number): readonly { readonly x: number; readonly y: number
   return corners;
 }
 
-/** The corners of the polygon drawn for the circle of radius `r` about `(x, y)`: `circleSides(r)`
- *  points on the circle, evenly spaced, the first straight up from the centre, going clockwise
- *  (y grows downward). */
-export function circlePoints(x: number, y: number, r: number): { x: number; y: number }[] {
-  return cornersOf(circleSides(r)).map((c) => ({ x: x + r * c.x, y: y + r * c.y }));
+/** The corners of the polygon drawn for the circle of radius `r` CSS px about `(x, y)`, at `dpr`
+ *  device pixels per CSS px: `circleSegments(r, dpr)` points on the circle, evenly spaced, the
+ *  first straight up from the centre, going clockwise (y grows downward). A radius that is not a
+ *  positive number, NaN included, still gets the fewest sides, never none: an empty point list
+ *  throws out of Phaser's `fillPoints` and `strokePoints` (they read the first point). */
+export function circlePoints(
+  x: number,
+  y: number,
+  r: number,
+  dpr: number,
+): { x: number; y: number }[] {
+  return cornersOf(circleSegments(r, dpr)).map((c) => ({ x: x + r * c.x, y: y + r * c.y }));
 }
 
-/** Fill the circle of radius `r` about `(x, y)` as its polygon, in the fill style in force. */
-export function fillCircleAsPolygon(g: PolygonGraphics, x: number, y: number, r: number): void {
-  g.fillPoints(circlePoints(x, y, r), true);
+/** Fill the circle of radius `r` about `(x, y)` as its polygon at `dpr`, in the fill style in
+ *  force. */
+export function fillCircleAsPolygon(
+  g: PolygonGraphics,
+  x: number,
+  y: number,
+  r: number,
+  dpr: number,
+): void {
+  g.fillPoints(circlePoints(x, y, r, dpr), true);
 }
 
-/** Stroke the circle of radius `r` about `(x, y)` as its polygon, in the line style in force.
- *  The path is closed rather than its first corner repeated: Phaser closes a path by joining its
- *  last side to its first, where a repeated corner would add a side of no length. */
-export function strokeCircleAsPolygon(g: PolygonGraphics, x: number, y: number, r: number): void {
-  g.strokePoints(circlePoints(x, y, r), false, true);
+/** Stroke the circle of radius `r` about `(x, y)` as its polygon at `dpr`, in the line style in
+ *  force. The path is closed rather than its first corner repeated: Phaser closes a path by
+ *  joining its last side to its first, where a repeated corner would add a side of no length. */
+export function strokeCircleAsPolygon(
+  g: PolygonGraphics,
+  x: number,
+  y: number,
+  r: number,
+  dpr: number,
+): void {
+  g.strokePoints(circlePoints(x, y, r, dpr), false, true);
 }

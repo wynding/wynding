@@ -1,12 +1,16 @@
 // placement.test.ts — which frame every sprite shows and where: hidden pending-sell towers,
 // queued builds, a tower's plate and head (the boosted head with its glow; no plate under
 // the mine), the scorches a spent mine leaves, a creep's body and shadow (its look, its
-// family's size, a flyer's lift and its cues on its lifted body, flyers over the ground),
-// and positions snapped to whole device pixels with the frame's anchor honoured.
+// family's size, a flyer's lift and its cues on its lifted body, flyers over the ground), a
+// hit creep's flash on its body, where each creep is drawn — the point the heads aim at and
+// the shots land on (C1/C2) — and positions snapped to whole device pixels with the frame's
+// anchor honoured.
 
 import { describe, it, expect } from 'vitest';
 import {
   HEAD_AT_REST,
+  creepAimPoints,
+  creepBodyCentre,
   placeCreeps,
   placeScorches,
   placeTowers,
@@ -15,6 +19,7 @@ import {
 import { snapToDevicePx } from './device-px';
 import {
   atlasFrameSpecs,
+  creepFrameKeys,
   PAD_FRAME_KEY,
   PLATE_FRAME_KEY,
   RIM_RUNS_FRAME_KEY,
@@ -65,6 +70,7 @@ const tower = (
 
 type CreepIn = Parameters<typeof placeCreeps>[0][number];
 const creep = (opts: Partial<CreepVM> = {}): CreepIn => ({
+  id: 1,
   x: 5 * 256,
   y: 5 * 256,
   hpFrac: 1,
@@ -752,5 +758,136 @@ describe('placeCreeps — each look found once per atlas, and the canvas-top ste
         }
       }
     }
+  });
+});
+
+// ---- Visual pass C1/C2 (#181): a hit creep's flash, and where each creep is drawn ----
+
+describe('placeCreeps — a hit creep’s flash, on its body to the texel (C1)', () => {
+  /** Where `spec`'s art is drawn from, frame-local: its own origin, read off the bake. */
+  const artOrigin = (key: string, projection: Projection): { x: number; y: number } => {
+    const spec = atlasFrameSpecs(projection.cellPx, projection.dpr).find((s) => s.key === key)!;
+    const g = recordingArtGraphics();
+    spec.paint(g, PAL);
+    const [, , x, y] = g.calls.find((c) => c.method === 'art')!.args as number[];
+    return { x: x!, y: y! };
+  };
+
+  it('shows each flashing creep’s flash — its look’s white silhouette, at the flash’s opacity — ground creeps’ first, then flyers’; none for a creep not flashing', () => {
+    const projection = projectionAt(1);
+    const frames = framesFor(projection);
+    const flashOf = (id: number): number => ({ 2: 0.5, 3: 0.85 })[id] ?? 0;
+    const { bodies, flashes } = placeCreeps(
+      [
+        creep({ id: 3, creepId: 'flying', domain: 'air', x: 700 }),
+        creep({ id: 1 }),
+        creep({ id: 2, creepId: 'fast', x: 400 }),
+      ],
+      PAL,
+      projection,
+      frames,
+      flashOf,
+    );
+    expect(flashes.map((f) => [f.frame, f.alpha])).toEqual([
+      [creepFrameKeys('fast', false, false).flash, 0.5],
+      [creepFrameKeys('flying', false, true).flash, 0.85],
+    ]);
+    // Each on its body: the flash's art and the body's are drawn from the same point.
+    const byId = new Map(bodies.map((b) => [b.id, b]));
+    for (const [flash, id] of [
+      [flashes[0]!, 2],
+      [flashes[1]!, 3],
+    ] as const) {
+      const body = byId.get(id)!;
+      const at = artOrigin(flash.frame, projection);
+      expect(flash.x + at.x, flash.frame).toBeCloseTo(body.cx, 9);
+      expect(flash.y + at.y, flash.frame).toBeCloseTo(body.cy, 9);
+      // On whole device pixels, as the body is: the same texel grid.
+      expect(flash.x).toBe(Math.round(flash.x));
+      expect(flash.y).toBe(Math.round(flash.y));
+    }
+    // With no flash asked for — `placeCreeps`' default — none.
+    expect(placeCreeps([creep()], PAL, projection, frames).flashes).toEqual([]);
+  });
+
+  it('steps a flyer’s flash down with its body at the canvas top, at every dpr', () => {
+    for (const dpr of [1, 1.5, 2]) {
+      const projection = projectionAt(dpr, 100, 100); // the board at the canvas top
+      expect(projection.originY).toBe(0);
+      const frames = framesFor(projection);
+      const { bodies, flashes } = placeCreeps(
+        [creep({ creepId: 'flying', domain: 'air', y: 64 })],
+        PAL,
+        projection,
+        frames,
+        () => 1,
+      );
+      const at = artOrigin(flashes[0]!.frame, projection);
+      expect(flashes[0]!.y + at.y, `dpr ${dpr}`).toBeCloseTo(bodies[0]!.cy, 9);
+      expect(flashes[0]!.y, `dpr ${dpr}`).toBeGreaterThanOrEqual(-1 / dpr);
+    }
+  });
+});
+
+describe('creepBodyCentre — where a creep no longer drawn would have been (C1/C2)', () => {
+  it('is exactly the centre placeCreeps gives that creep’s body — on the ground, in the air, and stepped down at the canvas top', () => {
+    for (const dpr of [1, 1.25, 1.5, 2]) {
+      const projection = projectionAt(dpr, 130, 130);
+      const frames = framesFor(projection);
+      for (const c of [
+        creep({ x: 5 * 256 + 37, y: 3 * 256 + 101 }),
+        creep({ creepId: 'flying', domain: 'air', x: 5 * 256 + 37, y: 3 * 256 + 101 }),
+        creep({ creepId: 'armored-flyer', domain: 'air', y: 20 }), // at the canvas top
+        creep({ creepId: 'boss', boss: true, x: 1000, y: 900 }),
+      ]) {
+        const [body] = placeCreeps([c], PAL, projection, frames).bodies;
+        const at = creepBodyCentre(c.x, c.y, c, projection, frames);
+        expect([at.x, at.y], `${c.creepId} ${c.domain} at dpr ${dpr}`).toEqual([
+          body!.cx,
+          body!.cy,
+        ]);
+      }
+    }
+  });
+});
+
+describe('creepAimPoints — where each creep is drawn, in sim units (C2)', () => {
+  it('takes each body’s centre back through the projection: projected again, it is the centre, to float precision', () => {
+    for (const dpr of [1, 1.25, 1.5]) {
+      const projection = projectionAt(dpr, 130, 130);
+      const frames = framesFor(projection);
+      const { bodies } = placeCreeps(
+        [
+          creep({ id: 4, x: 5 * 256 + 37, y: 3 * 256 + 101 }),
+          creep({ id: 9, creepId: 'flying', domain: 'air', x: 700, y: 900 }),
+        ],
+        PAL,
+        projection,
+        frames,
+      );
+      const points = creepAimPoints(bodies, projection);
+      expect([...points.keys()]).toEqual([4, 9]);
+      for (const body of bodies) {
+        const p = points.get(body.id)!;
+        const back = projection.fpToPixel(p.x, p.y);
+        expect(back.x, `${body.id} at dpr ${dpr}`).toBeCloseTo(body.cx, 9);
+        expect(back.y, `${body.id} at dpr ${dpr}`).toBeCloseTo(body.cy, 9);
+      }
+      // A flyer's point is its lifted body, above its true one: smaller y.
+      expect(points.get(9)!.y).toBeLessThan(900);
+    }
+  });
+
+  it('is a ground creep’s own point when that point is on a whole pixel', () => {
+    const projection = projectionAt(1); // 10px cells: every 25.6 fixed-point units is a pixel
+    const { bodies } = placeCreeps(
+      [creep({ x: 5 * 256, y: 3 * 256 })],
+      PAL,
+      projection,
+      framesFor(projection),
+    );
+    const p = creepAimPoints(bodies, projection).get(1)!;
+    expect(p.x).toBeCloseTo(5 * 256, 9);
+    expect(p.y).toBeCloseTo(3 * 256, 9);
   });
 });

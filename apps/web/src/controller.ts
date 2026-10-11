@@ -42,9 +42,12 @@ import {
   type RenderVM,
   type HudVM,
   type GhostVM,
+  type KillVM,
   type SelectionVM,
+  type SparkPoint,
   type TracerVM,
 } from '@wynding/render';
+import { markFlyerSparks, noteTowerless, stepOutcome } from './combat-events';
 import { validate, currentRulesetHash, MAX_INPUTS_PER_TICK, type Replay } from '@wynding/replay';
 import { getBundledRuleset, defaultBoardId, type Ruleset } from '@wynding/content';
 
@@ -214,8 +217,14 @@ export interface Controller {
    *  so a multi-tick catch-up frame still flashes every kill. `radiusFp` is `0` for a
    *  `targeted` impact (a spark) or a `blast`'s true radius (M2-S4a step 11, an
    *  expanding-and-fading ring — `scene.ts`). `detonation` is `true` only on the landing
-   *  of a mine going off (`SparkPoint.detonation`). */
-  drainSparks(): { x: number; y: number; radiusFp: number; detonation?: boolean }[];
+   *  of a mine going off (`SparkPoint.detonation`), and `flyer` only on a targeted impact
+   *  that struck a flyer (`SparkPoint.flyer`, `combat-events.ts`). */
+  drainSparks(): SparkPoint[];
+  /** The creeps killed and the leaks counted since the last call, then cleared (visual pass
+   *  C1, #181). Accumulated per sim tick, like the sparks, so a catch-up frame still shows
+   *  every kill and every leak. Derived from the view models either side of each step and the
+   *  sim's own leak counter (`combat-events.ts`), never from new sim state. */
+  drainFeedback(): StepFeedback;
   /** Derived HUD fields for the DOM overlay. */
   hud(): HudVM;
   isPaused(): boolean;
@@ -491,6 +500,15 @@ function diffPendingTowers(
 
 const NO_PENDING: readonly TowerAnchor[] = [];
 
+/** What `drainFeedback` hands back: the kills and the leaks since the last drain. */
+export interface StepFeedback {
+  readonly kills: readonly KillVM[];
+  readonly leaks: number;
+}
+
+/** No kills and no leaks — what nearly every frame drains, without an allocation. */
+const NO_FEEDBACK: StepFeedback = Object.freeze({ kills: Object.freeze([]), leaks: 0 });
+
 /**
  * Deep-freeze an immutable copy of a tick's commands for the recorded log. The commands
  * are CLONED (the live buffer objects stay untouched for step()) and then frozen at every
@@ -577,7 +595,11 @@ export function createController(
   // selected — `selection` is only reassigned on aim/tick.
   let selOverlaySrc: (SelectionVM & { id: number }) | null = null;
   let selOverlay: SelectionVM | null = null;
-  let pendingSparks: { x: number; y: number; radiusFp: number; detonation?: boolean }[]; // impact points resolved since the last drain
+  let pendingSparks: SparkPoint[]; // impact points resolved since the last drain
+  // Kills and leaks since the last drain (visual pass C1, #181) — accumulated per tick beside
+  // the sparks, and for the same reason: a catch-up frame still shows every one.
+  let pendingKills: KillVM[];
+  let pendingLeaks: number;
   // Live in-flight-shot list (Tracer, #32/P6): appended from each tick's drained `fired`
   // events, pruned in `frame()` once render time passes a flight's `impactTick` — no
   // tracer crosses run identity (cleared on `reset()`) or survives past terminal.
@@ -710,6 +732,13 @@ export function createController(
     // concern. `impactPoints`/`fired` stay as they were; the counter is a scalar and
     // costs an increment only on the drop path.
     const events: StepEvents = { impactPoints: [], fired: [], dotDropped: 0 };
+    // Combat feedback (visual pass C1/C2, #181) is read from either side of the step
+    // (`combat-events.ts`), and `step` changes `state` in place: so note first the two things
+    // it reads from the state as it stands — the sim's leak counter, and the bounty column the
+    // kill sweep credits each kill from.
+    const leakedBefore = state.leakedCount;
+    const bountyIds = state.creeps.id.slice();
+    const bounties = state.creeps.bounty.slice();
     hooks?.begin('step');
     state = step(state, ruleset, inputs, events);
     hooks?.end('step');
@@ -738,11 +767,25 @@ export function createController(
       // and names its tower as `sourceId`. Only towers fire, so every `sourceId` is a tower.
       for (const impact of state.impacts) builtTowerIds.add(impact.sourceId);
     }
+    const before = curVm;
     prevVm = curVm;
     hooks?.begin('derive');
     curVm = deriveViewModel(state, ruleset);
     hooks?.end('derive');
-    for (const pt of events.impactPoints) {
+    // What the step removed: its kills, where they stood as it began, and its leaks.
+    const outcome = stepOutcome(
+      before,
+      curVm,
+      state.leakedCount - leakedBefore,
+      grid.exit,
+      (id) => {
+        const i = bountyIds.indexOf(id);
+        return i < 0 ? 0 : (bounties[i] as number);
+      },
+    );
+    for (const kill of outcome.kills) pendingKills.push(kill);
+    pendingLeaks += outcome.leaks;
+    for (const pt of markFlyerSparks(events.impactPoints, curVm, outcome.kills)) {
       // A blast landing at a detonation tracer's origin (still listed: `frame()` prunes it,
       // and a catch-up frame may never have drawn it) is that mine going off — mark it so
       // the scorch survives the tracer being pruned unseen (`SparkPoint.detonation`).
@@ -757,6 +800,10 @@ export function createController(
         );
       pendingSparks.push(detonated ? { ...pt, detonation: true } : pt);
     }
+    // A shot whose tower this step sold carries that tower's id from here on (C2): only an input
+    // tick can remove a tower that has shots in flight, and the shots this step fired join after,
+    // so none of them is taken for a tower sold to make room for its own.
+    if (inputs.length > 0) tracers = noteTowerless(tracers, before, curVm);
     for (const f of events.fired) tracers.push(f);
     // Reconcile the selection with the post-step world: if the selected tower was sold or
     // destroyed this tick, drop the selection so the scene stops drawing a phantom range
@@ -806,6 +853,8 @@ export function createController(
     ghost = null;
     selection = null;
     pendingSparks = [];
+    pendingKills = []; // nor any kill or leak (C1)
+    pendingLeaks = 0;
     tracers = []; // no tracer crosses run identity
     bufferRev = 0;
     builtTowerIds.clear(); // "Towers built" is per run (#181 H2)
@@ -1373,10 +1422,17 @@ export function createController(
         tracers,
       };
     },
-    drainSparks(): { x: number; y: number; radiusFp: number; detonation?: boolean }[] {
+    drainSparks(): SparkPoint[] {
       if (pendingSparks.length === 0) return [];
       const out = pendingSparks;
       pendingSparks = [];
+      return out;
+    },
+    drainFeedback(): StepFeedback {
+      if (pendingKills.length === 0 && pendingLeaks === 0) return NO_FEEDBACK;
+      const out = { kills: pendingKills, leaks: pendingLeaks };
+      pendingKills = [];
+      pendingLeaks = 0;
       return out;
     },
     // Reads the SHARED projection whenever the buffer is non-empty, so bounty (and, while

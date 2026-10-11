@@ -1,7 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import { validate, MAX_INPUTS_PER_TICK } from '@wynding/replay';
 import { getBundledRuleset, defaultBoardId } from '@wynding/content';
-import type { TracerVM } from '@wynding/render';
+import type { KillVM, TracerVM } from '@wynding/render';
 import { compileRuleset, type SimInput } from '@wynding/sim';
 import { isDetonation } from '@wynding/render';
 import {
@@ -1052,6 +1052,111 @@ describe('controller — Tracer lifetime via fired StepEvents (#32)', () => {
     expect(listed.size).toBeGreaterThan(100);
     expect([...shotsPerTick.values()].filter((n) => n >= 2).length).toBeGreaterThan(10);
     expect(multiTickFrames).toBeGreaterThan(5);
+  });
+});
+
+describe('controller — kills and leaks for the board’s combat feedback (#181 C1)', () => {
+  it('a run with no towers drains every leak and no kill: the leaks sum to the sim’s own count', () => {
+    const c = createController(1);
+    c.start(); // PLAN.md P4: advance() no-ops while held
+    let leaks = 0;
+    let kills = 0;
+    let n = 0;
+    while (!c.isTerminal() && n < 6000) {
+      c.advance(TICK);
+      const fed = c.drainFeedback();
+      leaks += fed.leaks;
+      kills += fed.kills.length;
+      n++;
+    }
+    expect(c.isTerminal()).toBe(true);
+    expect(leaks).toBeGreaterThan(0);
+    expect(leaks).toBe(c.runStats().leaks);
+    expect(kills).toBe(0);
+  });
+
+  it('a tower’s kills each carry the creep, its look, where it stood as the step began and its catalog bounty — one per creep stopped', () => {
+    const c = createController(1);
+    startAndCall(c);
+    c.armTower('basic');
+    c.aimAt(2, 10);
+    c.confirm();
+    const kills: KillVM[] = [];
+    let leaks = 0;
+    let prev = c.frame().curVm;
+    let n = 0;
+    while (!c.isTerminal() && n < 6000) {
+      c.advance(TICK); // one tick at 1×
+      const fed = c.drainFeedback();
+      for (const k of fed.kills) {
+        // Where the board last drew it: the view model before the step that killed it.
+        const was = prev.creeps.find((cr) => cr.id === k.id);
+        expect(was, `creep ${k.id}`).toBeDefined();
+        expect([k.x, k.y, k.creepId, k.domain, k.boss]).toEqual([
+          was!.x,
+          was!.y,
+          was!.creepId,
+          was!.domain,
+          was!.boss,
+        ]);
+        // The sim sets each creep's bounty from its catalog entry at spawn and never changes it.
+        expect(k.bounty).toBe(c.ruleset.creepById[k.creepId]!.bounty);
+        kills.push(k);
+      }
+      leaks += fed.leaks;
+      prev = c.frame().curVm;
+      n++;
+    }
+    expect(kills.length).toBeGreaterThan(0);
+    expect(new Set(kills.map((k) => k.id)).size).toBe(kills.length); // each creep dies once
+    expect(kills.length).toBe(c.runStats().creepsStopped);
+    expect(leaks).toBe(c.runStats().leaks);
+  });
+
+  it('accumulates across a catch-up, drains once, and a new run starts with nothing pending', () => {
+    const c = createController(1);
+    c.start();
+    let n = 0;
+    // Several ticks, no drain between — a catch-up frame — until creeps have leaked.
+    while (c.runStats().leaks === 0 && !c.isTerminal() && n < 6000) {
+      c.advance(TICK);
+      n++;
+    }
+    const fed = c.drainFeedback();
+    expect(fed.leaks).toBeGreaterThan(0);
+    expect(fed.leaks).toBe(c.runStats().leaks);
+    expect(c.drainFeedback()).toEqual({ kills: [], leaks: 0 }); // drained, not re-reported
+    // More leaks pending, then Play again: none carries over.
+    while (c.runStats().leaks === fed.leaks && !c.isTerminal() && n < 12000) {
+      c.advance(TICK);
+      n++;
+    }
+    expect(c.runStats().leaks).toBeGreaterThan(fed.leaks);
+    c.startRun(2);
+    expect(c.drainFeedback()).toEqual({ kills: [], leaks: 0 });
+  });
+
+  it('a shot whose tower is sold while it flies carries that tower’s id from the sell’s tick on (C2)', () => {
+    const c = createController(1);
+    startAndCall(c);
+    c.armTower('basic');
+    c.aimAt(2, 10);
+    c.confirm();
+    let n = 0;
+    while (c.frame().tracers.length === 0 && !c.isTerminal() && n < 300) {
+      c.advance(TICK);
+      n++;
+    }
+    const [shot] = c.frame().tracers;
+    expect(shot).toBeDefined();
+    expect(shot!.towerId).toBeUndefined(); // its tower stands: the renderer finds it
+    expect(c.aimAt(2, 10).kind).toBe('tower');
+    expect(c.sellSelected()).toBe(true);
+    tick(c); // the sell's tick: the tower comes off the board, its shot still in the air
+    expect(c.frame().curVm.towers).toHaveLength(0);
+    const flying = c.frame().tracers.find((t) => t.launchTick === shot!.launchTick);
+    expect(flying, 'the premise: the shot outlives its tower').toBeDefined();
+    expect(flying!.towerId).toBe('basic');
   });
 });
 
