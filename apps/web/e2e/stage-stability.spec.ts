@@ -1,4 +1,4 @@
-import { test, expect, type Page } from '@playwright/test';
+import { test, expect, type Page } from './fixtures';
 import { createProjection } from '@wynding/render';
 import { contains, intersect, projectedGrid, GRID, type Rect } from './layout-probe';
 import { callWavePaced, titleAfterCall } from './paced-call';

@@ -1,4 +1,4 @@
-import { test, expect, type Page } from '@playwright/test';
+import { test, expect, type Page } from './fixtures';
 import AxeBuilder from '@axe-core/playwright';
 import { validateSurveyPayload, type SurveyPayload } from '@wynding/feedback';
 import { type SurveySendResult } from '../src/survey';

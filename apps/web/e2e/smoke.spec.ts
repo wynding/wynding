@@ -1,4 +1,4 @@
-import { test, expect } from '@playwright/test';
+import { test, expect } from './fixtures';
 import AxeBuilder from '@axe-core/playwright';
 import { createProjection } from '@wynding/render';
 import { assertRenderedContrast } from './contrast';

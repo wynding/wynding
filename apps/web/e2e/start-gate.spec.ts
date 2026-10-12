@@ -1,4 +1,4 @@
-import { test, expect } from '@playwright/test';
+import { test, expect } from './fixtures';
 import { callWavePaced, titleAfterCall } from './paced-call';
 
 // Player-started runs (PLAN.md P4/P6, decoupled further at M2-S2 P3 step 15): a fresh load

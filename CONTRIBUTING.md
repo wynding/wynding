@@ -76,6 +76,13 @@ through Turbo, cached per package):
 - `pnpm run lint:scripts` — ESLint over the root `scripts/` and `eslint-rules/` (not part
   of the Turbo workspace, so the package lint cannot reach them).
 - `pnpm test` — Vitest unit/integration suites.
+- The Playwright specs in `apps/web/e2e` import `test` (and `expect`, and the rest of
+  Playwright) from `./fixtures`, never from `@playwright/test`; ESLint enforces it. That `test`
+  fails any test on a console error or an uncaught page error, in any page it makes. A spec
+  that expects one declares it in a `describe` with
+  `test.use({ expectedErrors: { patterns: [/the message, without its tick/] } })`; a declared pattern that
+  matches nothing fails the test too. A spec that launches a browser of its own with
+  `chromium.launch()` passes each context it makes to `watchContext`.
 - `pnpm run format` / `pnpm run format:check` — Prettier (write / check).
 - `pnpm run verify` — the full local gate CI also runs (see `.github/workflows/ci.yml`).
 - `pnpm --filter @wynding/mobile run sync:ios` / `sync:android` — build the Host build and copy

@@ -958,6 +958,32 @@ export default tseslint.config(
     },
   },
   {
+    // The e2e specs' `test` is the fixtures' (#196): it fails a test on any console error or
+    // uncaught page error the test did not declare, and a spec on Playwright's own `test`
+    // would silently lack that. Type imports (`type Page`) and the rest of Playwright stay
+    // allowed from `@playwright/test`. This is the ONLY `no-restricted-imports` object that
+    // matches `apps/web/e2e` (the zones above match `packages/*/src` and `apps/*/src`), so
+    // it replaces nothing; give these files another and the two must be merged, as at the
+    // top of this file.
+    files: ['apps/web/e2e/**/*.spec.ts'],
+    rules: {
+      'no-restricted-imports': [
+        'error',
+        {
+          paths: [
+            {
+              name: '@playwright/test',
+              importNames: ['test'],
+              allowTypeImports: true,
+              message:
+                "Import `test` from './fixtures' (it fails a test on any undeclared console error or uncaught page error); `expect` and the rest are re-exported there too.",
+            },
+          ],
+        },
+      ],
+    },
+  },
+  {
     // Node CI/tooling scripts run under the Node runtime, not the browser — allow
     // the Node globals they legitimately use.
     // `**/scripts/` (not `scripts/`): flat-config globs are repo-root-relative, so the

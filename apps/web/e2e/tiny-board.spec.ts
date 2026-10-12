@@ -1,4 +1,4 @@
-import { test, expect, type Page, type Locator } from '@playwright/test';
+import { test, expect, type Page, type Locator } from './fixtures';
 import { PNG } from 'pngjs';
 import { createProjection, resolvePalette } from '@wynding/render';
 import { GRID } from './layout-probe';
@@ -13,21 +13,14 @@ import { GRID } from './layout-probe';
 // board all froze. (Since #191 the loop skips such a frame and holds the sim, and a draw that
 // keeps failing stops the run with a message.) These drive the two real ways a board gets
 // that small and require the run to keep ticking with no error of any kind — the bake
-// reports a failure on the console rather than throwing, so a console error fails these too.
+// reports a failure on the console rather than throwing, so a console error must fail these
+// too. That check lives in the shared fixture (`fixtures.ts`): these declare no
+// `expectedErrors`, so any console error or uncaught page error fails them.
 //
 // Each waits for the RENDERER to have taken the tiny size in before going on: the canvas's
 // inline width is written only by the renderer's own sizing, which starts when Phaser is READY.
 // Without that wait, a READY that came late enough would let the tiny phase pass before the
 // renderer ever drew it, and the test would pass against the very bug it is for.
-
-function watchErrors(page: Page): string[] {
-  const errors: string[] = [];
-  page.on('pageerror', (e) => errors.push(`pageerror: ${e.message}`));
-  page.on('console', (m) => {
-    if (m.type() === 'error') errors.push(`console.error: ${m.text()}`);
-  });
-  return errors;
-}
 
 const tickOf = async (board: Locator): Promise<number> =>
   Number(await board.getAttribute('data-sim-tick'));
@@ -100,7 +93,6 @@ test.describe('a board too small to draw never stops the game (#181)', () => {
   test('shrinking the viewport mid-run under the 1px-cell floor and back: the run keeps ticking', async ({
     page,
   }) => {
-    const errors = watchErrors(page);
     await page.goto('/');
     const board = page.locator('.wy-board');
     await expect(board).toBeVisible();
@@ -144,13 +136,11 @@ test.describe('a board too small to draw never stops the game (#181)', () => {
     await frames(page, 10);
     await expectTicking(board);
     await expectBoardDrawnAtFullSize(page);
-    expect(errors).toEqual([]);
   });
 
   test('mounting while the board is hidden, then revealing it: the board draws and the run ticks', async ({
     page,
   }) => {
-    const errors = watchErrors(page);
     // Hidden before any app script runs, so the renderer mounts into a 0×0 board. An adopted
     // stylesheet, because an init script runs before the document has an element to hold a
     // <style>.
@@ -185,6 +175,5 @@ test.describe('a board too small to draw never stops the game (#181)', () => {
     await page.getByRole('button', { name: 'Start', exact: true }).click();
     await expect(board).toHaveAttribute('data-started', 'true');
     await expectTicking(board);
-    expect(errors).toEqual([]);
   });
 });
