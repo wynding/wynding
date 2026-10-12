@@ -43,8 +43,9 @@ on:
 
 permissions:
   contents: read
-  # The trigger POST below comments on a PR: see the note above the step for why this
-  # scope. The freshness pre-check's reads (the PR, its reviews) ride on it too.
+  # The trigger POST below comments on a PR, which takes this scope: `issues: write` alone is
+  # refused for a pull request (#72 §3's probe). The freshness pre-check's reads (the PR,
+  # its reviews) ride on it too.
   pull-requests: write
   issues: read # the freshness pre-check reads the PR's comments through the issues API
 
@@ -72,24 +73,15 @@ jobs:
       - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
           node-version: 22
-      # #154 / #72 §3: every auto-trigger since the live probe on PR #156 (push 75e4f1a) had
-      # this POST refused with "Resource not accessible by integration", under the grants
-      # its run logs list: `issues: write`, `pull-requests: read`. #154 read that as an
-      # org-level token cap. But this workflow's first commit (111eba8) granted
-      # `pull-requests: write`, and 600923c narrowed it to `read` before any live run, so
-      # the refusal has only ever been seen without the PR scope. A comment on a pull
-      # request may need it, so the block above grants it again. A live run is the proof:
-      # until one shows the POST going through, the 403 branch below still downgrades
-      # ITSELF to a workflow warning — the `if`/`else` around the `gh api` call, not a
-      # step-level flag. A step-wide `continue-on-error` was tried here and removed (Codex,
-      # PR #156 round 2): it would also swallow a missing script, an indeterminate
-      # freshness read, or any other real failure in this step, exactly the silent-green
-      # #154 exists to prevent.
-      # Only the KNOWN 403 goes quiet; everything else in this step still fails the job
-      # loudly, as it should. `codex-freshness` still goes red separately and honestly
-      # when no verdict covers the head; that status is the one that matters. REVERT the
-      # warning-downgrade branch below (the `elif`, not the `else` — the `else` is the
-      # loud-failure path) once a live run shows the POST succeeding.
+      # #154 / #72 §3: from the live probe on PR #156 (push 75e4f1a) on, this POST was refused
+      # with "Resource not accessible by integration" on every run, under `issues: write`
+      # and `pull-requests: read`. #154 read that as an org-level token cap; it was the
+      # scope. An A/B probe (run 38308574140, 2026-10-12) settled it: with `issues: write`
+      # a token comments on an issue but is refused on a pull request, and with
+      # `pull-requests: write` it comments on the pull request, whatever GitHub's
+      # permission table suggests. This workflow's first commit granted it; 600923c
+      # narrowed it to `read` before any live run. A failed POST now fails the job, with
+      # what gh said in its output, and `codex-freshness` stays red until a verdict lands.
       - name: Comment "@codex review" if the current head lacks a Codex verdict
         run: |
           set -euo pipefail
@@ -105,46 +97,10 @@ jobs:
             0) echo "Current head already has a Codex verdict — no trigger needed." ;;
             1)
               # The REST issues endpoint, deliberately not `gh pr comment` — that command
-              # posts via GraphQL addComment, whose scope mapping is murkier. `gh` exits 1
-              # for EVERY failure alike — a 500, a network outage, a bad endpoint, an expired
-              # token, and the known refusal all land on the same exit code (Codex, PR #156
-              # round 3) — so the exit code alone cannot tell the known refusal from a
-              # fresh, actionable problem; the OUTPUT has to be inspected. Captured
-              # rather than streamed live so its content can be tested — `|| post_ec=$?`
-              # keeps `set -e` from killing the script at the assignment itself (POSIX
-              # exempts the first command of an OR list) — then reprinted verbatim before
-              # any decision, on every path, so nothing here suppresses what gh actually
-              # said.
-              post_ec=0
-              post_out=$(gh api "repos/$GITHUB_REPOSITORY/issues/$PR_NUMBER/comments" -f body='@codex review' 2>&1) || post_ec=$?
-              printf '%s\n' "$post_out"
-              if [ "$post_ec" -eq 0 ]; then
-                echo "Requested a Codex review of the new head."
-              elif printf '%s\n' "$post_out" | grep -qF 'Resource not accessible by integration'; then
-                # THE KNOWN REFUSAL, matched on the #154 probe's verbatim message. An `HTTP 403`
-                # alternative stood beside this one and was removed: it matched ANY 403 `gh`
-                # can emit — a secondary rate limit, SSO/SAML enforcement, an IP allow-list —
-                # so a fresh, actionable failure earned the same silent downgrade as the
-                # known refusal, which is exactly what this step's header promises does not
-                # happen. The narrow string is what the probe actually returned and what #154
-                # and `codex-freshness.yml` both quote. `-qF` rather than `-qE`: one fixed
-                # string now, so no regex surface to widen it again by accident.
-                #
-                # ONE RESIDUAL CASE THIS STRING CANNOT SEPARATE, stated rather than papered
-                # over: GitHub returns this message whenever a token lacks a scope a call
-                # needs, so it cannot say which scope is missing. Bounded by
-                # `codex-freshness` going red on its own when no verdict lands; re-check the
-                # permissions block before believing this warning. A grep of this file for
-                # the scope was considered and rejected — it would fire on any reformat,
-                # putting a flake inside a guard.
-                echo "::warning::auto-trigger POST refused (Resource not accessible by integration); see #72 §3. Post '@codex review' manually."
-              else
-                # Anything else — INCLUDING ANY OTHER 403. A 403 that is not the refusal above
-                # has a different cause and a different owner, so it gets no graceful
-                # downgrade and fails as loudly as a 500, a network blip or an auth error.
-                echo "auto-trigger POST failed with an unrecognised error (exit $post_ec) — not the known refusal. Failing." >&2
-                exit "$post_ec"
-              fi
+              # posts via GraphQL addComment, whose scope mapping is murkier. Under
+              # `set -e` a failed POST ends the step with gh's own error and exit code.
+              gh api "repos/$GITHUB_REPOSITORY/issues/$PR_NUMBER/comments" -f body='@codex review'
+              echo "Requested a Codex review of the new head."
               ;;
             *)
               # Exit 2 = the check could not determine freshness. Do NOT comment on a
