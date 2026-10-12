@@ -1497,8 +1497,13 @@ a.wy-home:focus-visible {
   touch-action: none;
 }
 
+/* A Card's focus ring is DASHED, the app's one dashed ring: the armed Card's frame (below) is
+   the same yellow, and a solid ring beside it read as arming on the phone rail (#181 D3 QC,
+   the owner's UAT ruling). The width and the offset are unchanged, so no Card box moves; the
+   frame sits inside the Card and the dashed ring outside it, so a Card both armed and focused
+   shows the two. Every other focus ring in the app stays solid. */
 .wy-card:focus-visible {
-  outline: var(--wy-card-ring-w) solid var(--wy-focus);
+  outline: var(--wy-card-ring-w) dashed var(--wy-focus);
   outline-offset: var(--wy-card-ring-offset);
 }
 
@@ -3259,6 +3264,14 @@ a.wy-home:focus-visible {
     flex-direction: column;
     gap: 0.15rem;
     margin-top: 0.25rem;
+  }
+
+  /* The title breaks between words, and INSIDE one where a single word is wider than the
+     column: at 150–200% text "Wave" alone outgrew the column (a few px at 568×320 and 150%, up
+     to 31px at 200% on macOS's fonts; more on CI's), and the scrollport cut its end. A word that
+     fits still breaks only between words, as the results panel's loss heading does (below). */
+  .wy-wave-preview-title {
+    overflow-wrap: anywhere;
   }
 
   /* An air entry's wings reach 0.1287em past the icon's box on each side (the armored flyer's,
