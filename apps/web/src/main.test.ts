@@ -508,10 +508,12 @@ describe('main — a frame that throws (#191)', () => {
    *  `step()`), as a throw from inside `step` would. From then on, every read that derives from
    *  the controller's live state is a VIOLATION, recorded and thrown, until Start again: after a
    *  real throw that state is half-stepped, so nothing may read it. `breakHud` makes the HUD's
-   *  derivation throw once, and `captureThrows` every capture. */
+   *  derivation throw once, `captureThrows` every capture, and `survey` wires an always-offered
+   *  survey, as the #181 H2 suite does. */
   function stopApp(
     options: Pick<AppDeps, 'hosted' | 'wakeLock' | 'capacitorApp'> & {
       readonly captureThrows?: boolean;
+      readonly survey?: boolean;
     } = {},
   ) {
     const root = document.createElement('div');
@@ -538,6 +540,17 @@ describe('main — a frame that throws (#191)', () => {
       ...(options.hosted === undefined ? {} : { hosted: options.hosted }),
       ...(options.wakeLock === undefined ? {} : { wakeLock: options.wakeLock }),
       ...(options.capacitorApp === undefined ? {} : { capacitorApp: options.capacitorApp }),
+      ...(options.survey === true
+        ? {
+            gameVersion: 'fedcba9876543210fedcba9876543210fedcba98',
+            surveyTransport: { send: async () => 'accepted' as const },
+            surveyAsk: {
+              offered: () => true,
+              refresh: () => Promise.resolve(),
+              commit: async () => {},
+            },
+          }
+        : {}),
       controllerFactory: (seed) => {
         const real = createController(seed, undefined, {
           begin: (span) => {
@@ -604,6 +617,11 @@ describe('main — a frame that throws (#191)', () => {
       steps: (): number => steps,
       breakStep: (): void => void (stepArmed = true),
       breakHud: (): void => void (hudArmed = true),
+      /** Give feedback's slot in the action row, and the form's below it. */
+      surveySlots: (): HTMLElement[] => [
+        results.querySelector<HTMLElement>('.wy-survey-opener')!,
+        results.querySelector<HTMLElement>('.wy-survey')!,
+      ],
       /** Start the run and play until Start's wave-1 claim is consumed: wave 1 is on. */
       start(): void {
         frame();
@@ -888,6 +906,42 @@ describe('main — a frame that throws (#191)', () => {
     expect(h.results.querySelector<HTMLElement>('.wy-results-more')!.hidden).toBe(true);
     expect(h.offers('Save run data')).toBe(false);
     expect(messages()).toContain('Wynding: the stopped run could not be captured.');
+  });
+
+  it('a stopped run is never offered the survey: no Give feedback after a frame stop or a step stop', async () => {
+    const h = stopApp({ survey: true });
+    // An offer waits on the ask refresh a dialog opening starts: a macrotask boundary drains it.
+    const settle = (): Promise<void> => new Promise<void>((resolve) => setTimeout(resolve, 0));
+    const offered = (): boolean[] => h.surveySlots().map((slot) => !slot.hidden);
+    // The control: in this same app, a finished run's dialog offers it.
+    h.start();
+    for (let i = 0; i < 4000 && h.results.hidden; i++) h.frame(300);
+    expect(h.results.hidden, 'the run must actually have resolved').toBe(false);
+    await settle();
+    expect(offered(), 'a finished run is offered the survey').toEqual([true, true]);
+
+    // A frame stop on the next run, whose data is offered...
+    h.button('Play again').click();
+    h.start();
+    const draw = vi.mocked(fakeHandle.draw);
+    draw.mockImplementation(() => {
+      throw new Error('the draw broke');
+    });
+    for (let i = 0; i < FAILED_FRAME_LIMIT; i++) h.frame(MS_PER_TICK);
+    expect(h.results.querySelector('h2')!.textContent).toBe('Something went wrong.');
+    await settle();
+    expect(offered(), 'a frame stop').toEqual([false, false]);
+
+    // ...and a step stop on the one after.
+    draw.mockReset();
+    h.button('Start again').click();
+    h.start();
+    h.breakStep();
+    h.frame(MS_PER_TICK);
+    expect(h.results.querySelector('h2')!.textContent).toBe('Something went wrong.');
+    await settle();
+    expect(offered(), 'a step stop').toEqual([false, false]);
+    expect(h.violations).toEqual([]);
   });
 
   it('once the results dialog is showing, a draw that keeps failing only parks the loop: the dialog stays as it is', () => {
