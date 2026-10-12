@@ -2562,8 +2562,20 @@ a.wy-home:focus-visible {
   pointer-events: none;
 }
 
-.wy-results-panel[data-outcome='lost'] {
+/* A run an error stopped (#191) has no outcome, and its band must not read as a win's: it takes
+   the loss red. */
+.wy-results-panel[data-outcome='lost'],
+.wy-results-panel[data-outcome='stopped'] {
   --wy-results-band: var(--wy-loss);
+}
+
+/* The stopped form hides the grade and the tiles, and the Run data toggle where there is no data
+   to save (`results-panel.ts`). Each has an explicit `display` that out-specifies the UA's
+   `[hidden] { display: none }` (the grade's only on Compact), so it is restored here. */
+.wy-results-grade[hidden],
+.wy-results-stats[hidden],
+.wy-results-more[hidden] {
+  display: none;
 }
 
 /* The scroller. Its inline size is the panel's, never its content's, so it can be the

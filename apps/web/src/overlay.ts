@@ -40,7 +40,7 @@ import { createModalOwner, type ModalOverlay, type ModalOwner } from './modal';
 import { chipIcon, dialDash, creepIcon, paintCreepIcon } from './hud-icons';
 import { dockButtonParts, type ShellChip, type ShellHandle } from './shell';
 import { paintSwatch, releaseSwatch } from './swatch';
-import { createResultsPanel } from './results-panel';
+import { createResultsPanel, type StoppedRun } from './results-panel';
 import type { InstallHandle, InstallState } from './install';
 import type { ArmedTower, UiState, PlacementOutcome, RunStats } from './controller';
 import type { SurveySlots } from './survey-form';
@@ -102,9 +102,18 @@ export interface Overlay {
    *  (the modified-activation check and the live-run state read) is `main.ts`'s, which owns
    *  the guard; this just shows the dialog and calls `onConfirm` if the player commits. */
   showLeave(onConfirm: () => void): void;
+  /** Close the leave confirmation as if the player chose Stay, and drop its commit action
+   *  (#191): a run an error stopped has nothing left to protect, and the dialog would
+   *  otherwise come back over the next, unstarted run. A no-op when it is not open. */
+  hideLeave(): void;
   /** Open the results dialog for a finished run: `hud` carries the outcome, score and stars,
    *  `stats` the run's numbers (`Controller.runStats`, #181 H2). */
   showResults(hud: HudVM, stats: RunStats): void;
+  /** Open the SAME dialog for a run an error stopped (#191), in the panel's stopped form
+   *  (`ResultsPanel.renderStopped`): where the run stopped, Start again, and Run data only
+   *  where the run's data can be saved. Priority, first focus, Escape, Back and `hideResults`
+   *  are a finished run's. */
+  showStopped(stopped: StoppedRun): void;
   hideResults(): void;
   /** Write the results dialog's ONE shared status region — the `role="status"`
    *  `aria-live="polite"` paragraph every secondary action reports through (Verify, and
@@ -891,6 +900,21 @@ export function createOverlay(
       results.hidden = true;
     },
   };
+  /** The results dialog's open lifecycle, for a finished run and a stopped one (#191) alike:
+   *  `fill` renders the panel for whichever it is. */
+  function openResults(fill: () => void): void {
+    // Modal-family open lifecycle (same as settings/rotate): abort any in-flight
+    // placement gesture first — the input manager's inert commit-guard is the net, but
+    // every opener aborts for itself so the ghost never lingers behind the dialog.
+    abortGesture();
+    cancelCapture?.(); // a match can end mid-rebind — drop the armed capture so the first
+    // Enter activates Play Again instead of being swallowed into a rebind.
+    fill();
+    results.setAttribute('aria-label', resultsPanel.title.textContent ?? '');
+    resultsStatus.textContent = '';
+    // Results is state-driven: Escape is consumed, never a dismissal (no `dismissOnEscape`).
+    modal.open(resultsOverlay, { priority: 'results', backExits: true });
+  }
   const settingsOverlay: ModalOverlay = {
     show(): void {
       settingsDialog.hidden = false;
@@ -2796,18 +2820,17 @@ export function createOverlay(
       leaveConfirmHandler = onConfirm;
       modal.open(leaveOverlay, { priority: 'settings', dismissOnEscape: true });
     },
+    hideLeave(): void {
+      leaveConfirmHandler = null;
+      modal.close(leaveOverlay);
+    },
     showResults(hud: HudVM, stats: RunStats): void {
-      // Modal-family open lifecycle (same as settings/rotate): abort any in-flight
-      // placement gesture first — the input manager's inert commit-guard is the net, but
-      // every opener aborts for itself so the ghost never lingers behind the dialog.
-      abortGesture();
-      cancelCapture?.(); // a match can end mid-rebind — drop the armed capture so the first
-      // Enter activates Play Again instead of being swallowed into a rebind.
-      resultsPanel.render({ won: hud.won, score: hud.score, stars: hud.stars, stats });
-      results.setAttribute('aria-label', resultsPanel.title.textContent ?? '');
-      resultsStatus.textContent = '';
-      // Results is state-driven: Escape is consumed, never a dismissal (no `dismissOnEscape`).
-      modal.open(resultsOverlay, { priority: 'results', backExits: true });
+      openResults(() =>
+        resultsPanel.render({ won: hud.won, score: hud.score, stars: hud.stars, stats }),
+      );
+    },
+    showStopped(stopped: StoppedRun): void {
+      openResults(() => resultsPanel.renderStopped(stopped));
     },
     hideResults(): void {
       resultsStatus.textContent = '';

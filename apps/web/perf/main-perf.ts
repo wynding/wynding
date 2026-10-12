@@ -25,7 +25,7 @@ import { parseRulesetJson } from '@wynding/sim';
 import { STRESS_RULESET_URL, STRESS_BOARD_ID } from '@wynding/content/stress';
 import { stressAnchors, towerIdAt, BUILD_TICKS, PLACEMENTS_PER_TICK } from '@wynding/perf';
 import { mount as mountScene } from '@wynding/render/scene';
-import { createApp } from '../src/main';
+import { createApp, rafScheduler } from '../src/main';
 import { createController, type Controller, type ControllerHooks } from '../src/controller';
 
 // ---- M2-S10 P8: semantic trace markers (perf-build only — this module never ships) ----
@@ -191,11 +191,11 @@ async function main(): Promise<void> {
   const bundle = parseRulesetJson(bundleText);
 
   // 2) Wire the REAL app — `sceneFactory` is the real Phaser mount, `schedule` is the
-  // real rAF, `controllerFactory` injects the stress bundle through `ControllerContent`
-  // (`controller.ts`) instead of the production `getBundledRuleset()` path. The created
-  // controller is captured via closure: `createApp` calls `controllerFactory`
-  // synchronously before it returns, so `controller` is assigned by the time the call
-  // below completes.
+  // app's own rAF scheduler (`boot()`'s), `controllerFactory` injects the stress bundle
+  // through `ControllerContent` (`controller.ts`) instead of the production
+  // `getBundledRuleset()` path. The created controller is captured via closure: `createApp`
+  // calls `controllerFactory` synchronously before it returns, so `controller` is assigned
+  // by the time the call below completes.
   let controller!: Controller;
   createApp(document, root, {
     // P8: a delegating wrapper around the real Phaser mount, bracketing `draw` with the
@@ -217,15 +217,7 @@ async function main(): Promise<void> {
         },
       };
     },
-    schedule: (onFrame: (nowMs: number) => void) => {
-      let id = 0;
-      const loop = (now: number): void => {
-        onFrame(now);
-        id = requestAnimationFrame(loop);
-      };
-      id = requestAnimationFrame(loop);
-      return (): void => cancelAnimationFrame(id);
-    },
+    schedule: rafScheduler,
     now: () => performance.now(),
     seed: 1234,
     controllerFactory: () => {

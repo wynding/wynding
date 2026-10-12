@@ -9,10 +9,11 @@ import { GRID } from './layout-probe';
 // sizes on its way — the projection falls back to 1px cells. Baking the board's static art
 // at that size once threw from inside the renderer's `draw()` (a rounded rect smaller than
 // its own inset asked Canvas2D for a negative arc radius, which it rejects), and an
-// exception escaping `draw()` stops the frame loop for good: the sim, the HUD and the board
-// all froze. These drive the two real ways a board gets that small and require the run to
-// keep ticking with no error of any kind — the bake reports a failure on the console rather
-// than throwing, so a console error fails these too.
+// exception escaping `draw()` then stopped the frame loop for good: the sim, the HUD and the
+// board all froze. (Since #191 the loop skips such a frame and holds the sim, and a draw that
+// keeps failing stops the run with a message.) These drive the two real ways a board gets
+// that small and require the run to keep ticking with no error of any kind — the bake
+// reports a failure on the console rather than throwing, so a console error fails these too.
 //
 // Each waits for the RENDERER to have taken the tiny size in before going on: the canvas's
 // inline width is written only by the renderer's own sizing, which starts when Phaser is READY.

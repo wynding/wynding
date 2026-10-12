@@ -14,9 +14,9 @@
 // pointed back at the previous bake, every texture key the attempt added is removed, both its
 // canvases are freed, and its inputs are not recorded. Each cleanup step runs on its own and
 // logs its own failure, so cleanup can neither hide the original error nor throw out of
-// `ensure` — an exception out of the renderer's `draw()` stops apps/web's frame loop, and the
-// sim and the HUD freeze with the board. The previous art stays on screen; before any bake has
-// succeeded, the board stays blank.
+// `ensure` — an exception out of the renderer's `draw()` costs apps/web that frame and holds
+// its sim, and one that recurs every frame stops the run (#191). The previous art stays on
+// screen; before any bake has succeeded, the board stays blank.
 //
 // RETRY. A failed attempt is not repeated for `BAKE_RETRY_FRAMES` frames, about a second,
 // unless the inputs change first — so a failure that recurs costs one attempt a second, not

@@ -209,7 +209,8 @@ export interface CaptureSnapshot {
 
 export interface Controller {
   readonly ruleset: CompiledRuleset;
-  /** Feed wall-clock ms since the last frame; scales by speed unless paused. */
+  /** Feed wall-clock ms since the last frame; scales by speed unless paused. Steps nothing
+   *  while the run is held, paused, resolved or stopped (`stop()`). */
   advance(wallDtMs: number): void;
   /** The interpolation snapshot for the current frame. */
   frame(): FrameSnapshot;
@@ -323,6 +324,20 @@ export interface Controller {
   startRun(seed: number): void;
   /** True once the match is won or lost. */
   isTerminal(): boolean;
+  /** Stop the run for good after an error in the app's frame loop (#191): until `startRun()`,
+   *  `advance()` never steps again, whatever `start()`, `resume()` or the speed say. It is not
+   *  an outcome: `isTerminal()` still reads the sim, and nothing is recorded, rewound or
+   *  captured. After a tick that THREW, the sim state is half-stepped (`step` mutates it in
+   *  place) and that tick's inputs are already recorded, so nothing derived from the live state
+   *  can be trusted again; `main.ts` keeps what it shows from the last good frame. */
+  stop(): void;
+  /** Whether `stop()` has stopped this run (#191). `startRun()` clears it. */
+  isStopped(): boolean;
+  /** How many ticks have recorded their inputs this run: `buildReplay().tickInputs.length`,
+   *  without the copy. At every boundary it equals the sim's tick (`capture()`), but a tick
+   *  records its inputs BEFORE it steps, so it also counts a tick that threw (#191): the tick
+   *  being stepped when the throw came is `ticksRecorded() - 1`. */
+  ticksRecorded(): number;
   /** Assemble the recorded replay envelope. */
   buildReplay(): Replay;
   /** The playtrace capture boundary (#133). All three fields are read TOGETHER so they
@@ -588,6 +603,7 @@ export function createController(
   let paused: boolean;
   let spd: Speed;
   let frozen: boolean; // set on the terminal transition — stops recording/stepping
+  let stopped: boolean; // set by `stop()` after an error (#191) — never steps again this run
   let cur: { col: number; row: number };
   let ghost: GhostVM | null;
   let selection: (SelectionVM & { id: number }) | null;
@@ -842,6 +858,7 @@ export function createController(
     paused = false;
     spd = 1;
     frozen = isTerminalPhase(state.phase);
+    stopped = false; // a fresh run identity is a healthy one (#191)
     cur = {
       col: Math.min(grid.entrance.col, cols - 1),
       row: Math.min(grid.entrance.row, rows - 1),
@@ -1389,8 +1406,9 @@ export function createController(
       // `started` is checked FIRST and independently of `paused`/`frozen` (PLAN.md P4):
       // a held run (fresh or Play-again'd, not yet `start()`ed) never steps no matter what
       // resume()/togglePause()/speed do meanwhile — those toggle `paused`/`spd` harmlessly,
-      // but this gate alone decides whether a tick can ever fire.
-      if (!started || paused || frozen) return;
+      // but this gate alone decides whether a tick can ever fire. A run `stop()` stopped
+      // (#191) is held the same way, for good: its state may be half-stepped.
+      if (!started || paused || frozen || stopped) return;
       loop.advance(Math.max(0, wallDtMs) * spd);
     },
     frame(): FrameSnapshot {
@@ -1649,6 +1667,11 @@ export function createController(
       reset(nextSeed);
     },
     isTerminal: () => isTerminalPhase(state.phase),
+    stop(): void {
+      stopped = true;
+    },
+    isStopped: () => stopped,
+    ticksRecorded: () => tickInputs.length,
     buildReplay: doBuildReplay,
     capture: (): CaptureSnapshot => ({
       // `state.tick` IS the count of recorded entries applied: `onTick` pushes this

@@ -26,6 +26,13 @@
 // One sentence carries the score and the stars to assistive tech (`results.summary`, today's
 // string): it is the dialog's description, and the visual stars and score are `aria-hidden`
 // beside it so nothing is read twice. The tiles are real text.
+//
+// A RUN AN ERROR STOPPED (#191) opens the same dialog in a stopped form (`renderStopped`): the
+// heading, one sentence saying the run stopped at wave N because of an error, and Start again in
+// Play again's place. It has no outcome, so no grade and no tiles, and never Verify, which only a
+// finished run can answer. Run data stays only where the stopped run's data could be saved. The
+// sentence is the dialog's description, its visible copy `aria-hidden`, as the grade is beside
+// the summary. `render` puts every part back for the next finished run.
 
 import { t } from './i18n/t';
 import { chipIcon } from './hud-icons';
@@ -45,6 +52,15 @@ export interface ResultsOutcome {
   readonly score: number;
   readonly stars: number;
   readonly stats: RunStats;
+}
+
+/** What the panel says about a run an error stopped (#191). */
+export interface StoppedRun {
+  /** The wave the run was on, counted from 1. */
+  readonly wave: number;
+  /** Whether Run data is offered — Copy and Save, never Verify: only where the stopped run
+   *  reached the recent-runs ring, which a run whose sim step threw never does. */
+  readonly runData: boolean;
 }
 
 /** The four tiles, in reading order (row by row). */
@@ -100,6 +116,9 @@ export interface ResultsPanel {
   readonly status: HTMLElement;
   /** Fill the panel for one finished run, with the disclosure collapsed. */
   render(outcome: ResultsOutcome): void;
+  /** Fill the panel for a run an error stopped (#191), with the disclosure collapsed: no grade,
+   *  no tiles, no Verify; Start again in Play again's place; Run data as `stopped` says. */
+  renderStopped(stopped: StoppedRun): void;
   /** The dialog has just been shown, or shown again: its arrival counts as the layout moving
    *  under any press made before it (`press-guard.ts`). Place the panel, then give it its first
    *  focus — Play again (ADR 0014 §1), which then takes no Enter or Space for 500 ms, or the
@@ -338,6 +357,28 @@ export function createResultsPanel(doc: Document, dialog: HTMLElement): ResultsP
     setRunDataExpanded(runDataToggle.getAttribute('aria-expanded') !== 'true'),
   );
 
+  /** Show or hide what only a finished run has (#191): the grade, the tiles and Verify. */
+  function showOutcomeParts(shown: boolean): void {
+    grade.hidden = !shown;
+    statList.hidden = !shown;
+    verify.hidden = !shown;
+  }
+
+  /** Play again's label: Start again in the stopped form (#191). Written only when it changes. */
+  function labelPlayAgain(label: string): void {
+    if (playAgain.textContent !== label) playAgain.textContent = label;
+  }
+
+  /** Where every new dialog starts, whatever it is about. */
+  function startFresh(): void {
+    // A new dialog starts collapsed: the run data belongs to the run it was opened for.
+    setRunDataExpanded(false);
+    body.scrollTop = 0;
+    // ...and with no status floor: the last dialog's messages are not this one's.
+    statusFloor = 0;
+    status.style.minHeight = '';
+  }
+
   return {
     root,
     body,
@@ -358,6 +399,7 @@ export function createResultsPanel(doc: Document, dialog: HTMLElement): ResultsP
       subtitle.textContent = won
         ? t('results.subtitle.won', { count: stats.waveCount })
         : t('results.subtitle.lost', { launched: stats.wavesLaunched, count: stats.waveCount });
+      subtitle.removeAttribute('aria-hidden'); // which the stopped form sets (#191)
       description.textContent = t('results.summary', { score: points, stars: earned });
       // Raw digits, like every HUD glance value: the number the description states, never a
       // differently grouped one beside it.
@@ -366,12 +408,26 @@ export function createResultsPanel(doc: Document, dialog: HTMLElement): ResultsP
         star.setAttribute('data-earned', String(index < earned));
       }
       for (const stat of STATS) statValues.get(stat)!.textContent = statValue(stat, stats);
-      // A new dialog starts collapsed: the run data belongs to the run it was opened for.
-      setRunDataExpanded(false);
-      body.scrollTop = 0;
-      // ...and with no status floor: the last dialog's messages are not this one's.
-      statusFloor = 0;
-      status.style.minHeight = '';
+      // Every part the stopped form takes away comes back (#191).
+      showOutcomeParts(true);
+      labelPlayAgain(t('controls.playAgain'));
+      runDataToggle.hidden = false;
+      startFresh();
+    },
+    renderStopped({ wave, runData: offered }: StoppedRun): void {
+      // The band's colour keys on it (`ui.css`).
+      root.dataset.outcome = 'stopped';
+      title.textContent = t('results.stopped');
+      // Said once: the sentence is the dialog's description, spoken as it opens, so its visible
+      // copy is hidden from assistive tech, as the grade is beside the summary.
+      const message = t('results.subtitle.stopped', { wave });
+      subtitle.textContent = message;
+      subtitle.setAttribute('aria-hidden', 'true');
+      description.textContent = message;
+      showOutcomeParts(false);
+      labelPlayAgain(t('controls.startAgain'));
+      runDataToggle.hidden = !offered;
+      startFresh();
     },
     open(): void {
       guard.arm();

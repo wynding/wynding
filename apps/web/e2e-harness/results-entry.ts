@@ -8,9 +8,9 @@
 // content package's greedy rule): `?run=win` plays the content suite's winning showcase build
 // (WINNER_A, won on 10 lives), `?run=loss` its 12-tower prefix (lost on wave 9 of 10). The
 // app then boots on that finished run as `boot()` would — the real scene, the real overlay,
-// and `main.ts`'s requestAnimationFrame loop (restated below, as it is private there) — and
-// opens its results dialog on the first frame, with the run's own numbers. Nothing is forced:
-// the outcome, score, stars and stats are the run's.
+// and `main.ts`'s own requestAnimationFrame scheduler — and opens its results dialog on the
+// first frame, with the run's own numbers. Nothing is forced: the outcome, score, stars and
+// stats are the run's.
 //
 // `&survey=1` adds an always-offered survey with a transport that accepts every send, so the
 // panel's Give feedback can be checked (and seen) beside Play again and Run data. `&text=200`
@@ -30,8 +30,13 @@
 // frame under a pointer that was pressing the board: what the press guard's arming is for.
 // With it, `&endDelay=<ms>` plays that tick that long after the press, and `&endOnKey=1` plays it
 // on the first keydown instead.
+//
+// `&stop=step` and `&stop=draw` open the dialog's STOPPED form instead (#191): the run is played
+// to wave 3 and left live, then from the app's tenth frame a sim step throws (`step`), or every
+// draw throws until the frame loop's bound stops the run (`draw`). Nine good frames first, so the
+// HUD the message reads its wave from has refreshed.
 
-import { createApp } from '../src/main';
+import { createApp, rafScheduler } from '../src/main';
 import { createController } from '../src/controller';
 import { playScript } from '../src/scripted-run';
 import type { Controller } from '../src/controller';
@@ -44,18 +49,6 @@ import { WINNER_A } from '../../../packages/content/src/showcase-builds';
 
 /** The seed WINNER_A is tuned against (`packages/content/src/m2-golden.test.ts`). */
 const SCENARIO_SEED = 0x5eed;
-
-/** `main.ts`'s requestAnimationFrame scheduler, restated: it is private there, and this page
- *  boots `createApp` the way `boot()` does. */
-function rafScheduler(onFrame: (nowMs: number) => void): () => void {
-  let id = 0;
-  const loop = (now: number): void => {
-    onFrame(now);
-    id = requestAnimationFrame(loop);
-  };
-  id = requestAnimationFrame(loop);
-  return () => cancelAnimationFrame(id);
-}
 
 const params = new URLSearchParams(window.location.search);
 if (params.get('text') === '200') {
@@ -130,14 +123,46 @@ function endingOnPress(seed: number): Controller {
   };
 }
 
+/** A run left live at wave 3 (#191's stopped form): with `step`, its tenth `advance` throws, as a
+ *  sim step that throws would; with `draw`, it plays on until the broken draw stops it. */
+function stoppingRun(seed: number, stop: 'step' | 'draw'): Controller {
+  const controller = createController(seed);
+  playScript(controller, plan, 1_200); // wave 3 launched, the run live
+  if (controller.isTerminal()) throw new Error('results harness: the stopping run ended');
+  if (stop === 'draw') return controller;
+  let calls = 0;
+  return {
+    ...controller,
+    advance: (ms: number) => {
+      if (++calls === 10) throw new Error('results harness: the step broke');
+      controller.advance(ms);
+    },
+  };
+}
+
+const stop = params.get('stop');
 const root = document.getElementById('app');
 if (root === null) throw new Error('missing #app root element');
 createApp(document, root, {
-  sceneFactory: mount,
+  sceneFactory:
+    stop === 'draw'
+      ? (el, geometry) => {
+          const handle = mount(el, geometry);
+          let draws = 0;
+          return {
+            ...handle,
+            draw: (prev, cur, alpha, overlay) => {
+              if (++draws >= 10) throw new Error('results harness: the draw broke');
+              handle.draw(prev, cur, alpha, overlay);
+            },
+          };
+        }
+      : mount,
   schedule: rafScheduler,
   now: () => performance.now(),
   seed: SCENARIO_SEED,
   controllerFactory: (seed) => {
+    if (stop === 'step' || stop === 'draw') return stoppingRun(seed, stop);
     if (params.get('endOnPress') === '1') return endingOnPress(seed);
     const controller = createController(seed);
     playScript(controller, plan);

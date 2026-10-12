@@ -37,6 +37,7 @@ export const EN = {
   "controls.settings": "Settings",
   "controls.speed": "Speed: {factor}x",
   "controls.start": "Start",
+  "controls.startAgain": "Start again",
   "controls.verify": "Verify this run",
   "creep.armored-flyer.name": "Armored Flyer",
   "creep.armored.name": "Armored Creep",
@@ -166,7 +167,9 @@ export const EN = {
   "results.stat.towersBuilt": "Towers built",
   "results.stat.wavesCleared": "Waves cleared",
   "results.stat.wavesCleared.value": "{cleared} / {count}",
+  "results.stopped": "Something went wrong.",
   "results.subtitle.lost": "Lost with {launched} of {count} waves launched",
+  "results.subtitle.stopped": "The run stopped at wave {wave} because of an error.",
   "results.subtitle.won": "All {count} waves cleared",
   "results.summary": "Score {score} — {stars} of 3 stars",
   "results.won": "The maze held.",
@@ -274,6 +277,7 @@ export interface MessageParams {
   "controls.settings": Record<never, never>;
   "controls.speed": { "factor": string | number };
   "controls.start": Record<never, never>;
+  "controls.startAgain": Record<never, never>;
   "controls.verify": Record<never, never>;
   "creep.armored-flyer.name": Record<never, never>;
   "creep.armored.name": Record<never, never>;
@@ -403,7 +407,9 @@ export interface MessageParams {
   "results.stat.towersBuilt": Record<never, never>;
   "results.stat.wavesCleared": Record<never, never>;
   "results.stat.wavesCleared.value": { "cleared": string | number; "count": string | number };
+  "results.stopped": Record<never, never>;
   "results.subtitle.lost": { "launched": string | number; "count": string | number };
+  "results.subtitle.stopped": { "wave": string | number };
   "results.subtitle.won": { "count": string | number };
   "results.summary": { "score": string | number; "stars": string | number };
   "results.won": Record<never, never>;

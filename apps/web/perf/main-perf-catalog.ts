@@ -25,7 +25,7 @@ import {
   CATALOG_SAMPLE_START_TICK,
 } from '@wynding/perf';
 import { mount as mountScene } from '@wynding/render/scene';
-import { createApp } from '../src/main';
+import { createApp, rafScheduler } from '../src/main';
 import { createController, type Controller, type ControllerHooks } from '../src/controller';
 
 // Semantic trace markers — identical mechanism to `main-perf.ts`'s (see that file for
@@ -115,15 +115,7 @@ async function main(): Promise<void> {
         },
       };
     },
-    schedule: (onFrame: (nowMs: number) => void) => {
-      let id = 0;
-      const loop = (now: number): void => {
-        onFrame(now);
-        id = requestAnimationFrame(loop);
-      };
-      id = requestAnimationFrame(loop);
-      return (): void => cancelAnimationFrame(id);
-    },
+    schedule: rafScheduler, // the app's own, as `boot()` passes it
     now: () => performance.now(),
     seed: CATALOG_SEED,
     controllerFactory: () => {

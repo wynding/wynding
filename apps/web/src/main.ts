@@ -167,6 +167,12 @@ export interface AppHandle {
   destroy(): void;
 }
 
+/** Consecutive failed frames after which the frame loop stops the run (#191): about a second at
+ *  60 Hz, the same bound `@wynding/render`'s bake runner waits before retrying a failed bake
+ *  (`BAKE_RETRY_FRAMES`). Frames that fail while the run is paused do not count. Exported for
+ *  the tests that drive a frame to it. */
+export const FAILED_FRAME_LIMIT = 60;
+
 /** Wire the whole app into `root`. Pure of Phaser/rAF (both injected via `deps`). */
 export function createApp(doc: Document, root: HTMLElement, deps: AppDeps): AppHandle {
   // The host declaration, resolved ONCE (ADR 0012). Read here rather than at each consumer
@@ -281,12 +287,23 @@ export function createApp(doc: Document, root: HTMLElement, deps: AppDeps): AppH
       deps.wakeLock === undefined
         ? (view?.navigator as { wakeLock?: WakeLockApi } | undefined)?.wakeLock
         : deps.wakeLock,
+    // `runOver()` leads: a run an error stopped must not be asked `uiState()` (#191).
     shouldHold: (): boolean =>
+      !runOver() &&
       controller.uiState().started &&
       !controller.isPaused() &&
-      !controller.isTerminal() &&
       doc.visibilityState !== 'hidden',
   });
+
+  /** Whether the run is over: resolved, or stopped by an error (#191). Every question about
+   *  whether there is a live run to protect — the wake lock, the pause seam, the leave guard,
+   *  hardware Back — asks this rather than `isTerminal()` alone, and asks it FIRST: after a
+   *  sim step threw, the controller's live state is half-stepped, so nothing may be derived
+   *  from it (`uiState()` derives the HUD). A function declaration, so it is hoisted above
+   *  every caller wired before this line. */
+  function runOver(): boolean {
+    return controller.isStopped() || controller.isTerminal();
+  }
 
   // Every `let` that `refreshHud` closes over is declared HERE, above all the wiring below,
   // and not beside the code that uses it. `refreshHud` is reachable from hoisted callbacks
@@ -303,8 +320,22 @@ export function createApp(doc: Document, root: HTMLElement, deps: AppDeps): AppH
    *  only once the dialog is open: a throw between the capture and the open leaves it false, and
    *  the next `refreshHud` walks the edge again, which must not fold the same run into the ring
    *  twice. Set before the capture rather than after it, so a capture that throws is not retried
-   *  either: the dialog still opens on the next refresh, without that run in the ring. */
+   *  either: the dialog still opens on the next refresh, without that run in the ring. A run the
+   *  frame loop stops (#191) is captured under the same guard (`stopRun`). */
   let runCaptured = false;
+  /** Whether this run's playtrace reached the recent-runs ring: set once a capture completes,
+   *  cleared by Play again. What a stopped run's Run data offers depends on it (#191). */
+  let runRecorded = false;
+  /** The last HUD derived from a good state — what a stopped run's message reads its wave from
+   *  (#191), since nothing may be derived from a half-stepped one. */
+  let lastHud: HudVM | null = null;
+  /** The frame loop's failure state (#191): whether the last frame failed after the sim step
+   *  (the sim is held until one completes), how many frames IN A ROW have failed while the run
+   *  was not paused (the count that stops the run), and each distinct error already logged. All
+   *  cleared by Play again. */
+  let frameHeld = false;
+  let failedFrames = 0;
+  const frameErrorsLogged = new Set<string>();
   /** The results dialog's live-region claim counter (#133 review round). Declared HERE,
    *  beside `resultsShown`, for the reason the comment above gives: `refreshHud` can be
    *  reached during construction, and a `let` declared further down would sit in its
@@ -587,7 +618,16 @@ export function createApp(doc: Document, root: HTMLElement, deps: AppDeps): AppH
   /** One HUD/overlay refresh from the controller's current state. Called from the frame
    *  loop's memo-key gate, and directly (out of band) when install state changes. */
   function refreshHud(): void {
+    if (controller.isStopped()) {
+      // A run an error stopped (#191) derives nothing: after a sim step threw, the live state
+      // is half-stepped. The HUD keeps its last good refresh until a new run starts. Only the
+      // wake lock is reconciled (the note at the end of this function), and its predicate now
+      // releases it.
+      wakeLock.refresh();
+      return;
+    }
     const hud = controller.hud();
+    lastHud = hud;
     overlay.update({
       hud,
       paused: controller.isPaused(),
@@ -603,13 +643,11 @@ export function createApp(doc: Document, root: HTMLElement, deps: AppDeps): AppH
       // Capture BEFORE the dialog opens (#133). The controller is frozen at the terminal
       // transition, so nothing can move between here and the export. At most ONE capture
       // attempt per run, whatever follows: if a step below throws, `resultsShown` stays false
-      // and the next `refreshHud` (an input handler's) walks this edge again, so the capture
-      // keeps its own guard rather than riding the dialog's. A capture that itself throws is
-      // not retried; the next walk opens the dialog without it.
-      if (!runCaptured) {
-        runCaptured = true;
-        capturePlaytrace(hud);
-      }
+      // and the next `refreshHud` walks this edge again — the next frame's, which retries a
+      // refresh that threw (#191), or an input handler's — so the capture keeps its own guard
+      // rather than riding the dialog's. A capture that itself throws is not retried; the next
+      // walk opens the dialog without it.
+      captureRunOnce(hud);
       // Opening a dialog invalidates anything still in flight for the previous one. The
       // invariant held via `resultsShown` + `playAgain` alone, but only by accident of
       // there being one re-open path; enforcing it where the dialog actually opens means a
@@ -653,24 +691,27 @@ export function createApp(doc: Document, root: HTMLElement, deps: AppDeps): AppH
    *  because of the contract in the paragraph above. Guarding at the caller would retire
    *  "any caller can invoke it unconditionally" and leave the other three still pausing
    *  finished runs. `overlay.ts`'s own `runLive` has carried the same term all along; this
-   *  seam simply lacked it. */
+   *  seam simply lacked it. A run an error stopped (#191) is over too, and `runOver()` asks
+   *  that first, before `uiState()` can derive anything from a half-stepped state. */
   function ensurePaused(): void {
-    if (!controller.uiState().started || controller.isPaused() || controller.isTerminal()) return;
+    if (runOver() || !controller.uiState().started || controller.isPaused()) return;
     controller.pause();
     refreshHud();
   }
 
-  /** Fold the just-finished run into the recent-runs ring (#133).
+  /** Fold the just-finished run into the recent-runs ring (#133) — or a run the frame loop
+   *  stopped (#191, `stopRun`), whose sim is whole, captured as it stands; `hud` is then null,
+   *  since no survey describes a stopped run.
    *
    *  The three capture facts come from ONE `controller.capture()` call rather than three
    *  reads, so `ticksCompleted`, the world hash pinned to that boundary, and the pending
    *  buffer can never describe different moments. */
-  function capturePlaytrace(hud: HudVM): void {
+  function capturePlaytrace(hud: HudVM | null): void {
     const snapshot = controller.capture();
     const replay = controller.buildReplay();
     // The survey describes this same capture (ADR 0014 §4), so the two can never disagree
     // about which moment the run ended at.
-    terminalRun = { replay, snapshot, hud };
+    if (hud !== null) terminalRun = { replay, snapshot, hud };
     playtrace.capture({
       runId,
       replay,
@@ -679,6 +720,17 @@ export function createApp(doc: Document, root: HTMLElement, deps: AppDeps): AppH
       pendingInputs: snapshot.pendingInputs,
       viewport: playtraceViewport(),
     });
+    runRecorded = true;
+  }
+
+  /** The ONE capture attempt a run gets (#133, #181 H2): the run is marked captured BEFORE the
+   *  attempt, so a capture that throws is never retried. The terminal edge and a run the frame
+   *  loop stops (#191) both come through here; each keeps its own failure behaviour, since this
+   *  lets a throw out. */
+  function captureRunOnce(hud: HudVM | null): void {
+    if (runCaptured) return;
+    runCaptured = true;
+    capturePlaytrace(hud);
   }
 
   /** The two export actions. Local only — nothing leaves the device, which is why neither
@@ -887,7 +939,8 @@ export function createApp(doc: Document, root: HTMLElement, deps: AppDeps): AppH
       (e: MouseEvent) => {
         if (e.defaultPrevented) return;
         if (e.button !== 0 || e.metaKey || e.ctrlKey || e.shiftKey || e.altKey) return;
-        if (controller.isTerminal()) return; // resolved → nothing to lose, navigate natively
+        // Resolved, or stopped by an error (#191) → nothing to lose, navigate natively.
+        if (runOver()) return;
         // Read at click time like every other term here, never cached: a plan can be queued or
         // committed between any two clicks. `frame()` already runs every frame, so one more call
         // on a click costs nothing.
@@ -977,8 +1030,9 @@ export function createApp(doc: Document, root: HTMLElement, deps: AppDeps): AppH
    *  caller — one pause path, not a second one. */
   const backHandler = createBackHandler({
     modal: overlay.modal,
-    isRunLive: () =>
-      controller.uiState().started && !controller.isPaused() && !controller.isTerminal(),
+    // Both predicates ask `runOver()` FIRST (#191): a stopped run is over, so Back on its
+    // message exits like the results dialog's, and nothing is derived from its state.
+    isRunLive: () => !runOver() && controller.uiState().started && !controller.isPaused(),
     // A PAUSED run is still a run the player has — and so is a board full of PENDING
     // BUILDS on a run that has not started yet. This must be the same question the home
     // link's interceptor asks (`!started && !hasPlan` → let the navigation through), or
@@ -986,7 +1040,7 @@ export function createApp(doc: Document, root: HTMLElement, deps: AppDeps): AppH
     // player who queued six towers pre-start and pressed Back would have them thrown
     // away, while the same player clicking the wordmark would be asked first.
     isRunUnresolved: () => {
-      if (controller.isTerminal()) return false;
+      if (runOver()) return false;
       if (controller.uiState().started) return true;
       const pending = controller.frame();
       return pending.pendingAdds.length > 0 || pending.pendingSells.length > 0;
@@ -1045,6 +1099,8 @@ export function createApp(doc: Document, root: HTMLElement, deps: AppDeps): AppH
         controller.escape();
         break;
       case 'playAgain':
+        // Also Start again, on the message a run an error stopped shows (#191): the same path,
+        // and `startRun` is what clears the controller's stopped state.
         // A fresh seed AND a fresh `runId`, minted together — this is the run-start edge.
         controller.startRun(beginRun());
         input.reset(); // no armed gesture from the previous run identity carries over (#40)
@@ -1063,6 +1119,11 @@ export function createApp(doc: Document, root: HTMLElement, deps: AppDeps): AppH
         board.focus();
         resultsShown = false;
         runCaptured = false; // the next run is captured at its own terminal edge
+        runRecorded = false;
+        // The next run's frames start healthy: no held sim, and its errors logged afresh (#191).
+        frameHeld = false;
+        failedFrames = 0;
+        frameErrorsLogged.clear();
         lastHudKey = '';
         // Repaint the HUD NOW rather than waiting for the next scheduled frame (#53): the
         // fresh run is held (un-ticking) at wave 1's initial countdown, so until a frame
@@ -1089,11 +1150,68 @@ export function createApp(doc: Document, root: HTMLElement, deps: AppDeps): AppH
     }
   }
 
+  // THE FRAME LOOP AND ITS FAILURE POLICY (#191). A throw anywhere in a frame once ended the
+  // loop for good and silently: nothing stepped or drew again, and only the console knew. The
+  // policy tells two failures apart, because only one of them can harm a replay.
+  //
+  // A SIM STEP THAT THROWS stops the run for good. `step` mutates the state in place, and the
+  // controller records a tick's inputs before stepping it, so a loop that carried on would
+  // re-run that tick on half-applied state and record its inputs twice: a run no replay
+  // re-simulates. So the controller is stopped (nothing steps again), and nothing is derived
+  // from its live state from then on: the board keeps the frame it last drew and the HUD its
+  // last refresh, both made from the last good state, and the message takes its wave from the
+  // last good HUD. Its run data is not offered: a capture would hash a half-written state.
+  //
+  // ANYTHING ELSE IN THE FRAME THAT THROWS (building the frame, draining its feedback, the leak
+  // cue, drawing, the board's data attributes, the HUD refresh) leaves the sim whole. That
+  // frame is skipped, each distinct error is logged once, and the sim is HELD (no `advance`,
+  // its time dropped as a pause drops it) until a frame completes, so nothing plays out unseen.
+  // A HUD refresh that threw is retried by the next frame: its memo key is recorded only once
+  // the refresh completes. `FAILED_FRAME_LIMIT` failed frames in a row stop the run as a step's
+  // throw does, but with the sim whole, so the run is captured as it stands and its data
+  // offered. A PAUSED run's failed frames are not counted: it has progress to lose and cannot
+  // play on unseen, and a draw that fails only in one layout (behind the rotate prompt, say) may
+  // recover. They are still logged and still hold the sim, and the count resumes with the run.
+  // A run not yet started counts: it has nothing to lose, and the message helps.
+  //
+  // Either way the player is told where the results dialog would open (`stopRun`). That message
+  // is modal, so the Shell is inert and no board, Card or Dock input reaches the stopped run;
+  // what can still arrive (backgrounding, hardware Back, an install event) asks `runOver()` or
+  // `refreshHud()`, and both ask about the stop first. Holding or stopping the sim is
+  // replay-safe the way a pause is: the sim never sees it.
   let lastNow = deps.now();
   const cancel = deps.schedule((now: number) => {
     const dt = now - lastNow;
     lastNow = now;
-    controller.advance(dt);
+    if (controller.isStopped()) return; // a stopped run steps, derives and draws nothing more
+    if (!frameHeld) {
+      try {
+        controller.advance(dt);
+      } catch (error) {
+        stopRun('step', error);
+        return;
+      }
+    }
+    try {
+      presentFrame(now);
+    } catch (error) {
+      frameHeld = true;
+      if (!controller.isPaused()) failedFrames++;
+      try {
+        reportFrameError(error);
+      } finally {
+        // A report that throws must not stand between a failing frame and its bound.
+        if (failedFrames >= FAILED_FRAME_LIMIT) stopRun('frame', error);
+      }
+      return;
+    }
+    frameHeld = false;
+    failedFrames = 0;
+  });
+
+  /** Everything a frame does after the sim step: build it, draw it, and refresh the HUD. Any
+   *  throw out of here skips the frame and holds the sim (the policy above). */
+  function presentFrame(now: number): void {
     const f = controller.frame();
     // Kills and leaks since the last frame (#181 C1): the board bursts and pulses for them, and
     // the lives chip shows the leaks, no more often than its cue allows (`leak-cue.ts`).
@@ -1144,10 +1262,87 @@ export function createApp(doc: Document, root: HTMLElement, deps: AppDeps): AppH
     // placement, which changes nothing else here).
     const hudKey = `${f.curVm.tick}|${controller.isPaused()}|${controller.speed()}|${selId}|${f.pendingRevision}|${controller.uiRev()}|${installRev}`;
     if (hudKey !== lastHudKey) {
-      lastHudKey = hudKey;
       refreshHud();
+      // Recorded only once the refresh completes (#191): a refresh that threw leaves the key
+      // where it was, so the next frame retries it — paused or at the terminal edge, the key
+      // would otherwise never move again, and the refresh would never be retried.
+      lastHudKey = hudKey;
     }
-  });
+  }
+
+  /** Log a failed frame's error, once per distinct error (#191): in production too, since a
+   *  frame that keeps failing is otherwise invisible, but once, so a draw that fails every frame
+   *  does not flood the console. An error is told apart by its name and message, not its stack:
+   *  a stack also records the path that called the frame, which says nothing about the error. */
+  function reportFrameError(error: unknown): void {
+    let key: string;
+    try {
+      key = error instanceof Error ? `${error.name}: ${error.message}` : String(error);
+    } catch {
+      key = '(an error with no printable text)';
+    }
+    if (frameErrorsLogged.has(key)) return;
+    frameErrorsLogged.add(key);
+    console.error(
+      'Wynding: a frame failed and was skipped; the sim holds until one completes.',
+      error,
+    );
+  }
+
+  /** Stop the run for good after an error (#191) and tell the player, where the results dialog
+   *  would open. `cause` is which half of the frame failed: a sim `'step'` that threw, or the
+   *  `'frame'` after it failing `FAILED_FRAME_LIMIT` times in a row.
+   *
+   *  The controller is stopped FIRST, so nothing can step between here and anything below. The
+   *  error is logged with its tick, in production as well as DEV: it is the one record of the
+   *  stop a player can hand on. Only a frame stop captures the run (under the terminal edge's own
+   *  one-capture guard), since its sim is whole; a step's throw left the state half-stepped, so
+   *  that run's data is never offered. Once the results dialog is already showing, the run was
+   *  over and captured before this, so the dialog is left as it is: the stop only parks the loop. */
+  function stopRun(cause: 'step' | 'frame', error: unknown): void {
+    controller.stop();
+    // A gesture in flight is DROPPED, never cancelled through the controller: the
+    // message's open aborts gestures, and cancelling a Card drag asks `uiState()`, which derives
+    // from the state a step's throw left half-stepped. Start again resets the controller's arm.
+    if (cause === 'step') input.reset();
+    // Stopped, this reconciles the wake lock alone, and its predicate now releases it: first,
+    // so nothing below that fails can leave the screen held awake.
+    refreshHud();
+    const recorded = controller.ticksRecorded();
+    if (cause === 'step') {
+      console.error(
+        `Wynding: the run stopped: a sim step threw while stepping tick ${String(recorded - 1)}.`,
+        error,
+      );
+    } else {
+      console.error(
+        `Wynding: the run stopped at tick ${String(recorded)}: ${String(FAILED_FRAME_LIMIT)} ` +
+          'frames in a row failed after the sim step (each distinct error is logged above).',
+      );
+    }
+    if (!resultsShown) {
+      if (cause === 'frame') {
+        try {
+          captureRunOnce(null);
+        } catch (captureError) {
+          // The message still opens, without the run data a failed capture cannot back.
+          console.error('Wynding: the stopped run could not be captured.', captureError);
+        }
+      }
+      // Opening the dialog invalidates anything still in flight for an earlier one, as at the
+      // terminal edge.
+      abandonResultsStatus();
+      // A leave confirmation open over the run (a not-yet-started run with a plan can have
+      // one) is dismissed as Stay: Start again closes only the results dialog, and the
+      // confirmation would come back over the fresh run.
+      overlay.hideLeave();
+      overlay.showStopped({
+        // The wave the run was on: waves launched, by the last good HUD, and at least the first.
+        wave: Math.max(1, lastHud?.waveCursor ?? 0),
+        runData: cause === 'frame' && runRecorded,
+      });
+    }
+  }
 
   return {
     destroy(): void {
@@ -1201,12 +1396,20 @@ function dismissalStorage(): StorageAdapter {
   return appStorage;
 }
 
-/** requestAnimationFrame-backed scheduler (the real per-frame driver). */
-function rafScheduler(onFrame: (nowMs: number) => void): () => void {
+/** requestAnimationFrame-backed scheduler (the real per-frame driver). Exported so the pages
+ *  that boot `createApp` themselves (the e2e results harness, the perf harnesses) drive it
+ *  exactly as `boot()` does.
+ *
+ *  The next frame is asked for BEFORE `onFrame` runs (#191): a throw that `onFrame` does not
+ *  catch leaves the loop running rather than ending it for good. That is safe only because the
+ *  app's frame catches its own failures and stops the run on a sim step's throw (`createApp`'s
+ *  frame loop); alone, this order would re-run a throwing tick on half-applied state every
+ *  frame. And a `cancel` from inside `onFrame` now cancels the frame already asked for. */
+export function rafScheduler(onFrame: (nowMs: number) => void): () => void {
   let id = 0;
   const loop = (now: number): void => {
-    onFrame(now);
     id = requestAnimationFrame(loop);
+    onFrame(now);
   };
   id = requestAnimationFrame(loop);
   return () => cancelAnimationFrame(id);
