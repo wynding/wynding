@@ -958,6 +958,42 @@ export default tseslint.config(
     },
   },
   {
+    // The e2e specs' `test` is the fixtures' (#196): it fails a test on any console error or
+    // uncaught page error the test did not declare, and a spec on Playwright's own `test`
+    // would silently lack that. So would a browser a spec launches through Playwright's own
+    // `chromium`, `firefox` or `webkit`: the fixtures' versions watch every context it makes.
+    // Type imports (`type Page`) and the rest of Playwright stay allowed from
+    // `@playwright/test`. The files are every name Playwright's default `testMatch` would
+    // discover under `e2e/` (`*.spec.*` and `*.test.*`), not only the `.spec.ts` the suite
+    // uses, so a test file named otherwise is still held to it. This is the ONLY
+    // `no-restricted-imports` object that matches `apps/web/e2e` (the zones above match
+    // `packages/*/src` and `apps/*/src`), so it replaces nothing; give these files another and
+    // the two must be merged, as at the top of this file.
+    files: ['apps/web/e2e/**/*.{spec,test}.{ts,tsx,mts,cts,js,jsx,mjs,cjs}'],
+    rules: {
+      'no-restricted-imports': [
+        'error',
+        {
+          paths: [
+            {
+              name: '@playwright/test',
+              importNames: ['test', 'chromium', 'firefox', 'webkit'],
+              allowTypeImports: true,
+              message:
+                "Import `test`, and any browser type you launch, from './fixtures': its `test` fails a test on any undeclared console error or uncaught page error, in every context its `chromium`, `firefox` and `webkit` make too; `expect` and the rest are re-exported there.",
+            },
+            ...['playwright', 'playwright-core'].map((name) => ({
+              name,
+              allowTypeImports: true,
+              message:
+                "Import Playwright from './fixtures', which re-exports `@playwright/test` with the error tripwire's `test` and browser types.",
+            })),
+          ],
+        },
+      ],
+    },
+  },
+  {
     // Node CI/tooling scripts run under the Node runtime, not the browser — allow
     // the Node globals they legitimately use.
     // `**/scripts/` (not `scripts/`): flat-config globs are repo-root-relative, so the

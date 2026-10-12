@@ -17,7 +17,7 @@
 // covers six MECHANISMS (the sixth, #153, is the Compact Rail paying the top inset) and
 // structurally cannot reach the rest. It also holds #172's Standard Rail walks, which share
 // #153's walk and check that Standard's Rail needs no top inset of its own.
-import { test, expect, type Page } from '@playwright/test';
+import { test, expect, type Page } from './fixtures';
 import { TARGET_MIN_PX } from './targets';
 
 const PHONE = { width: 658, height: 320 }; // Compact — Galaxy S9+ landscape

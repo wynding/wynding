@@ -1,4 +1,4 @@
-import { test, expect, type Locator, type Page } from '@playwright/test';
+import { test, expect, type Locator, type Page } from './fixtures';
 import { boxOf, expectSameBox, openResults, toggleOf, twoFrames } from './results-harness';
 
 // results-panel-scrollbar.spec.ts — the results panel (#181 H2) where a scrollbar takes room.

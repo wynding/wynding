@@ -1,4 +1,4 @@
-import { test, expect, type Page } from '@playwright/test';
+import { test, expect, type Page } from './fixtures';
 import AxeBuilder from '@axe-core/playwright';
 import { PNG } from 'pngjs';
 import { HARNESS, toggleOf } from './results-harness';
@@ -58,132 +58,153 @@ async function resolveColour(page: Page, value: string): Promise<string> {
   }, value);
 }
 
+// What each stop kind logs (`stopRun` and `reportFrameError`, `main.ts`), declared apart from the
+// spec's own checks: the fixture (`fixtures.ts`) fails a test on any console error or uncaught
+// page error it did not declare, and on a declared pattern that never came. So "nothing
+// escaped to the page" and "the stop is logged" are held there, for every test below.
+const FRAME_FAILED =
+  /^Wynding: a frame failed and was skipped; the sim holds until one completes\./;
+const FRAMES_STOP =
+  /^Wynding: the run stopped at tick \d+: \d+ frames in a row failed after the sim step/;
+const STOP_LOGS = {
+  step: [/^Wynding: the run stopped: a sim step threw while stepping tick \d+\./],
+  draw: [FRAME_FAILED, FRAMES_STOP],
+  // A render that keeps failing (#195) fails the app's frames as a draw that keeps failing does.
+  render: [FRAME_FAILED, FRAMES_STOP],
+} as const;
+
 for (const stop of ['step', 'draw', 'render'] as const) {
-  for (const size of SIZES) {
-    test(`a ${stop} stop opens the stopped form at ${String(size.width)}x${String(size.height)}`, async ({
-      page,
-      browserName,
-    }) => {
-      test.skip(
-        browserName === 'webkit' && stop !== 'render',
-        "the app's own stops run in Chromium only; WebKit runs the render breaks",
-      );
-      await page.setViewportSize(size);
-      const pageErrors: string[] = [];
-      const consoleErrors: string[] = [];
-      page.on('pageerror', (e) => pageErrors.push(e.message));
-      page.on('console', (m) => {
-        if (m.type() === 'error') consoleErrors.push(m.text());
+  test.describe(`a ${stop} stop`, () => {
+    test.use({ expectedErrors: { patterns: STOP_LOGS[stop] } });
+    for (const size of SIZES) {
+      test(`a ${stop} stop opens the stopped form at ${String(size.width)}x${String(size.height)}`, async ({
+        page,
+        browserName,
+      }) => {
+        test.skip(
+          browserName === 'webkit' && stop !== 'render',
+          "the app's own stops run in Chromium only; WebKit runs the render breaks",
+        );
+        await page.setViewportSize(size);
+        const consoleErrors: string[] = [];
+        page.on('console', (m) => {
+          if (m.type() === 'error') consoleErrors.push(m.text());
+        });
+        await page.goto(`${HARNESS}?stop=${stop}`);
+        if (stop === 'render') await skipUnlessWebGL(page, browserName);
+
+        const dialog = page.getByRole('dialog', { name: 'Something went wrong.' });
+        await expect(dialog).toBeVisible({ timeout: 30_000 });
+        const sentence = 'The run stopped at wave 3 because of an error.';
+        await expect(dialog).toHaveAccessibleDescription(sentence);
+        // ...said once: its visible copy is `aria-hidden` beside the description.
+        const subtitle = dialog.locator('.wy-results-subtitle');
+        await expect(subtitle).toHaveText(sentence);
+        await expect(subtitle).toBeVisible();
+        await expect(subtitle).toHaveAttribute('aria-hidden', 'true');
+
+        // No outcome: no grade, no tiles, no Play again; Start again takes its place and its focus.
+        await expect(page.locator('.wy-results-grade')).toBeHidden();
+        await expect(page.locator('.wy-results-stats')).toBeHidden();
+        await expect(dialog.getByRole('button', { name: 'Play again' })).toHaveCount(0);
+        const startAgain = dialog.getByRole('button', { name: 'Start again' });
+        await expect(startAgain).toBeFocused();
+
+        // Run data: Copy and Save after a draw or render stop (the sim whole), never Verify;
+        // nothing at all after a step stop.
+        const toggle = toggleOf(dialog);
+        if (stop !== 'step') {
+          await expect(toggle).toBeVisible();
+          await toggle.click();
+          await expect(dialog.getByRole('button', { name: 'Copy run data' })).toBeVisible();
+          await expect(dialog.getByRole('button', { name: 'Save run data' })).toBeVisible();
+        } else {
+          await expect(toggle).toBeHidden();
+        }
+        await expect(dialog.getByRole('button', { name: 'Verify this run' })).toBeHidden();
+
+        // The band takes the loss red: a stopped run must not read as a win.
+        const band = await page.evaluate(
+          () =>
+            getComputedStyle(document.querySelector('.wy-results-panel')!, '::before')
+              .backgroundColor,
+        );
+        expect(band).toBe(await resolveColour(page, 'var(--wy-loss)'));
+
+        const audit = await new AxeBuilder({ page }).include('#app').analyze();
+        expect(audit.violations, 'axe violations').toEqual([]);
+
+        // State-driven: Escape is consumed, never a dismissal.
+        await page.keyboard.press('Escape');
+        await expect(dialog).toBeVisible();
+
+        if (stop === 'step') {
+          // Start again: a fresh run, held at its start, that a player can begin.
+          await page.waitForTimeout(600); // past the press guard's hold on a fresh dialog
+          await startAgain.click();
+          await expect(dialog).toBeHidden();
+          const board = page.locator('.wy-board');
+          await expect(board).toHaveAttribute('data-started', 'false');
+          await expect(board).toHaveAttribute('data-sim-tick', '0');
+        }
+
+        if (stop === 'render') {
+          // The failed frames were logged once, with what Phaser's render threw (#195).
+          expect(
+            consoleErrors.filter((m) => m.startsWith('Wynding: a frame failed')),
+            "the render's own error, logged once",
+          ).toEqual([expect.stringContaining('results harness: the render broke')]);
+        }
       });
-      await page.goto(`${HARNESS}?stop=${stop}`);
-      if (stop === 'render') await skipUnlessWebGL(page, browserName);
-
-      const dialog = page.getByRole('dialog', { name: 'Something went wrong.' });
-      await expect(dialog).toBeVisible({ timeout: 30_000 });
-      const sentence = 'The run stopped at wave 3 because of an error.';
-      await expect(dialog).toHaveAccessibleDescription(sentence);
-      // ...said once: its visible copy is `aria-hidden` beside the description.
-      const subtitle = dialog.locator('.wy-results-subtitle');
-      await expect(subtitle).toHaveText(sentence);
-      await expect(subtitle).toBeVisible();
-      await expect(subtitle).toHaveAttribute('aria-hidden', 'true');
-
-      // No outcome: no grade, no tiles, no Play again; Start again takes its place and its focus.
-      await expect(page.locator('.wy-results-grade')).toBeHidden();
-      await expect(page.locator('.wy-results-stats')).toBeHidden();
-      await expect(dialog.getByRole('button', { name: 'Play again' })).toHaveCount(0);
-      const startAgain = dialog.getByRole('button', { name: 'Start again' });
-      await expect(startAgain).toBeFocused();
-
-      // Run data: Copy and Save after a draw or render stop (the sim whole), never Verify; nothing
-      // at all after a step stop.
-      const toggle = toggleOf(dialog);
-      if (stop !== 'step') {
-        await expect(toggle).toBeVisible();
-        await toggle.click();
-        await expect(dialog.getByRole('button', { name: 'Copy run data' })).toBeVisible();
-        await expect(dialog.getByRole('button', { name: 'Save run data' })).toBeVisible();
-      } else {
-        await expect(toggle).toBeHidden();
-      }
-      await expect(dialog.getByRole('button', { name: 'Verify this run' })).toBeHidden();
-
-      // The band takes the loss red: a stopped run must not read as a win.
-      const band = await page.evaluate(
-        () =>
-          getComputedStyle(document.querySelector('.wy-results-panel')!, '::before')
-            .backgroundColor,
-      );
-      expect(band).toBe(await resolveColour(page, 'var(--wy-loss)'));
-
-      const audit = await new AxeBuilder({ page }).include('#app').analyze();
-      expect(audit.violations, 'axe violations').toEqual([]);
-
-      // State-driven: Escape is consumed, never a dismissal.
-      await page.keyboard.press('Escape');
-      await expect(dialog).toBeVisible();
-
-      if (stop === 'step') {
-        // Start again: a fresh run, held at its start, that a player can begin.
-        await page.waitForTimeout(600); // past the press guard's hold on a fresh dialog
-        await startAgain.click();
-        await expect(dialog).toBeHidden();
-        const board = page.locator('.wy-board');
-        await expect(board).toHaveAttribute('data-started', 'false');
-        await expect(board).toHaveAttribute('data-sim-tick', '0');
-      }
-
-      // Nothing escaped to the page: the stop is caught, and its one record is the console's.
-      expect(pageErrors, 'nothing uncaught').toEqual([]);
-      expect(
-        consoleErrors.some((m) => m.startsWith('Wynding: the run stopped')),
-        'the stop is logged',
-      ).toBe(true);
-      if (stop === 'render') {
-        // ...after the failed frames, logged once with what Phaser's render threw (#195).
-        expect(
-          consoleErrors.filter((m) => m.startsWith('Wynding: a frame failed')),
-          "the render's own error, logged once",
-        ).toEqual([expect.stringContaining('results harness: the render broke')]);
-      }
-    });
-  }
+    }
+  });
 }
 
-test('a renderer that never starts stops the run, rather than letting it play on behind a blank board', async ({
-  page,
-  browserName,
-}) => {
-  test.skip(
-    browserName === 'webkit',
-    "the boot break is Phaser's own JavaScript: Chromium runs it",
-  );
-  // The stop waits out the never-started bound, which counts draws: on a runner drawing well
-  // under 60 a second that is far more than the bound's 10 s, so give the test room.
-  test.setTimeout(90_000);
-  const pageErrors: string[] = [];
-  const consoleErrors: string[] = [];
-  page.on('pageerror', (e) => pageErrors.push(e.message));
-  page.on('console', (m) => {
-    if (m.type() === 'error') consoleErrors.push(m.text());
+test.describe('a boot stop', () => {
+  // Phaser's boot throws where nothing can catch it, in an image's load handler: the run's one
+  // uncaught error. The draws' bound then reports the loop that never started, and the failed
+  // frames stop the run.
+  test.use({
+    expectedErrors: {
+      patterns: [/^uncaught Error: results harness: the boot broke$/, FRAME_FAILED, FRAMES_STOP],
+    },
   });
-  await page.goto(`${HARNESS}?stop=boot`);
-  // Phaser's boot threw where nothing can catch it, in an image's load handler: uncaught, once.
-  await expect
-    .poll(() => pageErrors, { timeout: 15_000 })
-    .toEqual(['results harness: the boot broke']);
-  // READY never comes, so the draws' bound says so, and the frame loop stops the run.
-  const dialog = page.getByRole('dialog', { name: 'Something went wrong.' });
-  await expect(dialog).toBeVisible({ timeout: 60_000 });
-  // The run plays on from wave 3 until the bound runs out, so how far it got is the runner's
-  // frame rate: wave 3 here, wave 4 on CI's. Any wave from the one it started on will do.
-  await expect(dialog).toHaveAccessibleDescription(
-    /^The run stopped at wave (?:[3-9]|10) because of an error\.$/,
-  );
-  expect(
-    consoleErrors.filter((m) => m.startsWith('Wynding: a frame failed')),
-    'the never-started error, logged once',
-  ).toEqual([expect.stringContaining("the board's renderer never started")]);
+
+  test('a renderer that never starts stops the run, rather than letting it play on behind a blank board', async ({
+    page,
+    browserName,
+  }) => {
+    test.skip(
+      browserName === 'webkit',
+      "the boot break is Phaser's own JavaScript: Chromium runs it",
+    );
+    // The stop waits out the never-started bound, which counts draws: on a runner drawing well
+    // under 60 a second that is far more than the bound's 10 s, so give the test room.
+    test.setTimeout(90_000);
+    const pageErrors: string[] = [];
+    const consoleErrors: string[] = [];
+    page.on('pageerror', (e) => pageErrors.push(e.message));
+    page.on('console', (m) => {
+      if (m.type() === 'error') consoleErrors.push(m.text());
+    });
+    await page.goto(`${HARNESS}?stop=boot`);
+    // Phaser's boot threw where nothing can catch it, in an image's load handler: uncaught, once.
+    await expect
+      .poll(() => pageErrors, { timeout: 15_000 })
+      .toEqual(['results harness: the boot broke']);
+    // READY never comes, so the draws' bound says so, and the frame loop stops the run.
+    const dialog = page.getByRole('dialog', { name: 'Something went wrong.' });
+    await expect(dialog).toBeVisible({ timeout: 60_000 });
+    // The run plays on from wave 3 until the bound runs out, so how far it got is the runner's
+    // frame rate: wave 3 here, wave 4 on CI's. Any wave from the one it started on will do.
+    await expect(dialog).toHaveAccessibleDescription(
+      /^The run stopped at wave (?:[3-9]|10) because of an error\.$/,
+    );
+    expect(
+      consoleErrors.filter((m) => m.startsWith('Wynding: a frame failed')),
+      'the never-started error, logged once',
+    ).toEqual([expect.stringContaining("the board's renderer never started")]);
+  });
 });
 
 /** `n` animation frames from now. */
@@ -238,57 +259,61 @@ async function drawnShare(page: Page): Promise<number> {
   return drawn / (png.width * png.height);
 }
 
-test('a render that breaks once costs Phaser a frame: the board draws again, and the run carries on', async ({
-  page,
-  browserName,
-}) => {
-  // Room for the board-change poll below to wait out a wave's countdown on a slow runner.
-  test.setTimeout(90_000);
-  const pageErrors: string[] = [];
-  const consoleErrors: string[] = [];
-  page.on('pageerror', (e) => pageErrors.push(e.message));
-  page.on('console', (m) => {
-    if (m.type() === 'error') consoleErrors.push(m.text());
+test.describe('a one-off render break', () => {
+  // One failed frame, logged once; never a stop, whose log nothing here declares.
+  test.use({ expectedErrors: { patterns: [FRAME_FAILED] } });
+
+  test('a render that breaks once costs Phaser a frame: the board draws again, and the run carries on', async ({
+    page,
+    browserName,
+  }) => {
+    // Room for the board-change poll below to wait out a wave's countdown on a slow runner.
+    test.setTimeout(90_000);
+    const consoleErrors: string[] = [];
+    page.on('console', (m) => {
+      if (m.type() === 'error') consoleErrors.push(m.text());
+    });
+    await page.goto(`${HARNESS}?stop=render-once`);
+    await skipUnlessWebGL(page, browserName);
+
+    type Break = { threw: number; frame: () => number };
+    const threw = (): Promise<number> =>
+      page.evaluate(() => (window as unknown as { __wyRenderBreak: Break }).__wyRenderBreak.threw);
+    const phaserFrame = (): Promise<number> =>
+      page.evaluate(() =>
+        (window as unknown as { __wyRenderBreak: Break }).__wyRenderBreak.frame(),
+      );
+    const board = page.locator('.wy-board');
+    const tick = async (): Promise<number> => Number(await board.getAttribute('data-sim-tick'));
+
+    // Phaser's render threw, once.
+    await expect.poll(threw, { timeout: 30_000 }).toBe(1);
+    const frameAtBreak = await phaserFrame();
+    const tickAtBreak = await tick();
+    // Half a second of animation frames on, Phaser's loop has gone on: its frame count has moved,
+    // and the board is drawn again.
+    await animationFrames(page, 30);
+    expect.soft(await phaserFrame(), "Phaser's frame count").toBeGreaterThan(frameAtBreak + 10);
+    expect.soft(await drawnShare(page), 'the share of the board drawn').toBeGreaterThan(0.25);
+    // ...and drawn live, not frozen on its last good frame: creeps move across a live board, so a
+    // board whose draws stopped recording (Phaser re-rendering what was last recorded while the
+    // app's frames complete) never changes, and fails here. On a slow runner wave 3 can be
+    // cleared by now, leaving nothing to move until wave 4 launches; its countdown started with
+    // wave 3's launch and lasts 15 s, so the poll waits that out. A frozen board fails however
+    // long it waits.
+    const drawnAgain = await boardShot(page);
+    await expect
+      .poll(async () => changedShare(drawnAgain, await boardShot(page)), { timeout: 25_000 })
+      .toBeGreaterThan(0.001);
+    // And the run carries on: the sim held for the frame that failed, then stepped on.
+    await expect.poll(tick, { timeout: 10_000 }).toBeGreaterThan(tickAtBreak + 10);
+
+    // One failed frame: held and logged once, with what the render threw, and never a stop.
+    await expect(page.getByRole('dialog')).toBeHidden();
+    expect(await threw(), 'the render broke once').toBe(1);
+    expect(
+      consoleErrors.filter((m) => m.startsWith('Wynding: a frame failed')),
+      "the render's own error, logged once",
+    ).toEqual([expect.stringContaining('results harness: the render broke')]);
   });
-  await page.goto(`${HARNESS}?stop=render-once`);
-  await skipUnlessWebGL(page, browserName);
-
-  type Break = { threw: number; frame: () => number };
-  const threw = (): Promise<number> =>
-    page.evaluate(() => (window as unknown as { __wyRenderBreak: Break }).__wyRenderBreak.threw);
-  const phaserFrame = (): Promise<number> =>
-    page.evaluate(() => (window as unknown as { __wyRenderBreak: Break }).__wyRenderBreak.frame());
-  const board = page.locator('.wy-board');
-  const tick = async (): Promise<number> => Number(await board.getAttribute('data-sim-tick'));
-
-  // Phaser's render threw, once.
-  await expect.poll(threw, { timeout: 30_000 }).toBe(1);
-  const frameAtBreak = await phaserFrame();
-  const tickAtBreak = await tick();
-  // Half a second of animation frames on, Phaser's loop has gone on: its frame count has moved,
-  // and the board is drawn again.
-  await animationFrames(page, 30);
-  expect.soft(await phaserFrame(), "Phaser's frame count").toBeGreaterThan(frameAtBreak + 10);
-  expect.soft(await drawnShare(page), 'the share of the board drawn').toBeGreaterThan(0.25);
-  // ...and drawn live, not frozen on its last good frame: creeps move across a live board, so a
-  // board whose draws stopped recording (Phaser re-rendering what was last recorded while the
-  // app's frames complete) never changes, and fails here. On a slow runner wave 3 can be cleared
-  // by now, leaving nothing to move until wave 4 launches; its countdown started with wave 3's
-  // launch and lasts 15 s, so the poll waits that out. A frozen board fails however long it waits.
-  const drawnAgain = await boardShot(page);
-  await expect
-    .poll(async () => changedShare(drawnAgain, await boardShot(page)), { timeout: 25_000 })
-    .toBeGreaterThan(0.001);
-  // And the run carries on: the sim held for the frame that failed, then stepped on.
-  await expect.poll(tick, { timeout: 10_000 }).toBeGreaterThan(tickAtBreak + 10);
-
-  // One failed frame: held and logged once, with what the render threw, and never a stop.
-  await expect(page.getByRole('dialog')).toBeHidden();
-  expect(await threw(), 'the render broke once').toBe(1);
-  expect(
-    consoleErrors.filter((m) => m.startsWith('Wynding: a frame failed')),
-    "the render's own error, logged once",
-  ).toEqual([expect.stringContaining('results harness: the render broke')]);
-  expect(consoleErrors.filter((m) => m.startsWith('Wynding: the run stopped'))).toEqual([]);
-  expect(pageErrors, 'nothing uncaught').toEqual([]);
 });

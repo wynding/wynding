@@ -1,4 +1,4 @@
-import { test, expect } from '@playwright/test';
+import { test, expect } from './fixtures';
 
 // persistence.spec.ts — #142's headline claim, measured where it actually lives.
 //

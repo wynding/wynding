@@ -1,4 +1,4 @@
-import { test, expect, chromium, type Page } from '@playwright/test';
+import { test, expect, chromium, type Page } from './fixtures';
 import { PNG } from 'pngjs';
 import { createProjection, resolvePalette } from '@wynding/render';
 import { GRID } from './layout-probe';
@@ -211,9 +211,12 @@ for (const dsf of [0.9, 0.8] as const) {
     try {
       // `deviceScaleFactor: undefined` keeps Playwright Test from filling in the project's
       // emulated scale, which a context without a viewport refuses.
-      const page = await (
-        await browser.newContext({ viewport: null, deviceScaleFactor: undefined, baseURL })
-      ).newPage();
+      const context = await browser.newContext({
+        viewport: null,
+        deviceScaleFactor: undefined,
+        baseURL,
+      });
+      const page = await context.newPage();
       await stage(page);
       // A 1280×720 page at that scale, not an emulated one.
       expect(

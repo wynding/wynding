@@ -1,4 +1,4 @@
-import { test, expect, chromium, type Page } from '@playwright/test';
+import { test, expect, chromium, type Page } from './fixtures';
 import { PNG } from 'pngjs';
 import { createProjection, resolvePalette, roleColour, towerRoleFor } from '@wynding/render';
 import { GRID } from './layout-probe';
