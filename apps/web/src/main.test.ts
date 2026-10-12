@@ -41,7 +41,14 @@ import { mount as mountMock } from '@wynding/render/scene';
 import { paintSwatch, releaseSwatch } from './swatch';
 import { hexColour } from './hud-icons';
 import { attachInput as attachInputMock } from './input';
-import { createApp, boot, FAILED_FRAME_LIMIT, type AppDeps, type Scheduler } from './main';
+import {
+  createApp,
+  boot,
+  rafScheduler,
+  FAILED_FRAME_LIMIT,
+  type AppDeps,
+  type Scheduler,
+} from './main';
 import { createController, type Controller } from './controller';
 import { MAX_RECENT_AGE_MS } from './playtrace';
 import { validateSurveyPayload, type SurveyPayload } from '@wynding/feedback';
@@ -566,14 +573,19 @@ describe('main — a frame that throws (#191)', () => {
         const guarded =
           <A extends unknown[], R>(name: string, read: (...args: A) => R) =>
           (...args: A): R => {
-            if (stepBroke && real.isStopped()) {
+            if (stepBroke) {
               violations.push(name);
               throw new Error(`${name}() read a run whose step threw`);
             }
             return read(...args);
           };
-        const { hud, capture } = real;
+        const { hud, capture, startRun } = real;
         controller = Object.assign(real, {
+          // A new run identity is a healthy one: the guard is off again.
+          startRun: (nextSeed: number): void => {
+            stepBroke = false;
+            startRun(nextSeed);
+          },
           frame: guarded('frame', real.frame),
           drainFeedback: guarded('drainFeedback', real.drainFeedback),
           drainSparks: guarded('drainSparks', real.drainSparks),
@@ -979,6 +991,70 @@ describe('main — a frame that throws (#191)', () => {
     h.frame(); // paused, so only the retry can move it
     expect(card.getAttribute('aria-pressed')).toBe('true');
     expect(messages()).toEqual([FAILED_FRAME]);
+  });
+
+  it('a Card drag in flight when a step throws is dropped, never cancelled through the half-stepped controller: the message still opens', () => {
+    const h = stopApp();
+    h.start();
+    const card = h.root.querySelector<HTMLElement>('.wy-card')!;
+    const touch = (type: string, x: number): Event => {
+      const e = new Event(type, { bubbles: true, cancelable: true });
+      Object.assign(e, { clientX: x, clientY: 0, pointerType: 'touch', button: 0, pointerId: 7 });
+      return e;
+    };
+    card.dispatchEvent(touch('pointerdown', 0));
+    card.dispatchEvent(touch('pointermove', 30)); // past the drag threshold: the drag arms its tower
+    expect(h.controller().uiState().armed, 'the drag armed its tower').not.toBeNull();
+    h.breakStep();
+    h.frame(MS_PER_TICK); // cancelling the drag through the controller would throw out of here
+    expect(h.results.hidden, 'the message opened').toBe(false);
+    card.dispatchEvent(touch('pointerup', 30)); // the finger lifts behind the message
+    expect(h.violations).toEqual([]);
+  });
+
+  it('a frame error that cannot be printed still reaches the bound: the run stops and says so', () => {
+    const h = stopApp();
+    h.start();
+    const unprintable: unknown = Object.create(null); // no toString or valueOf: String() throws
+    vi.mocked(fakeHandle.draw).mockImplementation(() => {
+      throw unprintable;
+    });
+    for (let i = 0; i < FAILED_FRAME_LIMIT; i++) h.frame(MS_PER_TICK);
+    expect(h.controller().isStopped()).toBe(true);
+    expect(h.results.hidden).toBe(false);
+    expect(logged.mock.calls[0]![1], 'logged once, as itself').toBe(unprintable);
+  });
+
+  it('Start again clears the frame loop’s failure state: the next run’s first failed frame is logged afresh and stops nothing', () => {
+    const h = stopApp();
+    h.start();
+    const draw = vi.mocked(fakeHandle.draw);
+    draw.mockImplementation(() => {
+      throw new Error('the draw broke');
+    });
+    for (let i = 0; i < FAILED_FRAME_LIMIT; i++) h.frame(MS_PER_TICK);
+    expect(h.controller().isStopped()).toBe(true);
+    draw.mockReset();
+    h.button('Start again').click();
+    h.start();
+    draw.mockImplementationOnce(() => {
+      throw new Error('the draw broke');
+    });
+    h.frame(MS_PER_TICK);
+    expect(h.results.hidden, 'one failed frame stops nothing').toBe(true);
+    expect(messages().filter((m) => m === FAILED_FRAME)).toHaveLength(2);
+  });
+
+  it('a held run whose draw starts failing after its first HUD refresh says wave 1, never wave 0', () => {
+    const h = stopApp();
+    h.frame(); // a good frame: the last good HUD is the held run's, with no wave launched yet
+    vi.mocked(fakeHandle.draw).mockImplementation(() => {
+      throw new Error('the draw broke');
+    });
+    for (let i = 0; i < FAILED_FRAME_LIMIT; i++) h.frame();
+    expect(h.results.querySelector('.wy-results-subtitle')!.textContent).toBe(
+      'The run stopped at wave 1 because of an error.',
+    );
   });
 });
 
@@ -2127,6 +2203,30 @@ describe('main — boot()', () => {
     expect(mountMock).toHaveBeenCalledOnce();
     handle!.destroy();
     vi.unstubAllGlobals();
+  });
+
+  it('rafScheduler: a cancel from inside a frame cancels the frame already asked for (#191)', () => {
+    const queued = new Map<number, FrameRequestCallback>();
+    let ids = 0;
+    vi.stubGlobal('requestAnimationFrame', (fn: FrameRequestCallback) => {
+      queued.set(++ids, fn);
+      return ids;
+    });
+    vi.stubGlobal('cancelAnimationFrame', (id: number) => queued.delete(id));
+    try {
+      let frames = 0;
+      const cancel = rafScheduler(() => {
+        frames++;
+        cancel();
+      });
+      const [first] = [...queued.values()];
+      queued.clear();
+      first!(16);
+      expect(frames).toBe(1);
+      expect(queued.size, 'the frame asked for inside was cancelled').toBe(0);
+    } finally {
+      vi.unstubAllGlobals();
+    }
   });
 
   it('a booted frame that throws, uncaught, still has the next frame asked for (#191)', async () => {
