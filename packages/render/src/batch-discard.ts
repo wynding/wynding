@@ -38,7 +38,9 @@ export interface BatchedPipeline {
  *  (`PipelineManager#pipelines`, a `CustomMap` keyed by name). Absent under the Canvas renderer. */
 export interface PipelineHolder {
   readonly pipelines?: {
-    readonly pipelines?: { each(callback: (name: string, pipeline: BatchedPipeline) => void): void };
+    readonly pipelines?: {
+      each(callback: (name: string, pipeline: BatchedPipeline) => void): void;
+    };
   };
 }
 
