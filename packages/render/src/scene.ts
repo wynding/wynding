@@ -1,11 +1,24 @@
 // scene.ts — the Phaser 3 board renderer (WebGL). This is the ONLY file that touches Phaser,
 // and it decides nothing: it builds the Phaser objects and hands them, as structural
 // interfaces, to the Phaser-free modules that do — `bake-runner.ts` (when and how the static
-// art is baked, and what happens when that fails), `sprite-pool.ts` (which sprite shows what),
-// `board-frame.ts` (everything drawn per frame, layer by layer) and `sparks.ts`. It is
-// excluded from unit coverage (not meaningfully testable under jsdom) and exercised by the
-// Playwright e2e suite instead. Draws board-space visuals only — the HUD and all controls are
-// a DOM overlay owned by apps/web (ADR 0003 §3: canvas text isn't semantic/axe-visible).
+// art is baked, and what happens when that fails), `loop-guard.ts` (what happens when Phaser's
+// own frame loop fails or stops), `sprite-pool.ts` (which sprite shows what), `board-frame.ts`
+// (everything drawn per frame, layer by layer) and `sparks.ts`. It is excluded from unit
+// coverage (not meaningfully testable under jsdom) and exercised by the Playwright e2e suite
+// instead. Draws board-space visuals only — the HUD and all controls are a DOM overlay owned by
+// apps/web (ADR 0003 §3: canvas text isn't semantic/axe-visible).
+//
+// WHAT A FAILURE DOES. `draw()` records a frame; Phaser's own loop makes the pixels from what it
+// recorded, on the same animation frames. `draw()` throws only what keeps the board from being
+// drawn, and apps/web's frame loop takes that as a failed frame: its sim holds, each distinct
+// error is logged once, and a failure that lasts stops the run, or holds a paused one (#191). A
+// bake that fails throws nothing (`bake-runner.ts`). A step of Phaser's loop that throws costs
+// Phaser that frame, not its loop, and the next `draw()` throws what it threw; so does every
+// `draw()` after a READY listener that threw, or once Phaser's loop has stopped stepping (#195,
+// `loop-guard.ts`). A loop that never started (Phaser's boot failed before our READY listener ran)
+// is reported the same way once about ten seconds of frames have passed with no READY. These last
+// three only a new renderer can draw past, so `needsRemount()` says so: a reset clears a run, not a
+// loop that stopped or never started.
 //
 // STATIC ART IS BAKED, NOT RE-RECORDED (V2, #181). The board, every tower and every creep's
 // body and shadow are painted once into textures and shown by sprites: one board image, and
@@ -20,6 +33,7 @@ import Phaser from 'phaser';
 import { createProjection, type Projection } from './projection';
 import { createDprTracker, clampDpr } from './dpr-tracker';
 import { createBakeRunner, type BakedArt } from './bake-runner';
+import { createLoopGuard } from './loop-guard';
 import { createSpritePool } from './sprite-pool';
 import { createSparkStore } from './sparks';
 import { createScorchTracker } from './scorches';
@@ -204,11 +218,17 @@ export function mount(el: HTMLElement, geometry: BoardGeometry): RenderHandle {
     if (targets !== null) applyBackingStoreSize(rect.width, rect.height, dpr, rawDpr);
   };
 
+  // Phaser's own frame loop (#195, `loop-guard.ts`): its step and the READY listener run through
+  // the guard, and every draw asks it what keeps the board from being drawn.
+  const loopGuard = createLoopGuard();
   // Scale.NONE (not RESIZE, #28/P5): RESIZE auto-stretches the canvas' CSS AND backing
   //-store size to the parent on its own internal ResizeObserver, which would fight
   // `applyBackingStoreSize`'s explicit device-px backing store + pinned-CSS-size
   // recipe. Under NONE, `game.scale.resize()` and the canvas style are the only things
   // that ever touch the canvas' size — sizing is fully explicit.
+  //
+  // No `fps` config: Phaser's loop runs on animation frames, not `forceSetTimeOut`'s timers, and
+  // counts every one, which `loop-guard.ts` relies on to tell a stopped loop from a running one.
   const game = new Phaser.Game({
     type: Phaser.AUTO,
     parent: el,
@@ -216,6 +236,15 @@ export function mount(el: HTMLElement, geometry: BoardGeometry): RenderHandle {
     scale: { mode: Phaser.Scale.NONE, width: 1, height: 1 },
     render: { antialias: true },
     scene: { create() {}, update() {} },
+    callbacks: {
+      // Phaser binds `game.step` for its loop right after this hook (`Game#start`, Phaser
+      // 3.90.0), so the step its loop runs is this one: Phaser's own, through the guard, where
+      // a throw costs Phaser a frame rather than its loop.
+      postBoot: (g) => {
+        const step = g.step.bind(g);
+        g.step = (time, delta) => loopGuard.runStep(() => step(time, delta));
+      },
+    },
   });
   const sceneOf = (): Phaser.Scene => game.scene.scenes[0] as Phaser.Scene;
 
@@ -310,7 +339,7 @@ export function mount(el: HTMLElement, geometry: BoardGeometry): RenderHandle {
   // What a frame draws into — the board image, the live layers and the sprite pools, each at
   // its depth in `layers.ts` — complete at READY.
   let targets: BoardTargets | null = null;
-  game.events.once(Phaser.Core.Events.READY, () => {
+  const ready = (): void => {
     if (destroyed) return;
     const scene = sceneOf();
     // Each live layer's depth comes from the name it was made under. Its circles are polygons
@@ -343,7 +372,10 @@ export function mount(el: HTMLElement, geometry: BoardGeometry): RenderHandle {
         devicePixelObserver.observe(game.canvas, { box: 'device-pixel-content-box' });
       }
     }
-  });
+  };
+  // Phaser starts its loop only once its READY listeners have returned (`Game#texturesReady`),
+  // so this one runs through the guard, which keeps what it throws for the next draw.
+  game.events.once(Phaser.Core.Events.READY, () => loopGuard.runReady(ready));
 
   const draw = (
     prevVm: RenderVM | null,
@@ -359,10 +391,16 @@ export function mount(el: HTMLElement, geometry: BoardGeometry): RenderHandle {
       sparks: overlay.sparks,
       renderTick: renderTimeOf(prevVm, curVm, alpha),
     });
+    // What keeps the board from being drawn (#195, `loop-guard.ts`): the READY listener failed,
+    // Phaser's loop has stopped, or its last step failed. Thrown below, it fails the app's frame
+    // (#191): the sim holds, and a failure that lasts stops the run (a paused one is only held).
+    const failure = loopGuard.check(game.getFrame());
     // Spark points arrive drained — the controller clears them — so dropping them here would
-    // lose those flashes for good. Before READY there is no game clock: hold them unstamped.
-    if (targets === null) {
+    // lose those flashes for good. Before READY there is no game clock, and a failed frame shows
+    // nothing: hold them unstamped for the next frame drawn.
+    if (failure !== null || targets === null) {
       sparks.hold(overlay.sparks);
+      if (failure !== null) throw failure.error;
       return; // Phaser not READY yet — nothing to draw into
     }
     if (resizeObserver === null) syncProjection(); // fallback only when no ResizeObserver
@@ -402,8 +440,12 @@ export function mount(el: HTMLElement, geometry: BoardGeometry): RenderHandle {
       if (targets !== null)
         resetBoardFrame(targets, { scorches, aim, fire, feedback, drawnPoints });
     },
+    needsRemount(): boolean {
+      return loopGuard.needsRemount();
+    },
     destroy(): void {
       destroyed = true;
+      loopGuard.destroy(); // Phaser's next step is its teardown, run bare (`loop-guard.ts`)
       sparks.clear();
       resizeObserver?.disconnect();
       devicePixelObserver?.disconnect();

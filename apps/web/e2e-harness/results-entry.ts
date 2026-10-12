@@ -35,7 +35,21 @@
 // to wave 3 and left live, then from the app's tenth frame a sim step throws (`step`), or every
 // draw throws until the frame loop's bound stops the run (`draw`). Nine good frames first, so the
 // HUD the message reads its wave from has refreshed.
+//
+// `&stop=render` and `&stop=render-once` break Phaser's own frame loop instead (#195), the loop
+// that makes the board's pixels from what the app's draw records. From the app's tenth frame,
+// `MultiPipeline#batchSprite`, which batches every image Phaser's WebGL renderer draws, throws on
+// every call (`render`) or on its next call only (`render-once`): Phaser's real render pass
+// throws, as it would on a sprite left on a removed texture. The run is `draw`'s, live at wave 3;
+// the lasting break stops it as a draw stop does, and the run carries on past the one-off.
+// `window.__wyRenderBreak` counts the throws and reads Phaser's frame count. It is the harness's
+// one reach into Phaser itself, through apps/web's `phaser` dev dependency, which resolves to the
+// install the scene runs on: one module, so the patch reaches the game the app mounts. Both
+// packages take Phaser's version from the workspace catalog (`pnpm-workspace.yaml`), so a bump
+// moves them together; were the two ever to resolve apart, the breaks would miss the game and
+// their specs would fail.
 
+import Phaser from 'phaser';
 import { createApp, rafScheduler } from '../src/main';
 import { createController } from '../src/controller';
 import { playScript } from '../src/scripted-run';
@@ -124,12 +138,12 @@ function endingOnPress(seed: number): Controller {
 }
 
 /** A run left live at wave 3 (#191's stopped form): with `step`, its tenth `advance` throws, as a
- *  sim step that throws would; with `draw`, it plays on until the broken draw stops it. */
-function stoppingRun(seed: number, stop: 'step' | 'draw'): Controller {
+ *  sim step that throws would; otherwise it plays on, until a broken draw or render stops it. */
+function stoppingRun(seed: number, stop: 'step' | 'draw' | 'render'): Controller {
   const controller = createController(seed);
   playScript(controller, plan, 1_200); // wave 3 launched, the run live
   if (controller.isTerminal()) throw new Error('results harness: the stopping run ended');
-  if (stop === 'draw') return controller;
+  if (stop !== 'step') return controller;
   let calls = 0;
   return {
     ...controller,
@@ -140,7 +154,57 @@ function stoppingRun(seed: number, stop: 'step' | 'draw'): Controller {
   };
 }
 
+/** What `&stop=render` and `&stop=render-once` let a spec read, as `window.__wyRenderBreak`
+ *  (deliberately not a `declare global`: see `tsconfig.json`'s note on test-only globals). */
+interface RenderBreak {
+  /** Throws made so far. */
+  threw: number;
+  /** Phaser's frame count (`Game#getFrame`): -1 until Phaser has batched an image. */
+  frame: () => number;
+}
+
+/** Break Phaser's real render pass from the returned `arm()` on (#195): `MultiPipeline#
+ *  batchSprite` throws on every call, or on its next call only. Patched on the prototype, so it
+ *  reaches every pipeline that batches images, and before the scene mounts. */
+function breakRender(once: boolean): () => void {
+  const control: RenderBreak = { threw: 0, frame: () => -1 };
+  (window as unknown as { __wyRenderBreak: RenderBreak }).__wyRenderBreak = control;
+  type Pipeline = Phaser.Renderer.WebGL.Pipelines.MultiPipeline;
+  const proto = Phaser.Renderer.WebGL.Pipelines.MultiPipeline.prototype;
+  const batchSprite = proto.batchSprite;
+  let armed = false;
+  proto.batchSprite = function (this: Pipeline, ...args: Parameters<Pipeline['batchSprite']>) {
+    const game = this.game;
+    control.frame = () => game.getFrame();
+    if (armed) {
+      armed = !once;
+      control.threw += 1;
+      throw new Error('results harness: the render broke');
+    }
+    batchSprite.apply(this, args);
+  };
+  return () => {
+    armed = true;
+  };
+}
+
+/** Break Phaser's boot ahead of the scene's READY listener (#195): `SceneManager#bootQueue`, which
+ *  Phaser's own READY listener runs before the scene's, throws once, so READY never reaches the
+ *  scene, Phaser's loop never starts and nothing draws the board, as a renderer whose boot failed
+ *  (a shader that will not compile, a context lost while booting) leaves it. */
+function breakBoot(): void {
+  const proto = Phaser.Scenes.SceneManager.prototype as unknown as { bootQueue: () => void };
+  const bootQueue = proto.bootQueue;
+  proto.bootQueue = function () {
+    proto.bootQueue = bootQueue;
+    throw new Error('results harness: the boot broke');
+  };
+}
+
 const stop = params.get('stop');
+if (stop === 'boot') breakBoot();
+const armRenderBreak =
+  stop === 'render' || stop === 'render-once' ? breakRender(stop === 'render-once') : null;
 const root = document.getElementById('app');
 if (root === null) throw new Error('missing #app root element');
 createApp(document, root, {
@@ -157,12 +221,25 @@ createApp(document, root, {
             },
           };
         }
-      : mount,
+      : armRenderBreak !== null
+        ? (el, geometry) => {
+            const handle = mount(el, geometry);
+            let draws = 0;
+            return {
+              ...handle,
+              draw: (prev, cur, alpha, overlay) => {
+                if (++draws === 10) armRenderBreak();
+                handle.draw(prev, cur, alpha, overlay);
+              },
+            };
+          }
+        : mount,
   schedule: rafScheduler,
   now: () => performance.now(),
   seed: SCENARIO_SEED,
   controllerFactory: (seed) => {
     if (stop === 'step' || stop === 'draw') return stoppingRun(seed, stop);
+    if (armRenderBreak !== null || stop === 'boot') return stoppingRun(seed, 'render');
     if (params.get('endOnPress') === '1') return endingOnPress(seed);
     const controller = createController(seed);
     playScript(controller, plan);

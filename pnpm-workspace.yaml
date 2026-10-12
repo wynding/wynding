@@ -1,3 +1,9 @@
 packages:
   - 'packages/*'
   - 'apps/*'
+
+# Phaser is declared twice: by @wynding/render, which mounts the game, and by apps/web, whose e2e
+# harness patches Phaser's prototypes to break its render and its boot (#195). The patches reach
+# the game only while both resolve to the one install, so both take their version from here.
+catalog:
+  phaser: ^3.90.0

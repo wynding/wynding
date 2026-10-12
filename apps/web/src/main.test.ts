@@ -10,7 +10,12 @@ import { MS_PER_TICK, isTerminalPhase, type SimPhase } from '@wynding/sim';
 // hoisted above imports, so the fake handle + spy live inside it and are read back via
 // the mocked module.
 vi.mock('@wynding/render/scene', () => {
-  const handle: RenderHandle = { draw: vi.fn(), reset: vi.fn(), destroy: vi.fn() };
+  const handle: RenderHandle = {
+    draw: vi.fn(),
+    reset: vi.fn(),
+    needsRemount: vi.fn(() => false),
+    destroy: vi.fn(),
+  };
   return { mount: vi.fn(() => handle) };
 });
 
@@ -534,12 +539,14 @@ describe('main — a frame that throws (#191)', () => {
     const violations: string[] = [];
     const saved: { filename: string; text: string }[] = [];
     let controller!: Controller;
+    const reload = vi.fn();
     const app = createApp(document, root, {
       sceneFactory: () => fakeHandle,
       schedule: sched.schedule,
       now: () => clock,
       seed: 1,
       navigate: vi.fn(),
+      reload,
       playtraceDelivery: {
         copy: async () => {},
         save: (filename: string, text: string) => void saved.push({ filename, text }),
@@ -623,6 +630,7 @@ describe('main — a frame that throws (#191)', () => {
       results,
       saved,
       violations,
+      reload,
       frame,
       offers,
       controller: (): Controller => controller,
@@ -714,6 +722,10 @@ describe('main — a frame that throws (#191)', () => {
     expect(h.results.hidden).toBe(false);
 
     h.button('Start again').click();
+    expect(
+      h.reload,
+      'a renderer that can still draw is reset, not reloaded',
+    ).not.toHaveBeenCalled();
     expect(h.results.hidden).toBe(true);
     expect(h.controller().isStopped()).toBe(false);
     expect(document.activeElement).toBe(h.board);
@@ -888,6 +900,34 @@ describe('main — a frame that throws (#191)', () => {
     for (let i = 0; i < 4; i++) h.frame(MS_PER_TICK);
     expect(Number(h.board.dataset.simTick)).toBeGreaterThan(1);
     expect(h.results.hidden).toBe(true);
+  });
+
+  it('Start again reloads, rather than resets, a renderer whose frame loop stopped or never started (#195): a reset could not bring the board back', () => {
+    const h = stopApp();
+    h.start();
+    const draw = vi.mocked(fakeHandle.draw);
+    draw.mockImplementation(() => {
+      throw new Error("the board's renderer has stopped");
+    });
+    for (let i = 0; i < FAILED_FRAME_LIMIT; i++) h.frame(MS_PER_TICK);
+    expect(h.controller().isStopped()).toBe(true);
+    expect(h.results.hidden).toBe(false);
+    const resets = vi.mocked(fakeHandle.reset).mock.calls.length;
+    const needsRemount = vi.mocked(fakeHandle.needsRemount);
+    needsRemount.mockReturnValue(true);
+    try {
+      h.button('Start again').click();
+      expect(h.reload).toHaveBeenCalledTimes(1);
+      // Nothing of the reset path: the page is going away, and a run started on this renderer
+      // would only fail its frames and stop again.
+      expect(vi.mocked(fakeHandle.reset).mock.calls.length).toBe(resets);
+      expect(h.controller().isStopped()).toBe(true);
+      expect(h.results.hidden).toBe(false);
+    } finally {
+      needsRemount.mockReturnValue(false);
+      draw.mockReset();
+    }
+    expect(h.violations).toEqual([]);
   });
 
   it('a board that cannot draw from the very first frame is told too: a held run, stopped before any HUD refresh, says wave 1', () => {

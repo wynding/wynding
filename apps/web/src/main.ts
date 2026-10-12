@@ -145,6 +145,10 @@ export interface AppDeps {
    *  app's existing dependency pattern (`now`, `schedule`, `sceneFactory`). Defaults to a
    *  real same-document navigation. */
   readonly navigate?: (href: string) => void;
+  /** How Start again starts afresh when the board's renderer cannot draw again (#195): a page
+   *  reload, the one way to a new renderer. Injected for the same reason as `navigate`. Defaults
+   *  to a real reload. */
+  readonly reload?: () => void;
   /** THE host declaration (ADR 0012): the one fact a **Host** — Capacitor on mobile, Tauri
    *  on desktop — tells the web build about itself, and the only place it is ever set. It is
    *  SUPPLIED here, never inferred: this app has no user-agent test, no protocol test and no
@@ -188,6 +192,11 @@ export function createApp(doc: Document, root: HTMLElement, deps: AppDeps): AppH
     deps.navigate ??
     ((href: string): void => {
       doc.defaultView?.location.assign(href);
+    });
+  const reload =
+    deps.reload ??
+    ((): void => {
+      doc.defaultView?.location.reload();
     });
   // Distinct Play-again seeds even if two clicks land in the same millisecond (or the
   // source is coarse): mix in a monotonic run counter so consecutive runs never repeat.
@@ -1101,6 +1110,13 @@ export function createApp(doc: Document, root: HTMLElement, deps: AppDeps): AppH
       case 'playAgain':
         // Also Start again, on the message a run an error stopped shows (#191): the same path,
         // and `startRun` is what clears the controller's stopped state.
+        // A renderer whose frame loop stopped or never started is one `handle.reset()` cannot
+        // bring back (#195): the next run would fail its frames and stop again. Only a new
+        // renderer can draw it, so the page reloads for it.
+        if (handle.needsRemount()) {
+          reload();
+          break;
+        }
         // A fresh seed AND a fresh `runId`, minted together — this is the run-start edge.
         controller.startRun(beginRun());
         input.reset(); // no armed gesture from the previous run identity carries over (#40)

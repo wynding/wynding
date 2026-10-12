@@ -36,6 +36,7 @@
     "@types/pngjs": "^6.0.5",
     "@wynding/perf": "workspace:*",
     "jsdom": "^25.0.0",
+    "phaser": "catalog:",
     "pngjs": "^7.0.0",
     "vite": "^6.0.0"
   }

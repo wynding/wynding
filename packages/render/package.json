@@ -22,7 +22,7 @@
     "@wynding/engine": "workspace:*",
     "@wynding/sim": "workspace:*",
     "@wynding/types": "workspace:*",
-    "phaser": "^3.90.0"
+    "phaser": "catalog:"
   },
   "devDependencies": {
     "@wynding/content": "workspace:*"

@@ -394,11 +394,17 @@ export interface RenderOverlay {
 export interface RenderHandle {
   /** Draw a frame: creeps interpolate between `prevVm`→`curVm` by `alpha` (id-matched);
    *  towers/board/overlay are drawn from `curVm`/`overlay`. `prevVm` is null on the
-   *  very first frame of a run. */
+   *  very first frame of a run. Throws what keeps the board from being drawn this frame —
+   *  among it a failure of Phaser's own frame loop, which makes the pixels (#195) — for the
+   *  caller to take as a failed frame (#191). */
   draw(prevVm: RenderVM | null, curVm: RenderVM, alpha: number, overlay: RenderOverlay): void;
   /** Clear every scene object for Play-again (§7). The next `draw()` repaints the fresh
    *  run, so no seed frame is passed. */
   reset(): void;
+  /** Whether only a new renderer can draw the board again (#195): Phaser's frame loop never
+   *  started, its READY setup failed, or the loop has stopped. `reset()` cannot bring the board
+   *  back from these, so the caller must mount afresh for the next run. */
+  needsRemount(): boolean;
   /** Tear down the Phaser game and release the WebGL context. */
   destroy(): void;
 }
