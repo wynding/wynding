@@ -223,8 +223,8 @@ export function mount(el: HTMLElement, geometry: BoardGeometry): RenderHandle {
   // recipe. Under NONE, `game.scale.resize()` and the canvas style are the only things
   // that ever touch the canvas' size — sizing is fully explicit.
   //
-  // No `fps` config: Phaser steps once per animation frame, which `loop-guard.ts` relies on to
-  // tell a stopped loop from a running one.
+  // No `fps` config: Phaser's loop runs on animation frames, not `forceSetTimeOut`'s timers, and
+  // counts every one, which `loop-guard.ts` relies on to tell a stopped loop from a running one.
   const game = new Phaser.Game({
     type: Phaser.AUTO,
     parent: el,

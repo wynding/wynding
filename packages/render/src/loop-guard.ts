@@ -23,20 +23,21 @@
 // failed once clears at Phaser's next good step, and the run carries on. Nothing is handed back
 // before READY, when Phaser's loop has not started.
 //
-// A LOOP THAT HAS STOPPED. Each `check` is given Phaser's frame count (`Game#getFrame`), which its
-// `TimeStep` moves once a step has returned. The renderer sets no fps limit and no
-// `forceSetTimeOut`, so Phaser steps once per animation frame, on the same animation frames as the
-// app's loop, and the two stop together in a hidden tab: between two draws Phaser steps once. The
-// count is first read at the first draw after READY, which can come before Phaser's first step
-// (its loop starts on the next animation frame). After that, a count that stands still across a
-// draw means a loop that has stopped, or never started; `LOOP_STALL_DRAWS` draws in a row is that,
-// with a margin.
+// A LOOP THAT HAS STOPPED. Each `check` is given Phaser's frame count (`Game#getFrame`). Phaser's
+// `TimeStep` runs on animation frames and moves the count on every one, once the step (if any)
+// has returned: an fps limit only skips steps, and only `forceSetTimeOut` would run the loop off
+// timers instead; the renderer passes no `fps` config at all. So the count moves once per
+// animation frame, the same frames the app's loop draws on, and the two stop together in a hidden
+// tab: between two draws it moves once. It is first read at the first draw after READY, which can
+// come before Phaser's first step (its loop starts on the next animation frame). After that, a
+// count that stands still across a draw means a loop that has stopped, or never started;
+// `LOOP_STALL_DRAWS` draws in a row is that, with a margin.
 //
 // AFTER `destroy`, Phaser's steps run bare: its next step is its teardown (`Game#destroy` only
 // marks the game), and no draw is left to report a teardown that kept failing, frame after frame.
 
 /** Draws in a row that may find Phaser's frame count where the draw before them left it before
- *  `check` reports its loop stopped. Between two draws Phaser steps once, so one such draw is
+ *  `check` reports its loop stopped. Between two draws the count moves once, so one such draw is
  *  already a stopped loop; three leave a margin and cost the player nothing: about 50 ms. */
 export const LOOP_STALL_DRAWS = 3;
 
