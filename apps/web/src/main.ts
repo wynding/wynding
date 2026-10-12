@@ -1181,8 +1181,12 @@ export function createApp(doc: Document, root: HTMLElement, deps: AppDeps): AppH
       presentFrame(now);
     } catch (error) {
       failedFrames++;
-      reportFrameError(error);
-      if (failedFrames >= FAILED_FRAME_LIMIT) stopRun('frame', error);
+      try {
+        reportFrameError(error);
+      } finally {
+        // A report that throws must not stand between a failing frame and its bound.
+        if (failedFrames >= FAILED_FRAME_LIMIT) stopRun('frame', error);
+      }
       return;
     }
     failedFrames = 0;
@@ -1254,7 +1258,12 @@ export function createApp(doc: Document, root: HTMLElement, deps: AppDeps): AppH
    *  does not flood the console. An error is told apart by its name and message, not its stack:
    *  a stack also records the path that called the frame, which says nothing about the error. */
   function reportFrameError(error: unknown): void {
-    const key = error instanceof Error ? `${error.name}: ${error.message}` : String(error);
+    let key: string;
+    try {
+      key = error instanceof Error ? `${error.name}: ${error.message}` : String(error);
+    } catch {
+      key = '(an error with no printable text)';
+    }
     if (frameErrorsLogged.has(key)) return;
     frameErrorsLogged.add(key);
     console.error(
@@ -1275,6 +1284,10 @@ export function createApp(doc: Document, root: HTMLElement, deps: AppDeps): AppH
    *  over and captured before this, so the dialog is left as it is: the stop only parks the loop. */
   function stopRun(cause: 'step' | 'frame', error: unknown): void {
     controller.stop();
+    // A gesture in flight is DROPPED, never cancelled through the controller: the
+    // message's open aborts gestures, and cancelling a Card drag asks `uiState()`, which derives
+    // from the state a step's throw left half-stepped. Start again resets the controller's arm.
+    if (cause === 'step') input.reset();
     // Stopped, this reconciles the wake lock alone, and its predicate now releases it: first,
     // so nothing below that fails can leave the screen held awake.
     refreshHud();
