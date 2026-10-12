@@ -38,12 +38,17 @@ const phaser = vi.hoisted(() => {
       scenes: [{ add: { graphics: chain, image: chain }, cameras: { main: chain() } }],
     };
     readonly scale = { resize: (): void => {} };
+    private frame = 0;
     constructor() {
       games.push(this);
     }
     destroy(): void {}
     getTime(): number {
       return 0;
+    }
+    /** Phaser's frame count, as a loop that steps between any two draws moves it. */
+    getFrame(): number {
+      return this.frame++;
     }
   }
   return {

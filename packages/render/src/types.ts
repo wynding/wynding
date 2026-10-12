@@ -394,7 +394,9 @@ export interface RenderOverlay {
 export interface RenderHandle {
   /** Draw a frame: creeps interpolate between `prevVm`→`curVm` by `alpha` (id-matched);
    *  towers/board/overlay are drawn from `curVm`/`overlay`. `prevVm` is null on the
-   *  very first frame of a run. */
+   *  very first frame of a run. Throws what keeps the board from being drawn this frame —
+   *  among it a failure of Phaser's own frame loop, which makes the pixels (#195) — for the
+   *  caller to take as a failed frame (#191). */
   draw(prevVm: RenderVM | null, curVm: RenderVM, alpha: number, overlay: RenderOverlay): void;
   /** Clear every scene object for Play-again (§7). The next `draw()` repaints the fresh
    *  run, so no seed frame is passed. */

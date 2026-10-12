@@ -6,7 +6,9 @@
 // AN ATTEMPT lays out the board and the atlas for the inputs, makes both canvases, paints
 // both, uploads both as textures under fresh keys, and points the board image and every sprite
 // at them (`host.show`). Only once the show has succeeded is the previous bake retired — its
-// textures removed, its canvases freed — and the inputs recorded as baked.
+// textures removed, its canvases freed — and the inputs recorded as baked. That order matters: a
+// sprite left showing a removed texture throws in Phaser's own render, at every step, and every
+// draw then fails until apps/web stops the run (#195, `loop-guard.ts`).
 //
 // A FAILED ATTEMPT IS UNDONE, AND NOTHING THROWS. Any failure — a browser that refuses a 2D
 // context (iOS Safari does once a page's canvas memory reaches its cap), or a throw while
