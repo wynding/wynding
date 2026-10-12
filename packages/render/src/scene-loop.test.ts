@@ -188,6 +188,7 @@ describe('mount — Phaser’s own frame loop', () => {
     expect(() => game.tick()).not.toThrow(); // Phaser's loop goes on
     expect(game.getFrame()).toBe(2);
     expect(drawCaught(handle)).toBe(broke); // the original error
+    expect(handle.needsRemount(), 'Phaser’s loop goes on: a reset may clear it').toBe(false);
     expect(frames.inputs).toHaveLength(1); // that frame drew nothing
     game.stepBody = () => {};
     game.tick();
@@ -212,6 +213,7 @@ describe('mount — Phaser’s own frame loop', () => {
       game.tick();
     }
     expect(frames.inputs).toHaveLength(0);
+    expect(handle.needsRemount(), 'a READY that failed is never run again').toBe(true);
   });
 
   it('throws the stopped error once Phaser’s frame count stands still across the bound', () => {
@@ -220,7 +222,9 @@ describe('mount — Phaser’s own frame loop', () => {
     game.tick();
     // Phaser's loop is gone: the draws go on, its count stands still.
     for (let i = 0; i <= LOOP_STALL_DRAWS - 1; i++) expect(drawCaught(handle)).toBeNull();
+    expect(handle.needsRemount()).toBe(false);
     expect((drawCaught(handle) as Error).message).toMatch(/^the board's renderer has stopped: /);
+    expect(handle.needsRemount(), 'only a new renderer steps again').toBe(true);
   });
 
   it('holds a failed frame’s sparks for the next frame drawn', () => {
@@ -273,5 +277,6 @@ describe('mount — a Phaser READY listener ahead of ours that throws (#195 QC)'
     for (let i = 0; i <= 600 && thrown === null; i++) thrown = drawCaught(handle);
     expect((thrown as Error | null)?.message).toMatch(/^the board's renderer never started: /);
     expect(frames.inputs).toHaveLength(0);
+    expect(handle.needsRemount(), 'only a new renderer boots again').toBe(true);
   });
 });

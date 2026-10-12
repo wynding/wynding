@@ -268,3 +268,51 @@ describe('createLoopGuard — a READY that never comes (#195 QC)', () => {
     expect((guard.check(loop.frame())?.error as Error).message).toMatch(/has stopped/);
   });
 });
+
+describe('createLoopGuard — whether only a new renderer can draw again (#195 Codex)', () => {
+  it('not for a failing step, once or on every frame: Phaser’s loop goes on', () => {
+    const { guard, loop } = started();
+    animationFrame(guard, loop, throwing(new Error('once')));
+    expect(guard.check(loop.frame())).not.toBeNull();
+    expect(guard.needsRemount()).toBe(false);
+    for (let i = 0; i < 60; i++) animationFrame(guard, loop, throwing(new Error('every frame')));
+    expect(guard.check(loop.frame())).not.toBeNull();
+    expect(guard.needsRemount()).toBe(false);
+  });
+
+  it(`once READY has not come in ${String(BOOT_STALL_DRAWS)} draws, not one before, until it comes late`, () => {
+    const guard = createLoopGuard();
+    for (let i = 0; i < BOOT_STALL_DRAWS; i++) {
+      guard.check(0);
+      expect(guard.needsRemount()).toBe(false);
+    }
+    guard.check(0);
+    expect(guard.needsRemount()).toBe(true);
+    guard.runReady(ok);
+    expect(guard.needsRemount()).toBe(false);
+  });
+
+  it('once our READY listener failed, for good, however Phaser’s loop goes on', () => {
+    const guard = createLoopGuard();
+    guard.runReady(throwing(new Error('ready broke')));
+    expect(guard.needsRemount()).toBe(true);
+    const loop = phaserLoop(guard);
+    for (let i = 0; i < 30; i++) animationFrame(guard, loop);
+    expect(guard.needsRemount()).toBe(true);
+  });
+
+  it(`once the count stands still across ${String(LOOP_STALL_DRAWS)} draws, not one before, until it moves again`, () => {
+    const { guard, loop } = started();
+    for (let i = 0; i < 5; i++) animationFrame(guard, loop);
+    guard.check(loop.frame()); // Phaser stepped since the draw before
+    for (let i = 1; i < LOOP_STALL_DRAWS; i++) {
+      guard.check(loop.frame());
+      expect(guard.needsRemount()).toBe(false);
+    }
+    guard.check(loop.frame());
+    expect(guard.needsRemount()).toBe(true);
+    loop.step(); // Phaser steps again
+    animationFrame(guard, loop);
+    expect(guard.needsRemount()).toBe(false);
+  });
+});

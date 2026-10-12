@@ -110,6 +110,7 @@ async function main(): Promise<void> {
         reset: (): void => {
           handle.reset();
         },
+        needsRemount: (): boolean => handle.needsRemount(),
         destroy: (): void => {
           handle.destroy();
         },

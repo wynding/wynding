@@ -16,7 +16,9 @@
 // Phaser that frame, not its loop, and the next `draw()` throws what it threw; so does every
 // `draw()` after a READY listener that threw, or once Phaser's loop has stopped stepping (#195,
 // `loop-guard.ts`). A loop that never started (Phaser's boot failed before our READY listener ran)
-// is reported the same way once about ten seconds of frames have passed with no READY.
+// is reported the same way once about ten seconds of frames have passed with no READY. These last
+// three only a new renderer can draw past, so `needsRemount()` says so: a reset clears a run, not a
+// loop that stopped or never started.
 //
 // STATIC ART IS BAKED, NOT RE-RECORDED (V2, #181). The board, every tower and every creep's
 // body and shadow are painted once into textures and shown by sprites: one board image, and
@@ -437,6 +439,9 @@ export function mount(el: HTMLElement, geometry: BoardGeometry): RenderHandle {
       scorches.reset();
       if (targets !== null)
         resetBoardFrame(targets, { scorches, aim, fire, feedback, drawnPoints });
+    },
+    needsRemount(): boolean {
+      return loopGuard.needsRemount();
     },
     destroy(): void {
       destroyed = true;

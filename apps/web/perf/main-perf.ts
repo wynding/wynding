@@ -199,7 +199,7 @@ async function main(): Promise<void> {
   let controller!: Controller;
   createApp(document, root, {
     // P8: a delegating wrapper around the real Phaser mount, bracketing `draw` with the
-    // `wy:draw` measure. `RenderHandle` is `{draw, reset, destroy}`; only `draw` is
+    // `wy:draw` measure. `RenderHandle` is `{draw, reset, needsRemount, destroy}`; only `draw` is
     // timed — `reset`/`destroy` never run inside the sampled window.
     sceneFactory: (el, geometry) => {
       const handle = mountScene(el, geometry);
@@ -212,6 +212,7 @@ async function main(): Promise<void> {
         reset: (): void => {
           handle.reset();
         },
+        needsRemount: (): boolean => handle.needsRemount(),
         destroy: (): void => {
           handle.destroy();
         },

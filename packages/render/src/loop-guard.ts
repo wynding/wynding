@@ -73,6 +73,11 @@ export interface LoopGuard {
   /** Asked once by every draw, with Phaser's frame count: what keeps the board from being drawn
    *  this frame, or null when nothing does. */
   check(frame: number): LoopFailure | null;
+  /** Whether only a new renderer can draw the board again, as of the last `check`: Phaser's loop
+   *  never started, our READY listener failed, or the loop has stopped. A reset clears a run, not
+   *  these. A failing step is not among them: Phaser's loop goes on, and a reset may clear what
+   *  it trips on. */
+  needsRemount(): boolean;
   /** The renderer is going away: Phaser's steps run bare from now on. */
   destroy(): void;
 }
@@ -144,6 +149,9 @@ export function createLoopGuard(): LoopGuard {
         return stall;
       }
       return stepFailure;
+    },
+    needsRemount() {
+      return ready ? readyFailure !== null || stall !== null : neverStarted !== null;
     },
     destroy() {
       destroyed = true;

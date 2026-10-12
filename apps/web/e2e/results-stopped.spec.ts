@@ -139,10 +139,13 @@ for (const stop of ['step', 'draw', 'render'] as const) {
         await expect(dialog).toBeVisible();
 
         if (stop === 'step') {
-          // Start again: a fresh run, held at its start, that a player can begin.
+          // Start again: a fresh run, held at its start, that a player can begin — on this page,
+          // since its renderer still draws (#195: only a renderer that cannot reloads).
           await page.waitForTimeout(600); // past the press guard's hold on a fresh dialog
+          await markPage(page);
           await startAgain.click();
           await expect(dialog).toBeHidden();
+          expect(await pageMarked(page), 'reset on this page, not reloaded').toBe(true);
           const board = page.locator('.wy-board');
           await expect(board).toHaveAttribute('data-started', 'false');
           await expect(board).toHaveAttribute('data-sim-tick', '0');
@@ -204,8 +207,28 @@ test.describe('a boot stop', () => {
       consoleErrors.filter((m) => m.startsWith('Wynding: a frame failed')),
       'the never-started error, logged once',
     ).toEqual([expect.stringContaining("the board's renderer never started")]);
+    // Start again: a reset cannot start a renderer that never started, so the page reloads for
+    // the next run (#195 Codex), where a reset would only stop again.
+    await page.waitForTimeout(600); // past the press guard's hold on a fresh dialog
+    await markPage(page);
+    const reloaded = page.waitForEvent('load');
+    await dialog.getByRole('button', { name: 'Start again' }).click();
+    await reloaded;
+    expect(await pageMarked(page), 'a new page, not this one reset').toBe(false);
   });
 });
+
+/** Mark this page, so a reload (which starts a new one) can be told from a reset. */
+async function markPage(page: Page): Promise<void> {
+  await page.evaluate(() => {
+    (window as unknown as { __wyMarked?: true }).__wyMarked = true;
+  });
+}
+
+/** Whether the page still carries `markPage`'s mark. */
+async function pageMarked(page: Page): Promise<boolean> {
+  return page.evaluate(() => (window as unknown as { __wyMarked?: true }).__wyMarked === true);
+}
 
 /** `n` animation frames from now. */
 async function animationFrames(page: Page, n: number): Promise<void> {
