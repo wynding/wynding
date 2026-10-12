@@ -13,7 +13,11 @@ import {
 } from './failed-frame';
 
 /** A pipeline part-way through a frame: quads batched, none drawn. */
-function holding(): BatchedPipeline & { activeTextures: unknown[]; vertexData: number[] } {
+function holding(): BatchedPipeline & {
+  activeBuffer: unknown;
+  activeTextures: unknown[];
+  vertexData: number[];
+} {
   return {
     vertexCount: 12,
     batch: [
@@ -23,19 +27,23 @@ function holding(): BatchedPipeline & { activeTextures: unknown[]; vertexData: n
     currentBatch: { start: 6, count: 6 },
     currentTexture: { webGLTexture: {} },
     currentUnit: 2,
+    activeBuffer: { webGLBuffer: {} },
     activeTextures: [{ webGLTexture: {} }],
     vertexData: [1, 2, 3],
   };
 }
 
-/** Phaser's `CustomMap#each`, over the pipelines registered by name. */
+/** Phaser's `CustomMap#each`, over the pipelines registered by name: it stops where a callback
+ *  returns false (`Structs/Map.js`, 3.90.0). */
 function renderer(...pipelines: BatchedPipeline[]): PipelineHolder {
   const map = new Map(pipelines.map((p, i) => [`pipeline${String(i)}`, p]));
   return {
     pipelines: {
       pipelines: {
         each: (callback) => {
-          for (const [name, pipeline] of map) callback(name, pipeline);
+          for (const [name, pipeline] of map) {
+            if ((callback(name, pipeline) as unknown) === false) break;
+          }
         },
       },
     },
@@ -60,7 +68,9 @@ describe('discardPendingBatch', () => {
 
   it('touches nothing else: the bound buffer, the active textures and the vertex data stay', () => {
     const p = holding();
+    const buffer = p.activeBuffer;
     discardPendingBatch(renderer(p));
+    expect(p.activeBuffer).toBe(buffer);
     expect(p.activeTextures).toHaveLength(1);
     expect(p.vertexData).toEqual([1, 2, 3]);
   });
@@ -123,17 +133,20 @@ describe('unwindCanvasSaves', () => {
     expect(ctx.clipped).toBe(false);
   });
 
-  it('restores the context a camera of its own was drawing to, as well as the game one', () => {
+  it('restores the context a dynamic texture was being drawn to, as well as the game one', () => {
+    // The game context's saves from `preRender` and `render`, then the texture's around its own
+    // drawing, clipped (`DynamicTexture`, `CanvasRenderer#setContext`).
     const game = context();
-    const camera = context();
+    const texture = context();
     game.save();
-    camera.save();
-    camera.clipped = true;
-    camera.save();
-    unwindCanvasSaves({ gameContext: game, currentContext: camera });
+    game.save();
+    texture.save();
+    texture.clipped = true;
+    texture.save();
+    unwindCanvasSaves({ gameContext: game, currentContext: texture });
     expect(game.saved).toEqual([]);
-    expect(camera.saved).toEqual([]);
-    expect(camera.clipped).toBe(false);
+    expect(texture.saved).toEqual([]);
+    expect(texture.clipped).toBe(false);
   });
 
   it('does nothing for a renderer with no 2D context (WebGL), or none at all', () => {

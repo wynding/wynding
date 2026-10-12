@@ -44,8 +44,9 @@
 // with two images already batched and not drawn. The run is `draw`'s, live at wave 3; the lasting
 // break stops it as a draw stop does, and the run carries on past the one-off.
 // `window.__wyRenderBreak` counts the throws, reads Phaser's frame count and records what the
-// batch held as each Phaser frame began: a frame after a failed one must start empty. It is the harness's
-// one reach into Phaser itself, through apps/web's `phaser` dev dependency, which resolves to the
+// batch held when the render threw and when each Phaser frame batched its first image (the
+// board's, drawn first): a frame after a failed one must start empty. It is the harness's one
+// reach into Phaser itself, through apps/web's `phaser` dev dependency, which resolves to the
 // install the scene runs on: one module, so the patch reaches the game the app mounts. Both
 // packages take Phaser's version from the workspace catalog (`pnpm-workspace.yaml`), so a bump
 // moves them together; were the two ever to resolve apart, the breaks would miss the game and
@@ -165,10 +166,23 @@ interface RenderBreak {
   frame: () => number;
   /** The frame the first throw came in: -1 until it has. */
   breakFrame: number;
-  /** What the MultiPipeline's batch held when each Phaser frame batched its first image, the
-   *  most recent frames last: `vertexCount` and the batch's entries. A frame that follows a
-   *  failed one starts with both at 0 once the failed frame's batch was discarded. */
-  starts: { frame: number; vertexCount: number; batch: number }[];
+  /** What the MultiPipeline's batch held as the first throw came: the quads the failed frame had
+   *  batched and not drawn, which the next frame must not start with. Null until it has. */
+  atBreak: BatchState | null;
+  /** What the batch held when the frame after the first failed one batched its first image. Null
+   *  until it has; kept, unlike the older `starts`. */
+  afterBreak: BatchState | null;
+  /** What the batch held when each Phaser frame batched its first image: the last `STARTS_KEPT`
+   *  frames, the most recent last. A frame that follows a failed one starts with nothing batched
+   *  once the failed frame's batch was discarded. */
+  starts: BatchState[];
+}
+
+/** A Phaser frame's MultiPipeline batch: its `vertexCount` and the batch's entries. */
+interface BatchState {
+  frame: number;
+  vertexCount: number;
+  batch: number;
 }
 
 /** How many frames' starting batch state `RenderBreak.starts` keeps. */
@@ -183,7 +197,14 @@ const THROWING_CALL = 3;
  *  lands with quads batched and undrawn). Patched on the prototype, so it reaches every pipeline
  *  that batches images, and before the scene mounts. */
 function breakRender(once: boolean): () => void {
-  const control: RenderBreak = { threw: 0, frame: () => -1, breakFrame: -1, starts: [] };
+  const control: RenderBreak = {
+    threw: 0,
+    frame: () => -1,
+    breakFrame: -1,
+    atBreak: null,
+    afterBreak: null,
+    starts: [],
+  };
   (window as unknown as { __wyRenderBreak: RenderBreak }).__wyRenderBreak = control;
   type Pipeline = Phaser.Renderer.WebGL.Pipelines.MultiPipeline;
   const proto = Phaser.Renderer.WebGL.Pipelines.MultiPipeline.prototype;
@@ -195,16 +216,26 @@ function breakRender(once: boolean): () => void {
     const game = this.game;
     control.frame = () => game.getFrame();
     const frame = game.getFrame();
+    const state = (): BatchState => ({
+      frame,
+      vertexCount: this.vertexCount,
+      batch: this.batch.length,
+    });
     if (frame !== seen) {
       seen = frame;
       calls = 0;
-      control.starts.push({ frame, vertexCount: this.vertexCount, batch: this.batch.length });
+      const start = state();
+      if (control.breakFrame >= 0) control.afterBreak ??= start;
+      control.starts.push(start);
       if (control.starts.length > STARTS_KEPT) control.starts.shift();
     }
     calls += 1;
     if (armed && calls === THROWING_CALL) {
       armed = !once;
-      if (control.breakFrame < 0) control.breakFrame = frame;
+      if (control.breakFrame < 0) {
+        control.breakFrame = frame;
+        control.atBreak = state();
+      }
       control.threw += 1;
       throw new Error('results harness: the render broke');
     }

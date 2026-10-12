@@ -7,13 +7,15 @@
 // flush draws them and empties it. A step that throws partway through the render never reaches
 // that flush, and the next frame's `preRender` clears the canvas but not the batch, so the quads
 // batched before the throw were drawn with the next frame's first flush (once, for a break that
-// came once; piling up behind the stopped message, for one that kept coming). The rest of what a
-// render can leave half-done, `preRender` resets itself: the bound framebuffer, the scissor stack
-// and the mask stack (`WebGLRenderer#preRender`, Phaser 3.90.0).
+// came once; piling up behind the stopped message, for one that kept coming). For what this scene
+// draws, `preRender` resets the rest itself: the scissor and mask stacks, and the canvas's own
+// framebuffer bound (`WebGLRenderer#preRender`, Phaser 3.90.0). It leaves Phaser's own stack of
+// framebuffers, which only render targets push (post-FX, masks, dynamic textures): none here.
 //
 // THE RESET. Phaser 3.90.0 has no method that drops a batch without drawing it, so this does what
 // `WebGLPipeline#flush` does after its draw calls (3.90.0, `WebGLPipeline.js`, `flush`, the
-// statements after the draw loop):
+// statements after the draw loop), and only that: the bound buffer and `activeTextures` stay, as
+// they do after a flush.
 //
 //   this.vertexCount = 0;
 //   this.batch.length = 0;
@@ -21,28 +23,26 @@
 //   this.currentTexture = null;
 //   this.currentUnit = 0;
 //
-// `WebGLPipeline#restoreContext` resets the same five. Only the current pipeline holds vertices
-// (`PipelineManager#set` flushes the one it replaces), but a throw can land between a pipeline
-// being replaced and the next being bound, so every registered pipeline is reset: on one with
-// nothing batched each statement leaves its value as it was. `flush` is a no-op for a pipeline
-// with no vertices, so nothing else of its state (the bound buffer, `activeTextures`) is touched.
+// Only the current pipeline can hold vertices (`PipelineManager#set` flushes the one it replaces
+// before it switches), but every registered pipeline is reset, which needs no reading of which
+// one was current: on one with nothing batched each statement leaves its value as it was.
 //
 // UNDER CANVAS (Phaser's fallback without WebGL), SAVED STATES. Nothing is batched: each object is
 // drawn as it is reached. The renderer saves the game context's state at the end of `preRender`
-// and restores it in `postRender`, saves a camera's context before `render` clips it and restores
-// it at the end, and each object's canvas renderer saves and restores around its own drawing
-// (`CanvasRenderer#preRender`, `#render`, `#postRender`, `#batchSprite`, 3.90.0). Between two steps
-// that completed, nothing is saved. A throw skips the restores that would have matched its saves,
-// so each failed step leaves a few states saved, and a clip in force at the throw outlasts it:
-// `preRender` resets the transform, the alpha and the compositing, but only a restore lifts a
-// clip. Phaser keeps stepping behind the stopped message, so a render that keeps failing would
-// pile them up until the page went away.
+// and restores it in `postRender`, saves it again before `render` clips it to a camera and
+// restores it at the end, and each object's canvas renderer saves and restores around its own
+// drawing (`CanvasRenderer#preRender`, `#render`, `#postRender`, `#batchSprite`, 3.90.0).
+// Between two steps that completed, nothing is saved. A throw skips the restores that would have
+// matched its saves, so each failed step leaves a few states saved, and a clip in force at the
+// throw outlasts it: `preRender` resets the transform, the alpha and the compositing, but only a
+// restore lifts a clip. Phaser keeps stepping behind the stopped message, so a render that keeps
+// failing would pile them up until the page went away.
 //
 // THE UNWIND. A 2D context cannot say how many states it has saved, but a restore with none saved
 // does nothing (HTML, `CanvasRenderingContext2D#restore`). So `restore` is called
-// `CANVAS_SAVE_UNWIND` times, more than any step nests, on the game context and on the context the
-// render was drawing to when it threw (`CanvasRenderer#currentContext`: a camera's own, for one
-// that renders to a texture). Each is left as a step that completed leaves it.
+// `CANVAS_SAVE_UNWIND` times on the game context and, when it is another, on the context the
+// render was drawing to when it threw (`CanvasRenderer#currentContext`: a dynamic texture's, while
+// one is drawn to). Each is left as a step that completed leaves it.
 
 /** The part of a WebGL pipeline's batch that Phaser's `flush` resets after it draws. */
 export interface BatchedPipeline {
@@ -75,9 +75,10 @@ export interface ContextHolder {
   readonly currentContext?: SavedStates | null;
 }
 
-/** Restores on each context: comfortably more than any step of Phaser's Canvas render nests,
- *  which is `preRender`'s save, the camera's, and an object's own two or three (one more with a
- *  mask). The ones beyond what is saved do nothing. */
+/** Restores on each context: comfortably more than a step of this scene's Canvas render nests,
+ *  which is three: `preRender`'s save, `render`'s, and an image's or a graphics object's own
+ *  (`batchSprite`, `SetTransform`). Graphics `save` commands could nest further; the scene records
+ *  none. The restores beyond what is saved do nothing. */
 export const CANVAS_SAVE_UNWIND = 16;
 
 /** Drop every pipeline's pending batch without drawing it, as the end of a flush leaves it, so

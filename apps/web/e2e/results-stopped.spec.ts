@@ -16,9 +16,10 @@ import { HARNESS, toggleOf } from './results-harness';
 // draw that keeps failing does, with nothing escaping to the page, and one that fails once must
 // cost a frame, not the board: Phaser's loop goes on, the board is drawn again and the run
 // carries on, with no stopped form. The break throws part-way through Phaser's render, with two
-// images batched and undrawn, and the batch such a frame leaves behind is discarded (`scene.ts`):
-// the frame after a failed one starts with nothing batched, and so does every frame behind the
-// stopped message, where the leftovers would otherwise be drawn once, or pile up. These run in
+// images batched and undrawn (measured as it throws), and the batch such a frame leaves behind is
+// discarded (`failed-frame.ts`): the frame after a failed one starts with nothing batched, and so
+// do the frames logged behind the stopped message (the last 400, each at its first image), where
+// the leftovers would otherwise be drawn once, or pile up. These run in
 // WebKit too, since the render path is the browser's; the other stops are the app's own
 // JavaScript, and run in Chromium only.
 
@@ -45,23 +46,42 @@ async function skipUnlessWebGL(page: Page, browserName: string): Promise<void> {
   test.skip(!webgl, NEEDS_WEBGL);
 }
 
+/** A Phaser frame's MultiPipeline batch, as the harness records it. */
+interface BatchState {
+  frame: number;
+  vertexCount: number;
+  batch: number;
+}
+
 /** What `window.__wyRenderBreak` (`results-entry.ts`) lets a spec read. */
 interface RenderBreakReport {
   threw: number;
   breakFrame: number;
   frame: () => number;
-  starts: { frame: number; vertexCount: number; batch: number }[];
+  atBreak: BatchState | null;
+  afterBreak: BatchState | null;
+  starts: BatchState[];
 }
 
-/** The Phaser frames that began after the first failed one, each with the batch it started
- *  with: the failed frame's leftovers, if they were not discarded, are in the first of them. */
-async function startsAfterBreak(
-  page: Page,
-): Promise<{ frame: number; vertexCount: number; batch: number }[]> {
-  return page.evaluate(() => {
+/** The render break left quads batched and undrawn as it threw, and none of them reached a later
+ *  frame: the one right after it, and every one logged since, began with nothing batched. */
+async function expectNoLeftovers(page: Page): Promise<void> {
+  const r = await page.evaluate(() => {
     const b = (window as unknown as { __wyRenderBreak: RenderBreakReport }).__wyRenderBreak;
-    return b.breakFrame < 0 ? [] : b.starts.filter((s) => s.frame > b.breakFrame);
+    const { breakFrame, atBreak, afterBreak } = b;
+    return { breakFrame, atBreak, afterBreak, since: b.starts.filter((s) => s.frame > breakFrame) };
   });
+  expect(r.atBreak?.vertexCount ?? 0, 'vertices the failed frame had batched').toBeGreaterThan(0);
+  expect(r.afterBreak, 'the frame after the failed one').toEqual({
+    frame: r.breakFrame + 1,
+    vertexCount: 0,
+    batch: 0,
+  });
+  expect(r.since.length, 'frames logged since the failed one').toBeGreaterThan(5);
+  expect(
+    r.since.filter((s) => s.vertexCount !== 0 || s.batch !== 0),
+    'frames that began with a batch left over',
+  ).toEqual([]);
 }
 
 const SIZES = [
@@ -182,13 +202,8 @@ for (const stop of ['step', 'draw', 'render'] as const) {
           ).toEqual([expect.stringContaining('results harness: the render broke')]);
           // ...and every frame Phaser began after the first failed one started with nothing
           // batched: each failed frame's half-built batch was discarded, so no stale quads pile up
-          // behind the message (3.90.0 flushes them with the next frame's first draw otherwise).
-          const starts = await startsAfterBreak(page);
-          expect(starts.length, 'frames began after the first failure').toBeGreaterThan(5);
-          expect(
-            starts.filter((s) => s.vertexCount !== 0 || s.batch !== 0),
-            'frames that began with a batch left over',
-          ).toEqual([]);
+          // behind the message (in 3.90.0 they would, drawn whenever a full buffer forced a flush).
+          await expectNoLeftovers(page);
         }
       });
     }
@@ -365,16 +380,7 @@ test.describe('a one-off render break', () => {
 
     // The failed frame had batched two images and drawn neither; the frame after it starts with
     // nothing batched, so those quads are not drawn with it (3.90.0 would flush them there).
-    const after = await startsAfterBreak(page);
-    expect(after.length, 'frames began after the failed one').toBeGreaterThan(5);
-    const breakFrame = await page.evaluate(
-      () => (window as unknown as { __wyRenderBreak: Break }).__wyRenderBreak.breakFrame,
-    );
-    expect(after[0]!.frame, 'the very next frame').toBe(breakFrame + 1);
-    expect(
-      after.filter((s) => s.vertexCount !== 0 || s.batch !== 0),
-      'frames that began with a batch left over',
-    ).toEqual([]);
+    await expectNoLeftovers(page);
 
     // One failed frame: held and logged once, with what the render threw, and never a stop.
     await expect(page.getByRole('dialog')).toBeHidden();
