@@ -18,7 +18,10 @@
 // `loop-guard.ts`). A loop that never started (Phaser's boot failed before our READY listener ran)
 // is reported the same way once about ten seconds of frames have passed with no READY. These last
 // three only a new renderer can draw past, so `needsRemount()` says so: a reset clears a run, not a
-// loop that stopped or never started.
+// loop that stopped or never started. What a failed step left half-done in Phaser's renderer is
+// cleared before its next frame (`failed-frame.ts`): the quads it had batched and not yet drawn
+// (WebGL), and the states it had saved on a canvas and not restored (Canvas). So the next frame
+// draws clean, and a render that keeps failing piles nothing up behind the stopped message.
 //
 // STATIC ART IS BAKED, NOT RE-RECORDED (V2, #181). The board, every tower and every creep's
 // body and shadow are painted once into textures and shown by sprites: one board image, and
@@ -34,6 +37,7 @@ import { createProjection, type Projection } from './projection';
 import { createDprTracker, clampDpr } from './dpr-tracker';
 import { createBakeRunner, type BakedArt } from './bake-runner';
 import { createLoopGuard } from './loop-guard';
+import { clearFailedFrame, type ContextHolder, type PipelineHolder } from './failed-frame';
 import { createSpritePool } from './sprite-pool';
 import { createSparkStore } from './sparks';
 import { createScorchTracker } from './scorches';
@@ -239,10 +243,15 @@ export function mount(el: HTMLElement, geometry: BoardGeometry): RenderHandle {
     callbacks: {
       // Phaser binds `game.step` for its loop right after this hook (`Game#start`, Phaser
       // 3.90.0), so the step its loop runs is this one: Phaser's own, through the guard, where
-      // a throw costs Phaser a frame rather than its loop.
+      // a throw costs Phaser a frame rather than its loop, and what that frame left half-done in
+      // the renderer is cleared, so the next frame draws clean.
       postBoot: (g) => {
         const step = g.step.bind(g);
-        g.step = (time, delta) => loopGuard.runStep(() => step(time, delta));
+        g.step = (time, delta) =>
+          loopGuard.runStep(
+            () => step(time, delta),
+            () => clearFailedFrame(g.renderer as (PipelineHolder & ContextHolder) | null),
+          );
       },
     },
   });

@@ -56,6 +56,37 @@ const phaser = vi.hoisted(() => {
       ],
     };
     readonly scale = { resize: (): void => {} };
+    /** The WebGL renderer's one pipeline, as far as its batch goes (`discardPendingBatch`). */
+    readonly pipeline = {
+      vertexCount: 0,
+      batch: [] as unknown[],
+      currentBatch: null as unknown,
+      currentTexture: null as unknown,
+      currentUnit: 0,
+    };
+    /** The Canvas renderer's game context, as far as its saved states go (`unwindCanvasSaves`):
+     *  a restore with none saved does nothing. */
+    readonly context = {
+      saved: 0,
+      restore(): void {
+        if (this.saved > 0) this.saved -= 1;
+      },
+    };
+    /** Set to make the renderer's pipelines throw when walked, as a renderer torn apart might. */
+    pipelinesError: Error | null = null;
+    /** Both renderers' leftovers in one: Phaser's has the pipelines (WebGL) or the context
+     *  (Canvas), and the clean-up finds nothing to do in the half that is absent. */
+    readonly renderer = {
+      gameContext: this.context,
+      pipelines: {
+        pipelines: {
+          each: (callback: (name: string, pipeline: Game['pipeline']) => void): void => {
+            if (this.pipelinesError !== null) throw this.pipelinesError;
+            callback('MultiPipeline', this.pipeline);
+          },
+        },
+      },
+    };
     /** What Phaser's own step does this frame: nothing, unless a test makes it throw. */
     stepBody: () => void = () => {};
     started = false;
@@ -194,6 +225,58 @@ describe('mount — Phaser’s own frame loop', () => {
     game.tick();
     expect(drawCaught(handle)).toBeNull();
     expect(frames.inputs).toHaveLength(2);
+  });
+
+  /** Leave quads batched and undrawn, and canvas states saved, as a render that threw part-way
+   *  through does. */
+  const batchSome = (game: StubGame): void => {
+    game.pipeline.vertexCount = 12;
+    game.pipeline.batch.push({ start: 0, count: 6 }, { start: 6, count: 6 });
+    game.pipeline.currentBatch = game.pipeline.batch[1];
+    game.pipeline.currentTexture = {};
+    game.pipeline.currentUnit = 1;
+    game.context.saved = 3;
+  };
+
+  it('clears what a step that threw left half-done, so the next frame starts clean', () => {
+    const { handle, game } = booted();
+    expect(drawCaught(handle)).toBeNull();
+    game.tick();
+    game.stepBody = () => {
+      batchSome(game);
+      throw new Error('the render broke mid-batch');
+    };
+    game.tick();
+    expect(game.pipeline).toEqual({
+      vertexCount: 0,
+      batch: [],
+      currentBatch: null,
+      currentTexture: null,
+      currentUnit: 0,
+    });
+    expect(game.context.saved, 'every state the step saved is restored').toBe(0);
+    expect(drawCaught(handle)).toBeInstanceOf(Error);
+  });
+
+  it('leaves the renderer alone after a step that completed: what it batched is Phaser’s to flush', () => {
+    const { game } = booted();
+    game.stepBody = () => batchSome(game);
+    game.tick();
+    expect(game.pipeline.vertexCount).toBe(12);
+    expect(game.pipeline.batch).toHaveLength(2);
+    expect(game.context.saved).toBe(3);
+  });
+
+  it('contains a throw from the discard: the frame costs only itself, and the step’s error stands', () => {
+    const { handle, game } = booted();
+    expect(drawCaught(handle)).toBeNull();
+    const broke = new Error('the render broke');
+    game.pipelinesError = new Error('the pipelines broke');
+    game.stepBody = () => {
+      throw broke;
+    };
+    expect(() => game.tick()).not.toThrow();
+    expect(drawCaught(handle)).toBe(broke);
   });
 
   it('runs the READY listener through the guard: Phaser still starts, and every draw throws', () => {
