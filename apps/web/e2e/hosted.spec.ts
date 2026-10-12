@@ -1,4 +1,4 @@
-import { test, expect } from '@playwright/test';
+import { test, expect } from './fixtures';
 
 // The Host build actually carries its declaration (#135, ADR 0013).
 //

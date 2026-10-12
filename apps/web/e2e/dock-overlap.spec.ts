@@ -1,4 +1,4 @@
-import { test, expect, devices, type Page } from '@playwright/test';
+import { test, expect, devices, type Page } from './fixtures';
 import AxeBuilder from '@axe-core/playwright';
 import { PNG } from 'pngjs';
 import { COMPACT_QUERY } from '../src/layout';

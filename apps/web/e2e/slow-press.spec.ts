@@ -1,4 +1,4 @@
-import { test, expect } from '@playwright/test';
+import { test, expect } from './fixtures';
 import { GRID, projectedGrid } from './layout-probe';
 
 // #98's WebKit regression: mid-run, `overlay.update()` reassigns the Pause/Speed/Sell

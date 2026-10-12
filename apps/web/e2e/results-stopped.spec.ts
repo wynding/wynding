@@ -1,4 +1,4 @@
-import { test, expect, type Page } from '@playwright/test';
+import { test, expect, type Page } from './fixtures';
 import AxeBuilder from '@axe-core/playwright';
 import { HARNESS, toggleOf } from './results-harness';
 
@@ -27,80 +27,82 @@ async function resolveColour(page: Page, value: string): Promise<string> {
   }, value);
 }
 
+// What each stop kind logs (`stopRun` and `reportFrameError`, `main.ts`), declared apart from the
+// spec's own checks: the fixture (`fixtures.ts`) fails a test on any console error or uncaught
+// page error it did not declare, and on a declared pattern that never came. So "nothing
+// escaped to the page" and "the stop is logged" are held there, for every test below.
+const STOP_LOGS = {
+  step: [/^Wynding: the run stopped: a sim step threw while stepping tick \d+\./],
+  draw: [
+    /^Wynding: a frame failed and was skipped; the sim holds until one completes\./,
+    /^Wynding: the run stopped at tick \d+: \d+ frames in a row failed after the sim step/,
+  ],
+} as const;
+
 for (const stop of ['step', 'draw'] as const) {
-  for (const size of SIZES) {
-    test(`a ${stop} stop opens the stopped form at ${String(size.width)}x${String(size.height)}`, async ({
-      page,
-    }) => {
-      await page.setViewportSize(size);
-      const pageErrors: string[] = [];
-      const consoleErrors: string[] = [];
-      page.on('pageerror', (e) => pageErrors.push(e.message));
-      page.on('console', (m) => {
-        if (m.type() === 'error') consoleErrors.push(m.text());
+  test.describe(`a ${stop} stop`, () => {
+    test.use({ expectedErrors: { patterns: STOP_LOGS[stop] } });
+    for (const size of SIZES) {
+      test(`a ${stop} stop opens the stopped form at ${String(size.width)}x${String(size.height)}`, async ({
+        page,
+      }) => {
+        await page.setViewportSize(size);
+        await page.goto(`${HARNESS}?stop=${stop}`);
+
+        const dialog = page.getByRole('dialog', { name: 'Something went wrong.' });
+        await expect(dialog).toBeVisible({ timeout: 30_000 });
+        const sentence = 'The run stopped at wave 3 because of an error.';
+        await expect(dialog).toHaveAccessibleDescription(sentence);
+        // ...said once: its visible copy is `aria-hidden` beside the description.
+        const subtitle = dialog.locator('.wy-results-subtitle');
+        await expect(subtitle).toHaveText(sentence);
+        await expect(subtitle).toBeVisible();
+        await expect(subtitle).toHaveAttribute('aria-hidden', 'true');
+
+        // No outcome: no grade, no tiles, no Play again; Start again takes its place and its focus.
+        await expect(page.locator('.wy-results-grade')).toBeHidden();
+        await expect(page.locator('.wy-results-stats')).toBeHidden();
+        await expect(dialog.getByRole('button', { name: 'Play again' })).toHaveCount(0);
+        const startAgain = dialog.getByRole('button', { name: 'Start again' });
+        await expect(startAgain).toBeFocused();
+
+        // Run data: Copy and Save after a draw stop, never Verify; nothing at all after a step stop.
+        const toggle = toggleOf(dialog);
+        if (stop === 'draw') {
+          await expect(toggle).toBeVisible();
+          await toggle.click();
+          await expect(dialog.getByRole('button', { name: 'Copy run data' })).toBeVisible();
+          await expect(dialog.getByRole('button', { name: 'Save run data' })).toBeVisible();
+        } else {
+          await expect(toggle).toBeHidden();
+        }
+        await expect(dialog.getByRole('button', { name: 'Verify this run' })).toBeHidden();
+
+        // The band takes the loss red: a stopped run must not read as a win.
+        const band = await page.evaluate(
+          () =>
+            getComputedStyle(document.querySelector('.wy-results-panel')!, '::before')
+              .backgroundColor,
+        );
+        expect(band).toBe(await resolveColour(page, 'var(--wy-loss)'));
+
+        const audit = await new AxeBuilder({ page }).include('#app').analyze();
+        expect(audit.violations, 'axe violations').toEqual([]);
+
+        // State-driven: Escape is consumed, never a dismissal.
+        await page.keyboard.press('Escape');
+        await expect(dialog).toBeVisible();
+
+        if (stop === 'step') {
+          // Start again: a fresh run, held at its start, that a player can begin.
+          await page.waitForTimeout(600); // past the press guard's hold on a fresh dialog
+          await startAgain.click();
+          await expect(dialog).toBeHidden();
+          const board = page.locator('.wy-board');
+          await expect(board).toHaveAttribute('data-started', 'false');
+          await expect(board).toHaveAttribute('data-sim-tick', '0');
+        }
       });
-      await page.goto(`${HARNESS}?stop=${stop}`);
-
-      const dialog = page.getByRole('dialog', { name: 'Something went wrong.' });
-      await expect(dialog).toBeVisible({ timeout: 30_000 });
-      const sentence = 'The run stopped at wave 3 because of an error.';
-      await expect(dialog).toHaveAccessibleDescription(sentence);
-      // ...said once: its visible copy is `aria-hidden` beside the description.
-      const subtitle = dialog.locator('.wy-results-subtitle');
-      await expect(subtitle).toHaveText(sentence);
-      await expect(subtitle).toBeVisible();
-      await expect(subtitle).toHaveAttribute('aria-hidden', 'true');
-
-      // No outcome: no grade, no tiles, no Play again; Start again takes its place and its focus.
-      await expect(page.locator('.wy-results-grade')).toBeHidden();
-      await expect(page.locator('.wy-results-stats')).toBeHidden();
-      await expect(dialog.getByRole('button', { name: 'Play again' })).toHaveCount(0);
-      const startAgain = dialog.getByRole('button', { name: 'Start again' });
-      await expect(startAgain).toBeFocused();
-
-      // Run data: Copy and Save after a draw stop, never Verify; nothing at all after a step stop.
-      const toggle = toggleOf(dialog);
-      if (stop === 'draw') {
-        await expect(toggle).toBeVisible();
-        await toggle.click();
-        await expect(dialog.getByRole('button', { name: 'Copy run data' })).toBeVisible();
-        await expect(dialog.getByRole('button', { name: 'Save run data' })).toBeVisible();
-      } else {
-        await expect(toggle).toBeHidden();
-      }
-      await expect(dialog.getByRole('button', { name: 'Verify this run' })).toBeHidden();
-
-      // The band takes the loss red: a stopped run must not read as a win.
-      const band = await page.evaluate(
-        () =>
-          getComputedStyle(document.querySelector('.wy-results-panel')!, '::before')
-            .backgroundColor,
-      );
-      expect(band).toBe(await resolveColour(page, 'var(--wy-loss)'));
-
-      const audit = await new AxeBuilder({ page }).include('#app').analyze();
-      expect(audit.violations, 'axe violations').toEqual([]);
-
-      // State-driven: Escape is consumed, never a dismissal.
-      await page.keyboard.press('Escape');
-      await expect(dialog).toBeVisible();
-
-      if (stop === 'step') {
-        // Start again: a fresh run, held at its start, that a player can begin.
-        await page.waitForTimeout(600); // past the press guard's hold on a fresh dialog
-        await startAgain.click();
-        await expect(dialog).toBeHidden();
-        const board = page.locator('.wy-board');
-        await expect(board).toHaveAttribute('data-started', 'false');
-        await expect(board).toHaveAttribute('data-sim-tick', '0');
-      }
-
-      // Nothing escaped to the page: the stop is caught, and its one record is the console's.
-      expect(pageErrors, 'nothing uncaught').toEqual([]);
-      expect(
-        consoleErrors.some((m) => m.startsWith('Wynding: the run stopped')),
-        'the stop is logged',
-      ).toBe(true);
-    });
-  }
+    }
+  });
 }
