@@ -32,6 +32,19 @@ test.describe('the error tripwire (#196)', () => {
     });
   });
 
+  test.describe('a declared pattern with the g flag', () => {
+    // A `g` pattern keeps its `lastIndex` between matches: unreset, the second error (or the
+    // unused scan after the first) would start past the match and miss it.
+    test.use({ expectedErrors: { patterns: [/tripwire self-check: global/g] } });
+    test('matches every error it declares, in both scans', async ({ page }) => {
+      await page.goto('about:blank');
+      await page.evaluate(() => {
+        console.error('tripwire self-check: global');
+        console.error('tripwire self-check: global');
+      });
+    });
+  });
+
   test('fails a test on a console error it did not declare', async ({ page }) => {
     test.fail(true, 'the tripwire must fail this test');
     await page.goto('about:blank');

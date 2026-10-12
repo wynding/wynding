@@ -81,6 +81,14 @@ function watchBrowser(collector: Collector, browser: Browser): () => void {
   };
 }
 
+/** Whether `pattern` matches `text`, as if tested fresh. A `g` or `y` pattern keeps its
+ *  `lastIndex` between `test` calls, so without the reset the same error could pass one scan and
+ *  fail the next. */
+function matches(pattern: RegExp, text: string): boolean {
+  pattern.lastIndex = 0;
+  return pattern.test(text);
+}
+
 export interface ExpectedErrors {
   readonly patterns: readonly RegExp[];
 }
@@ -101,10 +109,10 @@ export const test = base.extend<{ expectedErrors: ExpectedErrors; errorTripwire:
       }
       if (testInfo.status !== 'passed') return;
       const undeclared = collector.seen.filter(
-        (error) => !patterns.some((pattern) => pattern.test(error.text)),
+        (error) => !patterns.some((pattern) => matches(pattern, error.text)),
       );
       const unused = patterns.filter(
-        (pattern) => !collector.seen.some((error) => pattern.test(error.text)),
+        (pattern) => !collector.seen.some((error) => matches(pattern, error.text)),
       );
       if (undeclared.length === 0 && unused.length === 0) return;
       const lines: string[] = [];
