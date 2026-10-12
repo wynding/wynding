@@ -133,6 +133,9 @@ importers:
       jsdom:
         specifier: ^25.0.0
         version: 25.0.1
+      phaser:
+        specifier: ^3.90.0
+        version: 3.90.0
       pngjs:
         specifier: ^7.0.0
         version: 7.0.0

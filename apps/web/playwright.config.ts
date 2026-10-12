@@ -94,10 +94,12 @@ export default defineConfig({
     // `main.ts`, which only a browser runs together; it runs in both projects.
     // `panel-scroll-keys.spec.ts` is #181's: the pinned Panel's scrollport driven by keys, where
     // WebKit's focus and key-scroll behaviour differs from Chromium's; it runs in both projects.
+    // `results-stopped.spec.ts` is #195's here: Phaser's own render pass broken, once and on every
+    // frame, a path through the browser's WebGL; its other stops skip themselves in WebKit.
     {
       name: 'webkit',
       testMatch:
-        /slow-press\.spec\.ts|results-pointer\.spec\.ts|leak-cue\.spec\.ts|panel-scroll-keys\.spec\.ts/,
+        /slow-press\.spec\.ts|results-pointer\.spec\.ts|leak-cue\.spec\.ts|panel-scroll-keys\.spec\.ts|results-stopped\.spec\.ts/,
       use: { ...devices['Desktop Safari'] },
     },
   ],
