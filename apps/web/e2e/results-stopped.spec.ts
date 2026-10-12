@@ -158,6 +158,9 @@ test('a renderer that never starts stops the run, rather than letting it play on
     browserName === 'webkit',
     "the boot break is Phaser's own JavaScript: Chromium runs it",
   );
+  // The stop waits out the never-started bound, which counts draws: on a runner drawing well
+  // under 60 a second that is far more than the bound's 10 s, so give the test room.
+  test.setTimeout(90_000);
   const pageErrors: string[] = [];
   const consoleErrors: string[] = [];
   page.on('pageerror', (e) => pageErrors.push(e.message));
@@ -171,9 +174,11 @@ test('a renderer that never starts stops the run, rather than letting it play on
     .toEqual(['results harness: the boot broke']);
   // READY never comes, so the draws' bound says so, and the frame loop stops the run.
   const dialog = page.getByRole('dialog', { name: 'Something went wrong.' });
-  await expect(dialog).toBeVisible({ timeout: 40_000 });
+  await expect(dialog).toBeVisible({ timeout: 60_000 });
+  // The run plays on from wave 3 until the bound runs out, so how far it got is the runner's
+  // frame rate: wave 3 here, wave 4 on CI's. Any wave from the one it started on will do.
   await expect(dialog).toHaveAccessibleDescription(
-    'The run stopped at wave 3 because of an error.',
+    /^The run stopped at wave (?:[3-9]|10) because of an error\.$/,
   );
   expect(
     consoleErrors.filter((m) => m.startsWith('Wynding: a frame failed')),
@@ -237,6 +242,8 @@ test('a render that breaks once costs Phaser a frame: the board draws again, and
   page,
   browserName,
 }) => {
+  // Room for the board-change poll below to wait out a wave's countdown on a slow runner.
+  test.setTimeout(90_000);
   const pageErrors: string[] = [];
   const consoleErrors: string[] = [];
   page.on('pageerror', (e) => pageErrors.push(e.message));
@@ -263,12 +270,14 @@ test('a render that breaks once costs Phaser a frame: the board draws again, and
   await animationFrames(page, 30);
   expect.soft(await phaserFrame(), "Phaser's frame count").toBeGreaterThan(frameAtBreak + 10);
   expect.soft(await drawnShare(page), 'the share of the board drawn').toBeGreaterThan(0.25);
-  // ...and drawn live, not frozen on its last good frame: wave 3's creeps are moving, so a board
-  // whose draws stopped recording (Phaser re-rendering what was last recorded while the app's
-  // frames complete) never changes, and fails here.
+  // ...and drawn live, not frozen on its last good frame: creeps move across a live board, so a
+  // board whose draws stopped recording (Phaser re-rendering what was last recorded while the
+  // app's frames complete) never changes, and fails here. On a slow runner wave 3 can be cleared
+  // by now, leaving nothing to move until wave 4 launches; its countdown started with wave 3's
+  // launch and lasts 15 s, so the poll waits that out. A frozen board fails however long it waits.
   const drawnAgain = await boardShot(page);
   await expect
-    .poll(async () => changedShare(drawnAgain, await boardShot(page)), { timeout: 2_000 })
+    .poll(async () => changedShare(drawnAgain, await boardShot(page)), { timeout: 25_000 })
     .toBeGreaterThan(0.001);
   // And the run carries on: the sim held for the frame that failed, then stepped on.
   await expect.poll(tick, { timeout: 10_000 }).toBeGreaterThan(tickAtBreak + 10);
