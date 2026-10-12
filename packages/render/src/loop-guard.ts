@@ -12,12 +12,13 @@
 // for good: the board went blank behind a run that played on, and only the console knew.
 //
 // A THROW COSTS PHASER A FRAME, NOT ITS LOOP. `runStep` runs one step and records what it threw,
-// never rethrowing it, so Phaser asks for its next frame and tries the next step. A step that
-// threw partway through its render leaves the renderer's half-built batch of quads, which the next
-// frame would draw: `runStep` hands the failure to a callback that discards it (`scene.ts`,
-// `batch-discard.ts`), so the next frame draws clean. `runReady` does
+// never rethrowing it, so Phaser asks for its next frame and tries the next step. `runReady` does
 // the same for the READY listener: Phaser emits READY and only then starts its loop
-// (`Game#texturesReady`), so a throw out of the listener would leave the loop never started.
+// (`Game#texturesReady`), so a throw out of the listener would leave the loop never started. A
+// step that threw partway through its render leaves that render half-done (quads batched and not
+// yet drawn, or canvas states saved and not restored), and the next frame would inherit it: after a
+// failed step, `runStep` runs the caller's clean-up (`scene.ts`, `failed-frame.ts`), so the next
+// frame starts clean.
 //
 // WHAT CANNOT BE SHOWN IS A FAILED FRAME. `check` hands each draw what keeps the board from being
 // drawn: the READY listener's failure, a loop that has stopped, or the failure of Phaser's last
