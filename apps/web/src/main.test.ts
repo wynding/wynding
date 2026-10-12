@@ -1045,6 +1045,60 @@ describe('main — a frame that throws (#191)', () => {
     expect(messages().filter((m) => m === FAILED_FRAME)).toHaveLength(2);
   });
 
+  it('a paused run is not stopped by failed frames: held and logged once, and counted only once it resumes', () => {
+    const h = stopApp();
+    h.start();
+    dockButton(h.root, 'Pause').click();
+    h.frame();
+    const draw = vi.mocked(fakeHandle.draw);
+    draw.mockImplementation(() => {
+      throw new Error('the draw broke');
+    });
+    const heldAt = h.controller().ticksRecorded();
+    for (let i = 0; i < 2 * FAILED_FRAME_LIMIT; i++) h.frame(MS_PER_TICK);
+    expect(h.controller().isStopped()).toBe(false);
+    expect(h.results.hidden, 'no message over a paused run').toBe(true);
+    expect(messages()).toEqual([FAILED_FRAME]);
+
+    dockButton(h.root, 'Resume').click();
+    for (let i = 1; i < FAILED_FRAME_LIMIT; i++) h.frame(MS_PER_TICK);
+    expect(h.controller().isStopped(), 'a frame short of the bound').toBe(false);
+    h.frame(MS_PER_TICK);
+    expect(h.controller().isStopped()).toBe(true);
+    expect(h.results.hidden).toBe(false);
+    expect(h.controller().ticksRecorded(), 'the sim held throughout').toBe(heldAt);
+  });
+
+  it('a leave confirmation open over a run that then stops is dismissed: Start again does not bring it back', () => {
+    // The one path that opens the confirmation over a run that is not paused: a run not yet
+    // started, with a plan queued (a started run is paused before it opens).
+    const h = stopApp();
+    h.frame();
+    document.dispatchEvent(new KeyboardEvent('keydown', { code: 'Digit1' }));
+    for (let i = 0; i < 3; i++)
+      h.board.dispatchEvent(new KeyboardEvent('keydown', { code: 'ArrowRight' }));
+    for (let i = 0; i < 2; i++)
+      h.board.dispatchEvent(new KeyboardEvent('keydown', { code: 'ArrowUp' }));
+    h.board.dispatchEvent(new KeyboardEvent('keydown', { code: 'Enter', cancelable: true }));
+    h.frame();
+    expect(Number(h.board.dataset.pendingAdds), 'fixture queued a plan').toBeGreaterThan(0);
+    const leave = h.root.querySelector<HTMLElement>('.wy-leave')!;
+    expect(h.clickHome().defaultPrevented).toBe(true);
+    expect(leave.hidden, 'the confirmation is open').toBe(false);
+
+    vi.mocked(fakeHandle.draw).mockImplementation(() => {
+      throw new Error('the draw broke');
+    });
+    for (let i = 0; i < FAILED_FRAME_LIMIT; i++) h.frame();
+    expect(h.results.hidden, 'the message opened').toBe(false);
+    expect(leave.hidden, 'the confirmation is gone').toBe(true);
+
+    vi.mocked(fakeHandle.draw).mockReset();
+    h.button('Start again').click();
+    expect(h.results.hidden).toBe(true);
+    expect(leave.hidden, 'and does not return over the fresh run').toBe(true);
+  });
+
   it('a held run whose draw starts failing after its first HUD refresh says wave 1, never wave 0', () => {
     const h = stopApp();
     h.frame(); // a good frame: the last good HUD is the held run's, with no wave launched yet

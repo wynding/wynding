@@ -3245,6 +3245,20 @@ describe('overlay — the leave-run confirm dialog (presentation only)', () => {
     expect(onConfirm).not.toHaveBeenCalled();
   });
 
+  it('hideLeave closes it as Stay, drops its commit action, and is a no-op when it is not open (#191)', () => {
+    const s = setup();
+    s.overlay.hideLeave(); // nothing open: nothing happens
+    expect(s.overlay.leaveEl.hidden).toBe(true);
+
+    const onConfirm = vi.fn();
+    s.overlay.showLeave(onConfirm);
+    s.overlay.hideLeave();
+    expect(s.overlay.leaveEl.hidden).toBe(true);
+    expect(s.shell.root.hasAttribute('inert')).toBe(false);
+    s.overlay.leaveEl.querySelector<HTMLButtonElement>('.wy-leave-confirm')!.click();
+    expect(onConfirm).not.toHaveBeenCalled();
+  });
+
   it('a double Confirm activation navigates ONCE', () => {
     const s = setup();
     const onConfirm = vi.fn();
