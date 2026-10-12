@@ -169,7 +169,8 @@ export interface AppHandle {
 
 /** Consecutive failed frames after which the frame loop stops the run (#191): about a second at
  *  60 Hz, the same bound `@wynding/render`'s bake runner waits before retrying a failed bake
- *  (`BAKE_RETRY_FRAMES`). Exported for the tests that drive a frame to it. */
+ *  (`BAKE_RETRY_FRAMES`). Frames that fail while the run is paused do not count. Exported for
+ *  the tests that drive a frame to it. */
 export const FAILED_FRAME_LIMIT = 60;
 
 /** Wire the whole app into `root`. Pure of Phaser/rAF (both injected via `deps`). */
@@ -328,8 +329,11 @@ export function createApp(doc: Document, root: HTMLElement, deps: AppDeps): AppH
   /** The last HUD derived from a good state — what a stopped run's message reads its wave from
    *  (#191), since nothing may be derived from a half-stepped one. */
   let lastHud: HudVM | null = null;
-  /** The frame loop's failure state (#191): how many frames IN A ROW have failed after the sim
-   *  step, and each distinct error already logged. Both cleared by Play again. */
+  /** The frame loop's failure state (#191): whether the last frame failed after the sim step
+   *  (the sim is held until one completes), how many frames IN A ROW have failed while the run
+   *  was not paused (the count that stops the run), and each distinct error already logged. All
+   *  cleared by Play again. */
+  let frameHeld = false;
   let failedFrames = 0;
   const frameErrorsLogged = new Set<string>();
   /** The results dialog's live-region claim counter (#133 review round). Declared HERE,
@@ -1110,6 +1114,7 @@ export function createApp(doc: Document, root: HTMLElement, deps: AppDeps): AppH
         runCaptured = false; // the next run is captured at its own terminal edge
         runRecorded = false;
         // The next run's frames start healthy: no held sim, and its errors logged afresh (#191).
+        frameHeld = false;
         failedFrames = 0;
         frameErrorsLogged.clear();
         lastHudKey = '';
@@ -1157,7 +1162,10 @@ export function createApp(doc: Document, root: HTMLElement, deps: AppDeps): AppH
   // A HUD refresh that threw is retried by the next frame: its memo key is recorded only once
   // the refresh completes. `FAILED_FRAME_LIMIT` failed frames in a row stop the run as a step's
   // throw does, but with the sim whole, so the run is captured as it stands and its data
-  // offered.
+  // offered. A PAUSED run's failed frames are not counted: it has progress to lose and cannot
+  // play on unseen, and a draw that fails only in one layout (behind the rotate prompt, say) may
+  // recover. They are still logged and still hold the sim, and the count resumes with the run.
+  // A run not yet started counts: it has nothing to lose, and the message helps.
   //
   // Either way the player is told where the results dialog would open (`stopRun`). That message
   // is modal, so the Shell is inert and no board, Card or Dock input reaches the stopped run;
@@ -1169,7 +1177,7 @@ export function createApp(doc: Document, root: HTMLElement, deps: AppDeps): AppH
     const dt = now - lastNow;
     lastNow = now;
     if (controller.isStopped()) return; // a stopped run steps, derives and draws nothing more
-    if (failedFrames === 0) {
+    if (!frameHeld) {
       try {
         controller.advance(dt);
       } catch (error) {
@@ -1180,7 +1188,8 @@ export function createApp(doc: Document, root: HTMLElement, deps: AppDeps): AppH
     try {
       presentFrame(now);
     } catch (error) {
-      failedFrames++;
+      frameHeld = true;
+      if (!controller.isPaused()) failedFrames++;
       try {
         reportFrameError(error);
       } finally {
@@ -1189,6 +1198,7 @@ export function createApp(doc: Document, root: HTMLElement, deps: AppDeps): AppH
       }
       return;
     }
+    frameHeld = false;
     failedFrames = 0;
   });
 
@@ -1316,6 +1326,10 @@ export function createApp(doc: Document, root: HTMLElement, deps: AppDeps): AppH
       // Opening the dialog invalidates anything still in flight for an earlier one, as at the
       // terminal edge.
       abandonResultsStatus();
+      // A leave confirmation open over the run (a not-yet-started run with a plan can have
+      // one) is dismissed as Stay: Start again closes only the results dialog, and the
+      // confirmation would come back over the fresh run.
+      overlay.hideLeave();
       overlay.showStopped({
         // The wave the run was on: waves launched, by the last good HUD, and at least the first.
         wave: Math.max(1, lastHud?.waveCursor ?? 0),

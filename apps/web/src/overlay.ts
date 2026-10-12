@@ -102,6 +102,10 @@ export interface Overlay {
    *  (the modified-activation check and the live-run state read) is `main.ts`'s, which owns
    *  the guard; this just shows the dialog and calls `onConfirm` if the player commits. */
   showLeave(onConfirm: () => void): void;
+  /** Close the leave confirmation as if the player chose Stay, and drop its commit action
+   *  (#191): a run an error stopped has nothing left to protect, and the dialog would
+   *  otherwise come back over the next, unstarted run. A no-op when it is not open. */
+  hideLeave(): void;
   /** Open the results dialog for a finished run: `hud` carries the outcome, score and stars,
    *  `stats` the run's numbers (`Controller.runStats`, #181 H2). */
   showResults(hud: HudVM, stats: RunStats): void;
@@ -2815,6 +2819,10 @@ export function createOverlay(
       abortGesture();
       leaveConfirmHandler = onConfirm;
       modal.open(leaveOverlay, { priority: 'settings', dismissOnEscape: true });
+    },
+    hideLeave(): void {
+      leaveConfirmHandler = null;
+      modal.close(leaveOverlay);
     },
     showResults(hud: HudVM, stats: RunStats): void {
       openResults(() =>
