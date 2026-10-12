@@ -397,7 +397,7 @@ test.describe('#181 H3: the armed Card under forced colours', () => {
     await expect(armed).toBeFocused();
     const f = await look(0);
     expect(f.focused).toBe(true);
-    expect(f.ring, 'the focus ring is up').toBe('solid');
+    expect(f.ring, 'the focus ring is up (dashed, #181 UAT)').toBe('dashed');
     expect(
       { width: f.width, style: f.style },
       'and the armed mark still shows with focus ON the armed Card',
@@ -718,6 +718,99 @@ test.describe('#181 H3: under forced colours, arming moves nothing inside the Ca
         'the premise: the forced-colours armed mark',
       ).toBe('double');
       expect(await parts(), 'arming moves nothing inside the Card').toEqual(before);
+    });
+  }
+});
+
+// A focused Card must not read like an armed one (#181, the owner's UAT ruling). Both are the
+// same yellow, and on the phone rail's small tiles a solid focus ring beside the armed frame
+// looked like arming. The Card's focus ring is DASHED; the armed frame is a border and an inset
+// ring. Armed and focused shows both, the frame inside and the dashed ring outside.
+test.describe('#181 UAT: a focused Card is dashed, an armed Card is framed, and both show together', () => {
+  for (const [label, size] of [
+    ['658×320 (the phone rail)', PHONE],
+    ['1440×900', WIDE],
+  ] as const) {
+    test(`${label}: focused only, armed only, armed and focused — and the Card's box is the same in all four states`, async ({
+      page,
+    }) => {
+      await gotoAt(page, size);
+      const look = (n: number) =>
+        page
+          .locator('.wy-card')
+          .nth(n)
+          .evaluate((card) => {
+            const cs = getComputedStyle(card);
+            const b = card.getBoundingClientRect();
+            return {
+              focused: card === document.activeElement,
+              pressed: card.getAttribute('aria-pressed'),
+              outlineStyle: cs.outlineStyle,
+              outlineWidth: cs.outlineWidth,
+              outlineOffset: cs.outlineOffset,
+              outlineColor: cs.outlineColor,
+              borderWidth: cs.borderTopWidth,
+              borderColor: cs.borderTopColor,
+              ring: cs.boxShadow,
+              box: [b.x, b.y, b.width, b.height],
+            };
+          });
+
+      // A key press first, so the page is in keyboard modality and a script `focus()` matches
+      // `:focus-visible`; then back to nothing armed.
+      await page.keyboard.press('1');
+      await expect(page.locator('.wy-card').nth(0)).toHaveAttribute('aria-pressed', 'true');
+      await page.keyboard.press('Escape');
+      await expect(page.locator('.wy-card[aria-pressed="true"]')).toHaveCount(0);
+      await page.locator('.wy-board').focus();
+      const rest = await look(0);
+      expect(rest.pressed).toBe('false');
+      expect(rest.outlineStyle, 'a resting, unfocused Card has no ring').toBe('none');
+
+      // Focused only: the dashed ring, 3px at a 2px offset in the yellow, and no frame.
+      await page.locator('.wy-card').nth(0).focus();
+      const focusedOnly = await look(0);
+      expect(focusedOnly.focused).toBe(true);
+      expect(focusedOnly.pressed).toBe('false');
+      expect(focusedOnly.outlineStyle, 'a focused Card’s ring is dashed').toBe('dashed');
+      expect(focusedOnly.outlineWidth).toBe('3px');
+      expect(focusedOnly.outlineOffset).toBe('2px');
+      expect(focusedOnly.outlineColor).toBe(ARMED_RGB);
+      expect(focusedOnly.ring, 'focus alone adds no frame').toBe('none');
+      expect(focusedOnly.borderWidth).toBe('1px');
+
+      // Armed only: the frame (a 1px border and a 2px inset ring), and no outline.
+      await page.keyboard.press('1');
+      await expect(page.locator('.wy-card').nth(0)).toHaveAttribute('aria-pressed', 'true');
+      await page.locator('.wy-board').focus();
+      const armedOnly = await look(0);
+      expect(armedOnly.focused).toBe(false);
+      expect(armedOnly.pressed).toBe('true');
+      expect(armedOnly.outlineStyle, 'an armed, unfocused Card has no outline').toBe('none');
+      expect(armedOnly.borderWidth).toBe('1px');
+      expect(armedOnly.borderColor).toBe(ARMED_RGB);
+      expect(armedOnly.ring).toBe(`${ARMED_RGB} 0px 0px 0px 2px inset`);
+
+      // Armed and focused: both, the frame inside and the dashed ring outside.
+      await page.locator('.wy-card').nth(0).focus();
+      const both = await look(0);
+      expect(both.focused).toBe(true);
+      expect(both.pressed).toBe('true');
+      expect(both.outlineStyle).toBe('dashed');
+      expect(both.outlineWidth).toBe('3px');
+      expect(both.outlineOffset).toBe('2px');
+      expect(both.outlineColor).toBe(ARMED_RGB);
+      expect(both.borderColor).toBe(ARMED_RGB);
+      expect(both.ring).toBe(`${ARMED_RGB} 0px 0px 0px 2px inset`);
+
+      // Nothing moves: the Card's box is identical in every state.
+      for (const [state, s] of [
+        ['focused only', focusedOnly],
+        ['armed only', armedOnly],
+        ['armed and focused', both],
+      ] as const) {
+        expect(s.box, `the Card's box when ${state}`).toEqual(rest.box);
+      }
     });
   }
 });

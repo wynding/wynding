@@ -92,9 +92,12 @@ export default defineConfig({
     // (it scrolls a `preventScroll` focus made over dirty layout); it runs in both projects.
     // `leak-cue.spec.ts` is #181 C1's: the lives chip's leak cue, drawn by `ui.css` and timed by
     // `main.ts`, which only a browser runs together; it runs in both projects.
+    // `panel-scroll-keys.spec.ts` is #181's: the pinned Panel's scrollport driven by keys, where
+    // WebKit's focus and key-scroll behaviour differs from Chromium's; it runs in both projects.
     {
       name: 'webkit',
-      testMatch: /slow-press\.spec\.ts|results-pointer\.spec\.ts|leak-cue\.spec\.ts/,
+      testMatch:
+        /slow-press\.spec\.ts|results-pointer\.spec\.ts|leak-cue\.spec\.ts|panel-scroll-keys\.spec\.ts/,
       use: { ...devices['Desktop Safari'] },
     },
   ],

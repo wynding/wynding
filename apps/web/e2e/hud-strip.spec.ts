@@ -1753,3 +1753,123 @@ test('Compact at 100% text: a row’s wrap moves nothing else — the Dock, its 
   }
   expect(wrapped, 'the premise: a row wrapped at 100% text').toBeGreaterThan(0);
 });
+
+// ---- #181: the wave strip's title is never cut in Compact's column ----
+
+/** The title's text, measured where it is drawn, against the column: the extent of its text
+ *  boxes, and the column's content box (`measureStrip`'s). */
+async function measureTitle(page: Page): Promise<{
+  column: { left: number; right: number };
+  text: string;
+  left: number;
+  right: number;
+  wordBroke: boolean;
+}> {
+  return page.evaluate(() => {
+    const hud = document.querySelector<HTMLElement>('.wy-hud')!;
+    const columnLeft = hud.getBoundingClientRect().left + hud.clientLeft;
+    const title = document.querySelector<HTMLElement>('.wy-wave-preview-title')!;
+    const range = document.createRange();
+    range.selectNodeContents(title);
+    const boxes = [...range.getClientRects()].filter((r) => r.width > 0);
+    // A break inside a word shows as the word's own boxes on more than one line.
+    const word = document.createRange();
+    const node = title.firstChild!;
+    word.setStart(node, 0);
+    word.setEnd(node, 4); // "Wave"
+    const wordLines = new Set([...word.getClientRects()].map((r) => Math.round(r.top)));
+    return {
+      column: { left: columnLeft, right: columnLeft + hud.clientWidth },
+      text: title.textContent ?? '',
+      left: Math.min(...boxes.map((r) => r.left)),
+      right: Math.max(...boxes.map((r) => r.right)),
+      wordBroke: wordLines.size > 1,
+    };
+  });
+}
+
+// One test per phone, so they run side by side.
+for (const size of STRIP_PHONES) {
+  test(`Compact ${size.width}×${size.height}: the strip’s title lies wholly inside the column — a word wider than it breaks inside the word — 100–200% text, before and after Start (#181)`, async ({
+    page,
+  }) => {
+    test.setTimeout(240_000); // five page loads, each started; generous for slow cores
+    let broke = 0;
+    for (const zoom of [100, 125, 150, 175, 200]) {
+      await gotoAt(page, size);
+      expect(await page.evaluate((q) => matchMedia(q).matches, COMPACT_QUERY)).toBe(true);
+      if (zoom !== 100) await page.addStyleTag({ content: `:root { font-size: ${zoom}% }` });
+      await settle(page);
+      for (const phase of ['pre-start', 'started'] as const) {
+        if (phase === 'started') {
+          await page.getByRole('button', { name: 'Start', exact: true }).click();
+          await expect(page.getByRole('button', { name: 'Call wave' })).toBeVisible();
+          await settle(page);
+        }
+        const what = `${size.width}×${size.height} at ${zoom}%, ${phase}`;
+        const t = await measureTitle(page);
+        expect(t.text, `${what}: the premise, the title`).toMatch(/^Wave \d+ of \d+$/);
+        expect(t.left, `${what}: the title starts inside the column`).toBeGreaterThanOrEqual(
+          t.column.left - 0.5,
+        );
+        expect(
+          t.right,
+          `${what}: the title ends ${(t.right - t.column.right).toFixed(1)}px past the column`,
+        ).toBeLessThanOrEqual(t.column.right + 0.5);
+        if (t.wordBroke) broke++;
+      }
+    }
+    // The premise, where the column is the narrowest: a word broke somewhere.
+    if (size.width === 568) {
+      expect(broke, 'the premise: "Wave" broke inside the word at heavy text').toBeGreaterThan(0);
+    }
+  });
+}
+
+/** The title's mid-word break, undone (`ui.css`). */
+const TITLE_UNBROKEN = '.wy-wave-preview-title { overflow-wrap: normal !important; }';
+
+test('Compact at 100% text: the title’s mid-word break moves nothing — the Dock, its controls, the chips, the home mark, the board and the strip’s rows stay where they are, before and after Start (#181)', async ({
+  page,
+}) => {
+  test.setTimeout(120_000);
+  for (const size of STRIP_PHONES) {
+    await gotoAt(page, size);
+    expect(await page.evaluate((q) => matchMedia(q).matches, COMPACT_QUERY)).toBe(true);
+    await settle(page);
+    for (const phase of ['pre-start', 'started'] as const) {
+      if (phase === 'started') {
+        await page.getByRole('button', { name: 'Start', exact: true }).click();
+        await expect(page.getByRole('button', { name: 'Call wave' })).toBeVisible();
+        await page.getByRole('button', { name: 'Pause' }).click(); // nothing moves between reads
+        await settle(page);
+      }
+      const what = `${size.width}×${size.height}, ${phase}`;
+      const read = (): Promise<string> =>
+        page.evaluate(() =>
+          [
+            ...document.querySelectorAll(
+              '.wy-dock, .wy-dock .wy-btn, .wy-hud > .wy-chip, .wy-home, .wy-mark, .wy-board, .wy-wave-preview-title, .wy-wave-preview .wy-preview-entry',
+            ),
+          ]
+            .map((el) => {
+              const b = el.getBoundingClientRect();
+              return [b.x, b.y, b.width, b.height].map((v) => v.toFixed(3)).join(',');
+            })
+            .join(' | '),
+        );
+      const withBreak = await read();
+      await page.evaluate((css) => {
+        const style = document.createElement('style');
+        style.id = 'wy-test-unbroken';
+        style.textContent = css;
+        document.head.append(style);
+      }, TITLE_UNBROKEN);
+      await settle(page);
+      const unbroken = await read();
+      await page.evaluate(() => document.getElementById('wy-test-unbroken')?.remove());
+      await settle(page);
+      expect(withBreak, `${what}: the mid-word break moved a box at 100% text`).toBe(unbroken);
+    }
+  }
+});
