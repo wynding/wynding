@@ -860,6 +860,23 @@ describe('main — a frame that throws (#191)', () => {
     expect(h.results.hidden).toBe(true);
   });
 
+  it('a board that cannot draw from the very first frame is told too: a held run, stopped before any HUD refresh, says wave 1', () => {
+    const h = stopApp();
+    vi.mocked(fakeHandle.draw).mockImplementation(() => {
+      throw new Error('the draw broke');
+    });
+    for (let i = 0; i < FAILED_FRAME_LIMIT; i++) h.frame();
+    expect(h.results.hidden).toBe(false);
+    expect(h.results.querySelector('.wy-results-subtitle')!.textContent).toBe(
+      'The run stopped at wave 1 because of an error.',
+    );
+    // Its data is offered all the same: a run of no ticks, captured as it stood.
+    h.button('Run data').click();
+    h.button('Save run data').click();
+    const { runs } = JSON.parse(h.saved[0]!.text) as { runs: Record<string, unknown>[] };
+    expect(runs[0]!.ticksCompleted).toBe(0);
+  });
+
   it('a stopped run whose capture throws still shows its message, without Run data', () => {
     const h = stopApp({ captureThrows: true });
     h.start();
