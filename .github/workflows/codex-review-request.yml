@@ -14,7 +14,7 @@ name: Codex review request
 # artifact, review or comment, appear after the bot's comment? No → Codex is ignoring the
 # trigger, this file's problem; yes → the script's parsing drifted.) Remedy here: route
 # the comment through a
-# fine-grained PAT (issues: write) stored as a secret instead of `github.token`, or
+# fine-grained PAT (pull requests: write) stored as a secret instead of `github.token`, or
 # delete this workflow and fall back to the manual trigger documented in
 # docs/ai-workflow.md §4. A missed trigger is loud either way — the status never goes
 # green on its own.
@@ -44,8 +44,10 @@ on:
 
 permissions:
   contents: read
-  pull-requests: read # the freshness pre-check only reads PR metadata
-  issues: write # the trigger POSTs to the REST issues API below, which this scope covers
+  # The trigger POST below comments on a PR, which takes this scope: see the note above
+  # the step. The freshness pre-check's reads (the PR, its reviews) ride on it too.
+  pull-requests: write
+  issues: read # the freshness pre-check reads the PR's comments through the issues API
 
 jobs:
   request:
@@ -71,21 +73,24 @@ jobs:
       - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
           node-version: 22
-      # #154: this POST has declared `issues: write` since this workflow's first commit —
-      # confirmed by git history — yet the live probe on PR #156 (push 75e4f1a) hit the
-      # identical 403 anyway. That rules out the permissions block; what remains is an
-      # org-level token cap only an org admin can inspect, not something fixable from this
-      # repo. #72 §3's `CODEX_TRIGGER_TOKEN` (a fine-grained PAT, owner lane) is the
-      # recorded fix. Until it lands, the 403 branch below downgrades ITSELF to a workflow
-      # warning — the `if`/`else` around the `gh api` call, not a step-level flag. A
-      # step-wide `continue-on-error` was tried here and removed (Codex, PR #156 round 2):
-      # it would also swallow a missing script, an indeterminate freshness read, or any
-      # other real failure in this step, exactly the silent-green #154 exists to prevent.
+      # #154 / #72 §3: with `issues: write` and `pull-requests: read`, every auto-trigger
+      # since the live probe on PR #156 (push 75e4f1a) had this POST refused with "Resource
+      # not accessible by integration"; the runs' own logs list exactly those two grants.
+      # #154 read that as an org-level token cap only an org admin could inspect. But the
+      # comment's target is a pull request: GitHub lists this endpoint under both the
+      # issues and the pull-requests scopes, and the issues one alone was refused for a PR,
+      # so the block above now grants `pull-requests: write`. A live run is the proof:
+      # until one shows the POST going through, the 403 branch below still downgrades
+      # ITSELF to a workflow warning — the `if`/`else` around the `gh api` call, not a
+      # step-level flag. A step-wide `continue-on-error` was tried here and removed (Codex,
+      # PR #156 round 2): it would also swallow a missing script, an indeterminate
+      # freshness read, or any other real failure in this step, exactly the silent-green
+      # #154 exists to prevent.
       # Only the KNOWN 403 goes quiet; everything else in this step still fails the job
       # loudly, as it should. `codex-freshness` still goes red separately and honestly
       # when no verdict covers the head; that status is the one that matters. REVERT the
       # warning-downgrade branch below (the `elif`, not the `else` — the `else` is the
-      # loud-failure path) the moment the PAT lands and the POST can succeed again.
+      # loud-failure path) once a live run shows the POST succeeding.
       - name: Comment "@codex review" if the current head lacks a Codex verdict
         run: |
           set -euo pipefail
@@ -118,7 +123,7 @@ jobs:
               if [ "$post_ec" -eq 0 ]; then
                 echo "Requested a Codex review of the new head."
               elif printf '%s\n' "$post_out" | grep -qF 'Resource not accessible by integration'; then
-                # THE KNOWN CAP, matched on the #154 probe's verbatim message. An `HTTP 403`
+                # THE KNOWN REFUSAL, matched on the #154 probe's verbatim message. An `HTTP 403`
                 # alternative stood beside this one and was removed: it matched ANY 403 `gh`
                 # can emit — a secondary rate limit, SSO/SAML enforcement, an IP allow-list —
                 # so a fresh, actionable failure earned the same silent downgrade as the
@@ -128,16 +133,15 @@ jobs:
                 # string now, so no regex surface to widen it again by accident.
                 #
                 # ONE RESIDUAL CASE THIS STRING CANNOT SEPARATE, stated rather than papered
-                # over: GitHub returns the SAME message when a token simply lacks the scope,
-                # so if `issues: write` (the `permissions:` block above) is ever narrowed,
-                # that self-inflicted, one-line-fixable regression would be downgraded here
-                # wearing the org cap's clothes. The header's "what remains is an org-level
-                # token cap" was a finding about the state of the repo at the #154 probe, not
-                # a property of the string. Bounded by `codex-freshness` going red on its own
-                # when no verdict lands; re-check the permissions block before believing this
+                # over: it is the message GitHub returns whenever a token lacks the scope,
+                # which is what #72 §3 found it meant here (`issues: write` alone, for a
+                # comment on a PR), and also what any other missing scope would return. If it
+                # still appears with `pull-requests: write` granted, the scope is not the
+                # whole story. Bounded by `codex-freshness` going red on its own when no
+                # verdict lands; re-check the permissions block before believing this
                 # warning. A grep of this file for the scope was considered and rejected — it
                 # would fire on any reformat, putting a flake inside a guard.
-                echo "::warning::auto-trigger POST failed with the known org-level token cap (Resource not accessible by integration; see #154 probe + #72 §3). Post '@codex review' manually."
+                echo "::warning::auto-trigger POST refused (Resource not accessible by integration) with pull-requests: write granted; see #72 §3. Post '@codex review' manually."
               else
                 # Anything else — INCLUDING ANY OTHER 403. A 403 that is not the cap above
                 # has a different cause and a different owner, so it gets no graceful
