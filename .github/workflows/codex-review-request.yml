@@ -44,8 +44,8 @@ on:
 permissions:
   contents: read
   # The trigger POST below comments on a PR, which takes this scope: `issues: write` alone is
-  # refused for a pull request (#72 §3's probe). The freshness pre-check's reads (the PR,
-  # its reviews) ride on it too.
+  # refused for a pull request (A/B probe, run 38308574140). The freshness pre-check's reads
+  # (the PR, its reviews) ride on it too.
   pull-requests: write
   issues: read # the freshness pre-check reads the PR's comments through the issues API
 
@@ -73,14 +73,14 @@ jobs:
       - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
           node-version: 22
-      # #154 / #72 §3: from the live probe on PR #156 (push 75e4f1a) on, this POST was refused
+      # #154 / #72 §3: from this workflow's first live run (2026-07-30) on, this POST was refused
       # with "Resource not accessible by integration" on every run, under `issues: write`
       # and `pull-requests: read`. #154 read that as an org-level token cap; it was the
       # scope. An A/B probe (run 38308574140, 2026-10-12) settled it: with `issues: write`
       # a token comments on an issue but is refused on a pull request, and with
       # `pull-requests: write` it comments on the pull request, whatever GitHub's
       # permission table suggests. This workflow's first commit granted it; 600923c
-      # narrowed it to `read` before any live run. A failed POST now fails the job, with
+      # narrowed it to `read` before it ever ran on main. A failed POST now fails the job, with
       # what gh said in its output, and `codex-freshness` stays red until a verdict lands.
       - name: Comment "@codex review" if the current head lacks a Codex verdict
         run: |
