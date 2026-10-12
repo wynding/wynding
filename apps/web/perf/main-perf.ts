@@ -194,9 +194,8 @@ async function main(): Promise<void> {
   // app's own rAF scheduler (`boot()`'s), `controllerFactory` injects the stress bundle
   // through `ControllerContent` (`controller.ts`) instead of the production
   // `getBundledRuleset()` path. The created controller is captured via closure: `createApp`
-  // calls `controllerFactory`
-  // synchronously before it returns, so `controller` is assigned by the time the call
-  // below completes.
+  // calls `controllerFactory` synchronously before it returns, so `controller` is assigned
+  // by the time the call below completes.
   let controller!: Controller;
   createApp(document, root, {
     // P8: a delegating wrapper around the real Phaser mount, bracketing `draw` with the
