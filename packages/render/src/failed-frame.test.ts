@@ -34,7 +34,7 @@ function holding(): BatchedPipeline & {
 }
 
 /** Phaser's `CustomMap#each`, over the pipelines registered by name: it stops where a callback
- *  returns false (`Structs/Map.js`, 3.90.0). */
+ *  returns false (`structs/Map.js`, 3.90.0). */
 function renderer(...pipelines: BatchedPipeline[]): PipelineHolder {
   const map = new Map(pipelines.map((p, i) => [`pipeline${String(i)}`, p]));
   return {
