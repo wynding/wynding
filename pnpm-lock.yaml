@@ -4,6 +4,12 @@ settings:
   autoInstallPeers: true
   excludeLinksFromLockfile: false
 
+catalogs:
+  default:
+    phaser:
+      specifier: ^3.90.0
+      version: 3.90.0
+
 importers:
 
   .:
@@ -134,7 +140,7 @@ importers:
         specifier: ^25.0.0
         version: 25.0.1
       phaser:
-        specifier: ^3.90.0
+        specifier: 'catalog:'
         version: 3.90.0
       pngjs:
         specifier: ^7.0.0
@@ -196,7 +202,7 @@ importers:
         specifier: workspace:*
         version: link:../types
       phaser:
-        specifier: ^3.90.0
+        specifier: 'catalog:'
         version: 3.90.0
     devDependencies:
       '@wynding/content':

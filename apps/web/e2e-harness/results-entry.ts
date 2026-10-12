@@ -44,8 +44,10 @@
 // the lasting break stops it as a draw stop does, and the run carries on past the one-off.
 // `window.__wyRenderBreak` counts the throws and reads Phaser's frame count. It is the harness's
 // one reach into Phaser itself, through apps/web's `phaser` dev dependency, which resolves to the
-// install the scene runs on: one module, so the patch reaches the game the app mounts. Were the two
-// ever to resolve apart, the lasting break would never stop the run, and its spec would fail.
+// install the scene runs on: one module, so the patch reaches the game the app mounts. Both
+// packages take Phaser's version from the workspace catalog (`pnpm-workspace.yaml`), so a bump
+// moves them together; were the two ever to resolve apart, the breaks would miss the game and
+// their specs would fail.
 
 import Phaser from 'phaser';
 import { createApp, rafScheduler } from '../src/main';
