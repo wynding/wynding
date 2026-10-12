@@ -15,7 +15,8 @@
 // bake that fails throws nothing (`bake-runner.ts`). A step of Phaser's loop that throws costs
 // Phaser that frame, not its loop, and the next `draw()` throws what it threw; so does every
 // `draw()` after a READY listener that threw, or once Phaser's loop has stopped stepping (#195,
-// `loop-guard.ts`).
+// `loop-guard.ts`). A loop that never started (Phaser's boot failed before our READY listener ran)
+// is reported the same way once about ten seconds of frames have passed with no READY.
 //
 // STATIC ART IS BAKED, NOT RE-RECORDED (V2, #181). The board, every tower and every creep's
 // body and shadow are painted once into textures and shown by sprites: one board image, and
