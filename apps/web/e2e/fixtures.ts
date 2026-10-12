@@ -19,8 +19,10 @@ import { test as base, type Browser, type BrowserContext } from '@playwright/tes
 // second element is an object (a RegExp is one) as a `[value, options]` fixture tuple, so
 // `test.use({ expectedErrors: [/a/, /b/] })` would hand the fixture a RegExp, not the list.
 //
-// A test that already failed keeps its own failure: the check runs only when the test has not
-// failed, so the tripwire never hides the first cause.
+// The check judges only a test that otherwise passed. A test that already failed keeps its own
+// failure, so the tripwire never hides the first cause; and a test skipped at runtime stays
+// skipped (Playwright turns a teardown error into a failure even on a skipped test, and a skipped
+// test never logs the errors its `describe` declared). `fixtures.spec.ts` pins both halves.
 
 export * from '@playwright/test';
 
@@ -97,7 +99,7 @@ export const test = base.extend<{ expectedErrors: ExpectedErrors; errorTripwire:
         restore();
         current = undefined;
       }
-      if (testInfo.status !== testInfo.expectedStatus) return;
+      if (testInfo.status !== 'passed') return;
       const undeclared = collector.seen.filter(
         (error) => !patterns.some((pattern) => pattern.test(error.text)),
       );
