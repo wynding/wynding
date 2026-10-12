@@ -647,10 +647,7 @@ export function createApp(doc: Document, root: HTMLElement, deps: AppDeps): AppH
       // refresh that threw (#191), or an input handler's — so the capture keeps its own guard
       // rather than riding the dialog's. A capture that itself throws is not retried; the next
       // walk opens the dialog without it.
-      if (!runCaptured) {
-        runCaptured = true;
-        capturePlaytrace(hud);
-      }
+      captureRunOnce(hud);
       // Opening a dialog invalidates anything still in flight for the previous one. The
       // invariant held via `resultsShown` + `playAgain` alone, but only by accident of
       // there being one re-open path; enforcing it where the dialog actually opens means a
@@ -724,6 +721,16 @@ export function createApp(doc: Document, root: HTMLElement, deps: AppDeps): AppH
       viewport: playtraceViewport(),
     });
     runRecorded = true;
+  }
+
+  /** The ONE capture attempt a run gets (#133, #181 H2): the run is marked captured BEFORE the
+   *  attempt, so a capture that throws is never retried. The terminal edge and a run the frame
+   *  loop stops (#191) both come through here; each keeps its own failure behaviour, since this
+   *  lets a throw out. */
+  function captureRunOnce(hud: HudVM | null): void {
+    if (runCaptured) return;
+    runCaptured = true;
+    capturePlaytrace(hud);
   }
 
   /** The two export actions. Local only — nothing leaves the device, which is why neither
@@ -1314,10 +1321,9 @@ export function createApp(doc: Document, root: HTMLElement, deps: AppDeps): AppH
       );
     }
     if (!resultsShown) {
-      if (cause === 'frame' && !runCaptured) {
-        runCaptured = true;
+      if (cause === 'frame') {
         try {
-          capturePlaytrace(null);
+          captureRunOnce(null);
         } catch (captureError) {
           // The message still opens, without the run data a failed capture cannot back.
           console.error('Wynding: the stopped run could not be captured.', captureError);
