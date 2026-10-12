@@ -11,10 +11,11 @@
 // WHAT A FAILURE DOES. `draw()` records a frame; Phaser's own loop makes the pixels from what it
 // recorded, on the same animation frames. `draw()` throws only what keeps the board from being
 // drawn, and apps/web's frame loop takes that as a failed frame: its sim holds, each distinct
-// error is logged once, and a failure that lasts stops the run (#191). A bake that fails throws
-// nothing (`bake-runner.ts`). A step of Phaser's loop that throws costs Phaser that frame, not
-// its loop, and the next `draw()` throws what it threw; so does every `draw()` after a READY
-// listener that threw, or once Phaser's loop has stopped stepping (#195, `loop-guard.ts`).
+// error is logged once, and a failure that lasts stops the run, or holds a paused one (#191). A
+// bake that fails throws nothing (`bake-runner.ts`). A step of Phaser's loop that throws costs
+// Phaser that frame, not its loop, and the next `draw()` throws what it threw; so does every
+// `draw()` after a READY listener that threw, or once Phaser's loop has stopped stepping (#195,
+// `loop-guard.ts`).
 //
 // STATIC ART IS BAKED, NOT RE-RECORDED (V2, #181). The board, every tower and every creep's
 // body and shadow are painted once into textures and shown by sprites: one board image, and
@@ -389,7 +390,7 @@ export function mount(el: HTMLElement, geometry: BoardGeometry): RenderHandle {
     });
     // What keeps the board from being drawn (#195, `loop-guard.ts`): the READY listener failed,
     // Phaser's loop has stopped, or its last step failed. Thrown below, it fails the app's frame
-    // (#191): the sim holds, and a failure that lasts stops the run.
+    // (#191): the sim holds, and a failure that lasts stops the run (a paused one is only held).
     const failure = loopGuard.check(game.getFrame());
     // Spark points arrive drained — the controller clears them — so dropping them here would
     // lose those flashes for good. Before READY there is no game clock, and a failed frame shows

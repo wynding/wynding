@@ -19,9 +19,9 @@
 // WHAT CANNOT BE SHOWN IS A FAILED FRAME. `check` hands each draw what keeps the board from being
 // drawn: the READY listener's failure, a loop that has stopped, or the failure of Phaser's last
 // step, in that order. `draw()` throws it into the app's frame-failure policy (#191): the sim
-// holds, each distinct error is logged once, and a failure that lasts stops the run. A step that
-// failed once clears at Phaser's next good step, and the run carries on. Nothing is handed back
-// before READY, when Phaser's loop has not started.
+// holds, each distinct error is logged once, and a failure that lasts stops the run (a paused run
+// is only held). A step that failed once clears at Phaser's next good step, and the run carries
+// on. Nothing is handed back before READY, when Phaser's loop has not started.
 //
 // A LOOP THAT HAS STOPPED. Each `check` is given Phaser's frame count (`Game#getFrame`). Phaser's
 // `TimeStep` runs on animation frames and moves the count on every one, once the step (if any)
