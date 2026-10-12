@@ -3249,6 +3249,14 @@ a.wy-home:focus-visible {
     margin-top: 0.25rem;
   }
 
+  /* The title breaks between words, and INSIDE one where a single word is wider than the
+     column: at 150–200% text "Wave" alone outgrew the column (a few px at 568×320 and 150%, up
+     to 31px at 200% on macOS's fonts; more on CI's), and the scrollport cut its end. A word that
+     fits still breaks only between words, as the results panel's loss heading does (below). */
+  .wy-wave-preview-title {
+    overflow-wrap: anywhere;
+  }
+
   /* An air entry's wings reach 0.1287em past the icon's box on each side (the armored flyer's,
      the widest that ships), and the column's scrollport has no gap to give them on the left:
      this margin does. 0.15em, not the reach, for a little room. The glance gives the same
