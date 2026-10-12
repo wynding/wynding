@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
+import { describe, it, expect, vi, beforeEach, afterEach, type MockInstance } from 'vitest';
 import { COLOUR_MODES, resolvePalette, type RenderHandle } from '@wynding/render';
 import type { InputHandle } from './input';
 import { createKeymap } from './keymap';
@@ -41,7 +41,7 @@ import { mount as mountMock } from '@wynding/render/scene';
 import { paintSwatch, releaseSwatch } from './swatch';
 import { hexColour } from './hud-icons';
 import { attachInput as attachInputMock } from './input';
-import { createApp, boot, type Scheduler } from './main';
+import { createApp, boot, FAILED_FRAME_LIMIT, type AppDeps, type Scheduler } from './main';
 import { createController, type Controller } from './controller';
 import { MAX_RECENT_AGE_MS } from './playtrace';
 import { validateSurveyPayload, type SurveyPayload } from '@wynding/feedback';
@@ -338,6 +338,13 @@ describe('main — the results panel reads the finished run (#181 H2)', () => {
 });
 
 describe('main — the terminal edge captures each run once, even when it throws (#181 H2)', () => {
+  /** What the frame loop logs as it catches the edge's throw (#191), silenced and read back. */
+  let logged: MockInstance<typeof console.error>;
+  beforeEach(() => {
+    logged = vi.spyOn(console, 'error').mockImplementation(() => {});
+  });
+  afterEach(() => logged.mockRestore());
+
   /** An undefended run whose terminal edge throws ONCE: reading the run stats, the playtrace
    *  capture itself, or — after the capture — the survey's ask refresh, which the edge reaches
    *  once the dialog is showing. The survey is offered where its refresh is the step that
@@ -391,19 +398,18 @@ describe('main — the terminal edge captures each run once, even when it throws
     });
     openApps.push(app);
     const results = root.querySelector<HTMLElement>('.wy-results')!;
-    /** Play the run out; the frame that reaches the terminal edge throws, once. */
+    /** Play the run out to the frame whose terminal edge throws, once. The frame loop catches
+     *  that throw (#191): the frame is skipped, its error logged, and a HUD refresh that threw
+     *  leaves the HUD key where it was, so the NEXT frame walks the edge again. */
     const runToBrokenEdge = (): void => {
       sched.frame((clock += 16));
       dockButton(root, 'Start').click();
-      let thrown: unknown = null;
-      for (let i = 0; i < 4000 && thrown === null; i++) {
-        try {
-          sched.frame((clock += 300));
-        } catch (error) {
-          thrown = error;
-        }
-      }
-      expect((thrown as Error | null)?.message).toBe('the terminal edge broke');
+      for (let i = 0; i < 4000 && armed; i++) sched.frame((clock += 300));
+      expect(armed, 'the terminal edge never broke').toBe(false);
+      const edgeErrors = logged.mock.calls.filter(
+        ([, error]) => error instanceof Error && error.message === 'the terminal edge broke',
+      );
+      expect(edgeErrors, 'the frame loop logged the edge’s throw, once').toHaveLength(1);
     };
     /** The runs the playtrace ring holds, read through Copy run data. */
     const capturedRuns = async (): Promise<number> => {
@@ -422,6 +428,7 @@ describe('main — the terminal edge captures each run once, even when it throws
       runToBrokenEdge,
       capturedRuns,
       captures: (): number => captures,
+      frame: (): void => sched.frame((clock += 16)),
       /** Give feedback's slot in the action row, and the form's below it (#181 H2). */
       surveySlots: (): HTMLElement[] => [
         results.querySelector<HTMLElement>('.wy-survey-opener')!,
@@ -430,31 +437,31 @@ describe('main — the terminal edge captures each run once, even when it throws
     };
   }
 
-  it('a throw reading the run stats opens nothing; the next refresh opens the dialog with the run captured once', async () => {
+  it('a throw reading the run stats opens nothing; the next frame opens the dialog with the run captured once', async () => {
     const h = brokenEdgeApp('runStats');
     h.runToBrokenEdge();
     expect(h.results.hidden, 'the broken edge opened nothing').toBe(true);
-    // The frame loop's HUD key has not moved, so only an input handler refreshes the HUD now:
-    // the Dock's Pause, which a player can still press, since no dialog opened.
-    dockButton(h.root, 'Pause').click();
+    // No input handler is needed to finish the job: the frame loop retries the edge (#191).
+    h.frame();
     expect(h.results.hidden).toBe(false);
     expect(h.captures(), 'one capture attempt, made by the walk that opened the dialog').toBe(1);
     expect(await h.capturedRuns()).toBe(1);
   });
 
-  it('a capture that THROWS is not retried: the next refresh opens the dialog without it', () => {
+  it('a capture that THROWS is not retried: the next frame opens the dialog without it', () => {
     const h = brokenEdgeApp('capture');
     h.runToBrokenEdge();
     expect(h.results.hidden, 'the broken edge opened nothing').toBe(true);
-    dockButton(h.root, 'Pause').click(); // as above: no dialog opened, so the Dock is live
+    h.frame();
     expect(h.results.hidden, 'the dialog still opens').toBe(false);
+    for (let i = 0; i < 5; i++) h.frame(); // ...and no later frame walks the edge again
     expect(h.captures(), 'the failed capture was attempted once and never again').toBe(1);
   });
 
   it('a capture that THROWS leaves no run for the survey to describe: Give feedback is never offered', async () => {
     const h = brokenEdgeApp('capture', { survey: true });
     h.runToBrokenEdge();
-    dockButton(h.root, 'Pause').click(); // as above: no dialog opened, so the Dock is live
+    h.frame(); // the frame loop's retry, as above
     expect(h.results.hidden, 'the dialog still opens').toBe(false);
     // Offering the survey waits on the ask refresh a dialog opening starts. A macrotask boundary
     // drains every pending microtask, however deep the offer's chain, so the assertion below
@@ -469,13 +476,438 @@ describe('main — the terminal edge captures each run once, even when it throws
   it('a throw AFTER the capture (the survey’s ask refresh) still leaves the run captured once', async () => {
     const h = brokenEdgeApp('afterCapture');
     h.runToBrokenEdge();
-    // Any later `refreshHud` walks the edge again and retries the dialog's open. The Dock's
-    // Pause handler is invoked directly as one such caller: with the dialog shown the Shell is
-    // inert, so no player could press it, but the frame loop's next HUD change would do the same.
-    dockButton(h.root, 'Pause').click();
+    // Any later `refreshHud` walks the edge again and retries the dialog's open: here the frame
+    // loop's own retry (#191), the next frame after the one that threw.
+    h.frame();
     expect(h.results.hidden).toBe(false);
+    for (let i = 0; i < 5; i++) h.frame();
     expect(h.captures(), 'the retried walk did not capture again').toBe(1);
     expect(await h.capturedRuns()).toBe(1);
+  });
+});
+
+describe('main — a frame that throws (#191)', () => {
+  /** What the frame loop logs, silenced and read back. */
+  let logged: MockInstance<typeof console.error>;
+  beforeEach(() => {
+    logged = vi.spyOn(console, 'error').mockImplementation(() => {});
+  });
+  afterEach(() => {
+    logged.mockRestore();
+    // The scene's handle is shared by every test in this file: a draw taught to throw here must
+    // not throw in the next one.
+    vi.mocked(fakeHandle.draw).mockReset();
+  });
+  /** The messages logged so far, in order. */
+  const messages = (): string[] => logged.mock.calls.map(([message]) => String(message));
+  const FAILED_FRAME =
+    'Wynding: a frame failed and was skipped; the sim holds until one completes.';
+
+  /** An app over a real controller whose sim step can be made to throw ONCE (`breakStep`): at
+   *  the step's own boundary, after the tick's inputs are recorded (the perf hooks bracket
+   *  `step()`), as a throw from inside `step` would. From then on, every read that derives from
+   *  the controller's live state is a VIOLATION, recorded and thrown, until Start again: after a
+   *  real throw that state is half-stepped, so nothing may read it. `breakHud` makes the HUD's
+   *  derivation throw once, and `captureThrows` every capture. */
+  function stopApp(
+    options: Pick<AppDeps, 'hosted' | 'wakeLock' | 'capacitorApp'> & {
+      readonly captureThrows?: boolean;
+    } = {},
+  ) {
+    const root = document.createElement('div');
+    document.body.appendChild(root);
+    const sched = manualSchedule();
+    let clock = 0;
+    let stepArmed = false;
+    let stepBroke = false;
+    let hudArmed = false;
+    let steps = 0;
+    const violations: string[] = [];
+    const saved: { filename: string; text: string }[] = [];
+    let controller!: Controller;
+    const app = createApp(document, root, {
+      sceneFactory: () => fakeHandle,
+      schedule: sched.schedule,
+      now: () => clock,
+      seed: 1,
+      navigate: vi.fn(),
+      playtraceDelivery: {
+        copy: async () => {},
+        save: (filename: string, text: string) => void saved.push({ filename, text }),
+      },
+      ...(options.hosted === undefined ? {} : { hosted: options.hosted }),
+      ...(options.wakeLock === undefined ? {} : { wakeLock: options.wakeLock }),
+      ...(options.capacitorApp === undefined ? {} : { capacitorApp: options.capacitorApp }),
+      controllerFactory: (seed) => {
+        const real = createController(seed, undefined, {
+          begin: (span) => {
+            if (span !== 'step') return;
+            steps++;
+            if (!stepArmed) return;
+            stepArmed = false;
+            stepBroke = true;
+            throw new Error('the step broke');
+          },
+          end: () => {},
+        });
+        const guarded =
+          <A extends unknown[], R>(name: string, read: (...args: A) => R) =>
+          (...args: A): R => {
+            if (stepBroke && real.isStopped()) {
+              violations.push(name);
+              throw new Error(`${name}() read a run whose step threw`);
+            }
+            return read(...args);
+          };
+        const { hud, capture } = real;
+        controller = Object.assign(real, {
+          frame: guarded('frame', real.frame),
+          drainFeedback: guarded('drainFeedback', real.drainFeedback),
+          drainSparks: guarded('drainSparks', real.drainSparks),
+          uiState: guarded('uiState', real.uiState),
+          refundForSelection: guarded('refundForSelection', real.refundForSelection),
+          runStats: guarded('runStats', real.runStats),
+          verifyRun: guarded('verifyRun', real.verifyRun),
+          isTerminal: guarded('isTerminal', real.isTerminal),
+          hud: guarded('hud', () => {
+            if (!hudArmed) return hud();
+            hudArmed = false;
+            throw new Error('the HUD broke');
+          }),
+          capture: guarded('capture', () => {
+            if (options.captureThrows === true) throw new Error('the capture broke');
+            return capture();
+          }),
+        });
+        return controller;
+      },
+    });
+    openApps.push(app);
+    const board = root.querySelector<HTMLElement>('.wy-board')!;
+    const results = root.querySelector<HTMLElement>('.wy-results')!;
+    const frame = (ms: number = FRAME_MS): void => sched.frame((clock += ms));
+    /** Whether the results dialog offers a button by this label to a player: present, and not
+     *  inside anything hidden. */
+    const offers = (label: string): boolean =>
+      [...results.querySelectorAll<HTMLButtonElement>('button')].some(
+        (b) => b.textContent === label && b.closest('[hidden]') === null,
+      );
+    return {
+      root,
+      board,
+      results,
+      saved,
+      violations,
+      frame,
+      offers,
+      controller: (): Controller => controller,
+      steps: (): number => steps,
+      breakStep: (): void => void (stepArmed = true),
+      breakHud: (): void => void (hudArmed = true),
+      /** Start the run and play until Start's wave-1 claim is consumed: wave 1 is on. */
+      start(): void {
+        frame();
+        dockButton(root, 'Start').click();
+        for (let i = 0; i < FRAMES_PER_SIM_TICK; i++) frame();
+      },
+      /** A results-dialog button a player can reach, by its label. */
+      button(label: string): HTMLButtonElement {
+        const found = [...results.querySelectorAll<HTMLButtonElement>('button')].find(
+          (b) => b.textContent === label,
+        );
+        if (found === undefined || !offers(label)) throw new Error(`no reachable ${label}`);
+        return found;
+      },
+      /** A plain left-click on the home link. */
+      clickHome(): MouseEvent {
+        const e = new MouseEvent('click', { bubbles: true, cancelable: true, button: 0 });
+        homeLink(root).dispatchEvent(e);
+        return e;
+      },
+    };
+  }
+
+  it('a sim step that throws stops the run for good: nothing steps, draws or reads it again, and the message names its wave, with no Run data', () => {
+    const h = stopApp();
+    h.start(); // wave 1 launches...
+    dockButton(h.root, 'Call wave').click();
+    for (let i = 0; i < FRAMES_PER_SIM_TICK; i++) h.frame(); // ...and wave 2
+    const draws = vi.mocked(fakeHandle.draw).mock.calls.length;
+    const shownTick = h.board.dataset.simTick;
+
+    h.breakStep();
+    h.frame(MS_PER_TICK); // the step throws inside this frame's advance
+    expect(h.controller().isStopped()).toBe(true);
+    // Logged with its tick, in production as in DEV: the one record of the stop.
+    expect(messages()).toEqual([
+      `Wynding: the run stopped: a sim step threw while stepping tick ${String(h.controller().ticksRecorded() - 1)}.`,
+    ]);
+    expect((logged.mock.calls[0]![1] as Error).message).toBe('the step broke');
+
+    // The message, where the results dialog would open, with focus moved onto Start again...
+    expect(h.results.hidden).toBe(false);
+    expect(h.results.querySelector('h2')!.textContent).toBe('Something went wrong.');
+    expect(h.results.getAttribute('aria-label')).toBe('Something went wrong.');
+    const sentence = 'The run stopped at wave 2 because of an error.';
+    expect(h.results.querySelector('.wy-results-subtitle')!.textContent).toBe(sentence);
+    const describedBy = h.results.getAttribute('aria-describedby')!;
+    expect(document.getElementById(describedBy)!.textContent, 'spoken as it opens').toBe(sentence);
+    expect(document.activeElement).toBe(h.button('Start again'));
+    // ...and no outcome, no Verify, and NO run data: a half-stepped run is never captured.
+    for (const part of ['.wy-results-grade', '.wy-results-stats', '.wy-results-more']) {
+      expect(h.results.querySelector<HTMLElement>(part)!.hidden, part).toBe(true);
+    }
+    for (const label of ['Verify this run', 'Copy run data', 'Save run data']) {
+      expect(h.offers(label), label).toBe(false);
+    }
+    // State-driven, like the results dialog: Escape is consumed, never a dismissal.
+    document.dispatchEvent(
+      new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true }),
+    );
+    expect(h.results.hidden).toBe(false);
+
+    // However many frames come, nothing steps, draws, or reads the half-stepped state again.
+    const steps = h.steps();
+    for (let i = 0; i < 30; i++) h.frame(MS_PER_TICK);
+    expect(h.steps()).toBe(steps);
+    expect(fakeHandle.draw).toHaveBeenCalledTimes(draws);
+    expect(h.board.dataset.simTick, 'the board keeps the last good frame').toBe(shownTick);
+    expect(h.violations).toEqual([]);
+    expect(messages()).toHaveLength(1);
+  });
+
+  it('Start again, on the stopped message, starts a clean run that steps and draws', () => {
+    const h = stopApp();
+    h.start();
+    h.breakStep();
+    h.frame(MS_PER_TICK);
+    expect(h.results.hidden).toBe(false);
+
+    h.button('Start again').click();
+    expect(h.results.hidden).toBe(true);
+    expect(h.controller().isStopped()).toBe(false);
+    expect(document.activeElement).toBe(h.board);
+    h.frame();
+    expect(h.board.dataset.simTick, 'a fresh run, held at its start').toBe('0');
+    expect(h.board.dataset.started).toBe('false');
+    h.start();
+    const draws = vi.mocked(fakeHandle.draw).mock.calls.length;
+    for (let i = 0; i < 4; i++) h.frame(MS_PER_TICK);
+    expect(Number(h.board.dataset.simTick)).toBeGreaterThan(1);
+    expect(vi.mocked(fakeHandle.draw).mock.calls.length).toBe(draws + 4);
+    expect(h.violations).toEqual([]);
+  });
+
+  it('a stopped run is over to the wake lock and the pause seam: the lock is released, and backgrounding asks nothing of it', async () => {
+    const lock = fakeWakeLock();
+    const h = stopApp({ wakeLock: lock.api });
+    h.start();
+    await lock.settle();
+    expect(lock.liveSentinels(), 'a live wave holds the screen awake').toBe(1);
+
+    h.breakStep();
+    h.frame(MS_PER_TICK);
+    await lock.settle();
+    expect(lock.liveSentinels(), 'a stopped run must not hold the screen awake').toBe(0);
+
+    // Backgrounding reaches the pause seam with no frame at all.
+    setVisibility('hidden');
+    setVisibility('visible');
+    await lock.settle();
+    expect(lock.liveSentinels()).toBe(0);
+    expect(h.controller().isPaused(), 'nothing to pause: the run is over').toBe(false);
+    expect(h.violations).toEqual([]);
+  });
+
+  it('a stopped run is over to the leave guard: the home link navigates natively', () => {
+    const h = stopApp();
+    h.start();
+    h.breakStep();
+    h.frame(MS_PER_TICK);
+    const e = h.clickHome();
+    expect(e.defaultPrevented).toBe(false);
+    expect(h.root.querySelector<HTMLElement>('.wy-leave')!.hidden).toBe(true);
+    expect(h.violations).toEqual([]);
+  });
+
+  it('a stopped run is over to hardware Back: on its message Back exits, as on the results dialog', async () => {
+    const back = { press: (): void => {} };
+    let markRegistered!: () => void;
+    const registered = new Promise<void>((resolve) => {
+      markRegistered = resolve;
+    });
+    const exitApp = vi.fn(async () => undefined);
+    const h = stopApp({
+      hosted: true,
+      capacitorApp: {
+        addListener: (async (name: string, listener: () => void) => {
+          await Promise.resolve();
+          if (name === 'backButton') {
+            back.press = listener;
+            markRegistered();
+          }
+          return { remove: async () => undefined };
+        }) as never,
+        exitApp,
+      },
+    });
+    await registered;
+    h.start();
+    h.breakStep();
+    h.frame(MS_PER_TICK);
+    expect(h.results.hidden).toBe(false);
+
+    back.press();
+    expect(exitApp, 'a stopped run leaves nothing to lose').toHaveBeenCalledTimes(1);
+    expect(h.root.querySelector<HTMLElement>('.wy-leave')!.hidden).toBe(true);
+    expect(h.violations).toEqual([]);
+  });
+
+  it('a draw that throws once skips that frame and holds the sim for one: the next frame draws, then play resumes', () => {
+    const h = stopApp();
+    h.start();
+    h.frame(MS_PER_TICK);
+    const shownTick = (): number => Number(h.board.dataset.simTick);
+    const at = shownTick();
+    const draw = vi.mocked(fakeHandle.draw);
+    draw.mockImplementationOnce(() => {
+      throw new Error('the draw broke');
+    });
+    h.frame(MS_PER_TICK); // steps a tick, then fails to draw it: the frame is skipped
+    expect(shownTick(), 'a skipped frame writes nothing').toBe(at);
+
+    const draws = draw.mock.calls.length;
+    h.frame(MS_PER_TICK); // HELD: no step, and the tick the failed frame stepped is drawn
+    expect(draw).toHaveBeenCalledTimes(draws + 1);
+    expect(draw.mock.calls.at(-1)![1].tick).toBe(at + 1);
+    expect(shownTick(), 'the held frame stepped nothing').toBe(at + 1);
+
+    // Play resumes: one tick for one tick's time, since the held frame's time was dropped.
+    h.frame(MS_PER_TICK);
+    expect(shownTick()).toBe(at + 2);
+    expect(h.results.hidden, 'one failed frame stops nothing').toBe(true);
+    expect(messages()).toEqual([FAILED_FRAME]);
+    expect((logged.mock.calls[0]![1] as Error).message).toBe('the draw broke');
+  });
+
+  it('logs each distinct frame error once — a repeat says nothing, even as a new Error, and a thrown non-Error is told apart by its text', () => {
+    const h = stopApp();
+    h.start();
+    const thrown: unknown[] = [new Error('the draw broke'), new Error('the draw broke'), 'oops'];
+    const draw = vi.mocked(fakeHandle.draw);
+    for (const error of thrown) {
+      draw.mockImplementationOnce(() => {
+        throw error;
+      });
+    }
+    // Three failed frames, each from its own call site, then one that completes.
+    h.frame();
+    h.frame();
+    h.frame();
+    h.frame();
+    const reported = logged.mock.calls.map(([, error]) => error as unknown);
+    expect(reported).toHaveLength(2);
+    expect(reported[0]).toBe(thrown[0]);
+    expect(reported[1], 'the second Error repeats the first, so it is not logged').toBe(thrown[2]);
+    expect(h.results.hidden).toBe(true);
+  });
+
+  it('a draw that throws every frame stops the run at the bound, with its data offered: Save exports the run as it stood', () => {
+    const h = stopApp();
+    h.start();
+    const draw = vi.mocked(fakeHandle.draw);
+    draw.mockImplementation(() => {
+      throw new Error('the draw broke');
+    });
+    h.frame(MS_PER_TICK); // failed frame 1 steps a tick, then fails to draw it
+    const heldAt = h.controller().ticksRecorded();
+    for (let i = 2; i < FAILED_FRAME_LIMIT; i++) h.frame(MS_PER_TICK);
+    expect(h.results.hidden, 'a frame short of the bound, nothing is stopped').toBe(true);
+    expect(h.controller().ticksRecorded(), 'the sim held through every failed frame').toBe(heldAt);
+
+    h.frame(MS_PER_TICK); // failed frame FAILED_FRAME_LIMIT
+    expect(h.controller().isStopped()).toBe(true);
+    expect(h.results.hidden).toBe(false);
+    expect(h.results.querySelector('.wy-results-subtitle')!.textContent).toBe(
+      'The run stopped at wave 1 because of an error.',
+    );
+    // The draw's error logged ONCE however many frames it failed, then the stop with its tick.
+    expect(messages()).toEqual([
+      FAILED_FRAME,
+      `Wynding: the run stopped at tick ${String(heldAt)}: ${String(FAILED_FRAME_LIMIT)} frames ` +
+        'in a row failed after the sim step (each distinct error is logged above).',
+    ]);
+
+    // The sim is whole, so the run was captured as it stood: Run data stays, without Verify.
+    h.button('Run data').click();
+    expect(h.offers('Verify this run')).toBe(false);
+    expect(h.offers('Copy run data')).toBe(true);
+    h.button('Save run data').click();
+    expect(h.saved).toHaveLength(1);
+    const { runs } = JSON.parse(h.saved[0]!.text) as { runs: Record<string, unknown>[] };
+    expect(runs).toHaveLength(1);
+    expect(runs[0]!.ticksCompleted).toBe(heldAt);
+    expect(runs[0]!.tickInputs as unknown[]).toHaveLength(heldAt);
+    expect(runs[0]!.stateHash).toMatch(/^[0-9a-f]+$/);
+    expect(h.results.querySelector('.wy-verify')!.textContent).toContain('Run data saved as');
+
+    // A renderer that recovers plays on after Start again.
+    draw.mockReset();
+    h.button('Start again').click();
+    h.start();
+    for (let i = 0; i < 4; i++) h.frame(MS_PER_TICK);
+    expect(Number(h.board.dataset.simTick)).toBeGreaterThan(1);
+    expect(h.results.hidden).toBe(true);
+  });
+
+  it('a stopped run whose capture throws still shows its message, without Run data', () => {
+    const h = stopApp({ captureThrows: true });
+    h.start();
+    vi.mocked(fakeHandle.draw).mockImplementation(() => {
+      throw new Error('the draw broke');
+    });
+    for (let i = 0; i < FAILED_FRAME_LIMIT; i++) h.frame(MS_PER_TICK);
+    expect(h.results.hidden).toBe(false);
+    expect(h.results.querySelector<HTMLElement>('.wy-results-more')!.hidden).toBe(true);
+    expect(h.offers('Save run data')).toBe(false);
+    expect(messages()).toContain('Wynding: the stopped run could not be captured.');
+  });
+
+  it('once the results dialog is showing, a draw that keeps failing only parks the loop: the dialog stays as it is', () => {
+    const h = stopApp();
+    h.start();
+    for (let i = 0; i < 4000 && h.results.hidden; i++) h.frame(300);
+    expect(h.results.hidden, 'the run must actually have resolved').toBe(false);
+    const draw = vi.mocked(fakeHandle.draw);
+    draw.mockImplementation(() => {
+      throw new Error('the draw broke');
+    });
+    for (let i = 0; i < FAILED_FRAME_LIMIT; i++) h.frame();
+    expect(h.controller().isStopped()).toBe(true);
+    const draws = draw.mock.calls.length;
+    h.frame();
+    expect(draw, 'parked: no later frame tries again').toHaveBeenCalledTimes(draws);
+    // Still the finished run's own dialog: its outcome, Play again, and its Run data.
+    expect(h.results.querySelector('h2')!.textContent).toBe('The creeps broke through.');
+    expect(h.offers('Play again')).toBe(true);
+    expect(h.offers('Run data')).toBe(true);
+    expect(messages()).toHaveLength(2); // the draw's error, once, and the stop
+  });
+
+  it('a HUD refresh that throws is retried by the next frame, even paused, where nothing else would move it', () => {
+    const h = stopApp();
+    h.start();
+    dockButton(h.root, 'Pause').click();
+    h.frame();
+    const card = h.root.querySelector<HTMLElement>('.wy-card')!;
+    expect(card.getAttribute('aria-pressed')).toBe('false');
+    h.breakHud();
+    card.click(); // arms the tower: the next frame's HUD refresh shows it...
+    h.frame(); // ...and that refresh throws
+    expect(card.getAttribute('aria-pressed')).toBe('false');
+    h.frame(); // paused, so only the retry can move it
+    expect(card.getAttribute('aria-pressed')).toBe('true');
+    expect(messages()).toEqual([FAILED_FRAME]);
   });
 });
 
@@ -1624,6 +2056,40 @@ describe('main — boot()', () => {
     expect(mountMock).toHaveBeenCalledOnce();
     handle!.destroy();
     vi.unstubAllGlobals();
+  });
+
+  it('a booted frame that throws, uncaught, still has the next frame asked for (#191)', async () => {
+    // An injected scheduler never runs `rafScheduler`, so this is the one test that does.
+    document.body.innerHTML = '<div id="app"></div>';
+    const queued: FrameRequestCallback[] = [];
+    vi.stubGlobal('requestAnimationFrame', (fn: FrameRequestCallback) => queued.push(fn));
+    vi.stubGlobal('cancelAnimationFrame', vi.fn());
+    const logged = vi.spyOn(console, 'error').mockImplementation(() => {});
+    const draw = vi.mocked(fakeHandle.draw);
+    try {
+      const handle = await boot(document);
+      expect(queued, 'boot asked for the first frame').toHaveLength(1);
+      // The frame catches a draw that throws — but here reporting it throws too: a throw the
+      // frame does NOT catch, which would end a loop that asked for its next frame only after
+      // the callback returned.
+      draw.mockImplementationOnce(() => {
+        throw new Error('the draw broke');
+      });
+      logged.mockImplementationOnce(() => {
+        throw new Error('the report broke');
+      });
+      expect(() => queued.shift()!(16)).toThrow('the report broke');
+      expect(queued, 'the next frame was asked for before the throw').toHaveLength(1);
+      const draws = draw.mock.calls.length;
+      queued.shift()!(32);
+      expect(draw, 'and the loop draws on').toHaveBeenCalledTimes(draws + 1);
+      expect(queued).toHaveLength(1);
+      handle!.destroy();
+    } finally {
+      logged.mockRestore();
+      draw.mockReset();
+      vi.unstubAllGlobals();
+    }
   });
 
   it('honours prefers-reduced-motion at boot', async () => {

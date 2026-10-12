@@ -3504,6 +3504,71 @@ describe('overlay — the results panel (#181 H2)', () => {
     expect(document.activeElement!.textContent).toBe('Play again');
   });
 
+  it('a run an error stopped (#191): the same dialog, its one sentence the description, Start again focused, and no outcome, Verify or run data', () => {
+    const { actions, overlay, shell } = setup();
+    overlay.showStopped({ wave: 4, runData: false });
+    const panel = panelOf(overlay);
+    expect(overlay.resultsEl.hidden).toBe(false);
+    expect(shell.root.hasAttribute('inert')).toBe(true);
+    // The results dialog's own modality: Back exits from it, and Escape is consumed.
+    expect(overlay.modal.activeBackState()).toBe('exit');
+    document.dispatchEvent(
+      new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true }),
+    );
+    expect(overlay.resultsEl.hidden).toBe(false);
+
+    expect(panel.dataset.outcome).toBe('stopped'); // the band's colour keys on it
+    expect(panel.querySelector('h2')!.textContent).toBe('Something went wrong.');
+    expect(overlay.resultsEl.getAttribute('aria-label')).toBe('Something went wrong.');
+    const sentence = 'The run stopped at wave 4 because of an error.';
+    const describedBy = overlay.resultsEl.getAttribute('aria-describedby')!;
+    expect(document.getElementById(describedBy)!.textContent).toBe(sentence);
+    // Said once: its visible copy is hidden from assistive tech, as the grade is.
+    const subtitle = panel.querySelector('.wy-results-subtitle')!;
+    expect(subtitle.textContent).toBe(sentence);
+    expect(subtitle.getAttribute('aria-hidden')).toBe('true');
+
+    for (const part of ['.wy-results-grade', '.wy-results-stats']) {
+      expect(panel.querySelector<HTMLElement>(part)!.hidden, part).toBe(true);
+    }
+    const startAgain = panel.querySelector<HTMLButtonElement>('.wy-primary')!;
+    expect(startAgain.textContent).toBe('Start again');
+    expect(document.activeElement).toBe(startAgain);
+    expect(toggleOf(overlay).hidden, 'no run data to offer').toBe(true);
+    expect(panel.querySelector<HTMLElement>('.wy-results-item')!.hidden, 'never Verify').toBe(true);
+    startAgain.click();
+    expect(actions.map((a) => a.type)).toEqual(['playAgain']);
+  });
+
+  it('a stopped run whose data can be saved keeps Run data, without Verify; the next finished run gets every part back', () => {
+    const { overlay } = setup();
+    overlay.showStopped({ wave: 1, runData: true });
+    const panel = panelOf(overlay);
+    const toggle = toggleOf(overlay);
+    expect(toggle.hidden).toBe(false);
+    toggle.click();
+    const reachable = [...groupOf(overlay).querySelectorAll<HTMLButtonElement>('button')]
+      .filter((b) => !b.hidden)
+      .map((b) => b.textContent);
+    expect(reachable).toEqual(['Copy run data', 'Save run data']);
+    overlay.hideResults();
+
+    overlay.showResults(hud({ won: false, phase: 'lost', score: 40 }), runStats());
+    expect(panel.dataset.outcome).toBe('lost');
+    expect(panel.querySelector('h2')!.textContent).toBe('The creeps broke through.');
+    const subtitle = panel.querySelector('.wy-results-subtitle')!;
+    expect(subtitle.hasAttribute('aria-hidden')).toBe(false);
+    const describedBy = overlay.resultsEl.getAttribute('aria-describedby')!;
+    expect(document.getElementById(describedBy)!.textContent).toBe('Score 40 — 0 of 3 stars');
+    for (const part of ['.wy-results-grade', '.wy-results-stats', '.wy-results-more']) {
+      expect(panel.querySelector<HTMLElement>(part)!.hidden, part).toBe(false);
+    }
+    expect(panel.querySelector('.wy-primary')!.textContent).toBe('Play again');
+    expect(toggle.getAttribute('aria-expanded'), 'collapsed again').toBe('false');
+    toggle.click();
+    expect([...groupOf(overlay).querySelectorAll('button')].every((b) => !b.hidden)).toBe(true);
+  });
+
   it('the survey lock holds the three actions whether the disclosure is open or closed', () => {
     const { actions, overlay } = setup();
     overlay.showResults(hud({ won: true, phase: 'won' }), runStats());

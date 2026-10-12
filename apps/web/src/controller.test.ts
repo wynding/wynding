@@ -803,6 +803,77 @@ describe('controller — run lifecycle (startRun cleanup, §7)', () => {
   });
 });
 
+describe('controller — a run stopped by an error (#191)', () => {
+  /** A controller whose sim step throws once, on the next tick after `arm()`: the throw comes
+   *  from the step's own boundary (the perf hooks bracket `step()`), after the controller has
+   *  recorded that tick's inputs, as a throw from inside `step` would. */
+  function breakableController() {
+    let armed = false;
+    let steps = 0;
+    const c = createController(1, undefined, {
+      begin: (span) => {
+        if (span !== 'step') return;
+        steps++;
+        if (armed) {
+          armed = false;
+          throw new Error('the step broke');
+        }
+      },
+      end: () => {},
+    });
+    return { c, arm: (): void => void (armed = true), steps: (): number => steps };
+  }
+
+  it('stop() holds advance() for good — nothing un-holds it but startRun()', () => {
+    const c = createController(1);
+    startAndCall(c);
+    tick(c, 3);
+    expect(c.isStopped()).toBe(false);
+    const at = c.frame().curVm.tick;
+
+    c.stop();
+    expect(c.isStopped()).toBe(true);
+    // Every control that moves a run: none of them steps a stopped one.
+    c.start();
+    c.resume();
+    c.cycleSpeed();
+    tick(c, 10);
+    expect(c.frame().curVm.tick).toBe(at);
+    expect(c.ticksRecorded()).toBe(at);
+    // Not an outcome: the sim's own phase is untouched.
+    expect(c.isTerminal()).toBe(false);
+
+    c.startRun(2);
+    expect(c.isStopped(), 'a fresh run identity is a healthy one').toBe(false);
+    startAndCall(c);
+    tick(c, 2);
+    expect(c.frame().curVm.tick).toBe(2);
+  });
+
+  it('ticksRecorded() is the sim tick at every boundary, and counts a tick that threw', () => {
+    const { c, arm, steps } = breakableController();
+    startAndCall(c);
+    tick(c, 4);
+    expect(c.ticksRecorded()).toBe(4);
+    expect(c.capture().ticksCompleted).toBe(4);
+
+    arm();
+    expect(() => tick(c)).toThrow('the step broke');
+    // The tick's inputs were recorded before it stepped, so the log is one ahead of the last
+    // good view model: the tick being stepped when the throw came is `ticksRecorded() - 1`.
+    expect(c.ticksRecorded()).toBe(5);
+    expect(c.frame().curVm.tick, 'the view model is the last good one').toBe(4);
+
+    // Stopped, the tick that threw is never stepped again — the fixed loop still holds its time,
+    // so without the stop the next advance would run it on half-applied state.
+    c.stop();
+    const stepsAtStop = steps();
+    tick(c, 5);
+    expect(steps()).toBe(stepsAtStop);
+    expect(c.ticksRecorded(), 'nothing recorded twice').toBe(5);
+  });
+});
+
 describe('controller — impact-spark plumbing via StepEvents (#31)', () => {
   it('a run with no towers ever leaks creeps without ever producing a spark', () => {
     const c = createController(1);
