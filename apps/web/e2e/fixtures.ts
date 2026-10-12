@@ -1,4 +1,12 @@
-import { test as base, type Browser, type BrowserContext } from '@playwright/test';
+import {
+  test as base,
+  chromium as playwrightChromium,
+  firefox as playwrightFirefox,
+  webkit as playwrightWebkit,
+  type Browser,
+  type BrowserContext,
+  type BrowserType,
+} from '@playwright/test';
 
 // fixtures.ts — the e2e suite's `test` (#196). Every spec imports `test` (and `expect`, and the
 // rest of Playwright) from here, never from `@playwright/test` (ESLint forbids the value import).
@@ -11,9 +19,10 @@ import { test as base, type Browser, type BrowserContext } from '@playwright/tes
 // pixel-reading specs cause it).
 //
 // WHICH CONTEXTS: the test's own `context` (so every `page`), every context made through the
-// `browser` fixture for the test's duration (`newContext`, and the one `newPage` makes), and any
-// context a spec adds by hand with `watchContext` (the specs that call `chromium.launch()` for a
-// browser of their own).
+// `browser` fixture for the test's duration (`newContext`, and the one `newPage` makes), and every
+// context of a browser a spec opens itself through this module's `chromium`, `firefox` or
+// `webkit` (a spec that needs Chromium flags of its own, say). Nothing is opted into: ESLint
+// forbids those three from `@playwright/test`, as it does `test`.
 //
 // The option is an object, not the bare array of patterns: Playwright reads any array whose
 // second element is an object (a RegExp is one) as a `[value, options]` fixture tuple, so
@@ -55,12 +64,64 @@ function watch(collector: Collector, context: BrowserContext): void {
   });
 }
 
-/** Add a context the test made itself (say, in a browser from `chromium.launch()`) to the
- *  running test's watch. Call it before the context's first page does anything. */
-export function watchContext(context: BrowserContext): void {
-  if (!current) throw new Error('watchContext was called outside a running test');
+/** Add a context to the running test's watch. A context made outside a test (in a `beforeAll`,
+ *  say) has no test to fail, so making one is refused rather than left unwatched. */
+function watchContext(context: BrowserContext): void {
+  if (!current) {
+    throw new Error(
+      'a browser opened through ./fixtures made a context outside a running test, where no ' +
+        'test would see its errors: make it inside the test',
+    );
+  }
   watch(current, context);
 }
+
+/** Put every context `browser` makes, for as long as it is open, under the watch. */
+function adoptBrowser(browser: Browser): Browser {
+  const { newContext, newPage } = browser;
+  browser.newContext = async (...args) => {
+    const context = await newContext.apply(browser, args);
+    watchContext(context);
+    return context;
+  };
+  browser.newPage = async (...args) => {
+    const page = await newPage.apply(browser, args);
+    watchContext(page.context());
+    return page;
+  };
+  return browser;
+}
+
+const OPENS_A_BROWSER = new Set<PropertyKey>(['launch', 'connect', 'connectOverCDP']);
+
+/** `type`, except that every browser it opens is adopted (and a persistent context is watched),
+ *  so a spec that launches a browser of its own is covered without registering anything. */
+function watchedType(type: BrowserType): BrowserType {
+  return new Proxy(type, {
+    get(target, key) {
+      const value: unknown = Reflect.get(target, key);
+      if (typeof value !== 'function') return value;
+      const call = (...args: unknown[]): unknown => Reflect.apply(value, target, args);
+      if (OPENS_A_BROWSER.has(key)) {
+        return async (...args: unknown[]) =>
+          adoptBrowser(await (call(...args) as Promise<Browser>));
+      }
+      if (key === 'launchPersistentContext') {
+        return async (...args: unknown[]) => {
+          const context = await (call(...args) as Promise<BrowserContext>);
+          watchContext(context);
+          return context;
+        };
+      }
+      return call;
+    },
+  });
+}
+
+/** Playwright's browser types, watched (these shadow the `export *` above). */
+export const chromium = watchedType(playwrightChromium);
+export const firefox = watchedType(playwrightFirefox);
+export const webkit = watchedType(playwrightWebkit);
 
 /** Watch every context `browser` makes until the returned function restores it. */
 function watchBrowser(collector: Collector, browser: Browser): () => void {

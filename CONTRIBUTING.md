@@ -81,8 +81,9 @@ through Turbo, cached per package):
   fails any test on a console error or an uncaught page error, in any page it makes. A spec
   that expects one declares it in a `describe` with
   `test.use({ expectedErrors: { patterns: [/the message, without its tick/] } })`; a declared pattern that
-  matches nothing fails the test too. A spec that launches a browser of its own with
-  `chromium.launch()` passes each context it makes to `watchContext`.
+  matches nothing fails the test too. A spec that launches a browser of its own takes
+  `chromium` (or `firefox`, `webkit`) from `./fixtures` as well, and every context it makes is
+  watched the same way, with nothing to register.
 - `pnpm run format` / `pnpm run format:check` — Prettier (write / check).
 - `pnpm run verify` — the full local gate CI also runs (see `.github/workflows/ci.yml`).
 - `pnpm --filter @wynding/mobile run sync:ios` / `sync:android` — build the Host build and copy

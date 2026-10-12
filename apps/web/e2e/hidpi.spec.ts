@@ -1,4 +1,4 @@
-import { test, expect, chromium, watchContext, type Page } from './fixtures';
+import { test, expect, chromium, type Page } from './fixtures';
 import { PNG } from 'pngjs';
 import { createProjection, resolvePalette, roleColour, towerRoleFor } from '@wynding/render';
 import { GRID } from './layout-probe';
@@ -202,7 +202,6 @@ async function atRealScale(
       deviceScaleFactor: undefined,
       baseURL,
     });
-    watchContext(context);
     await context.addInitScript(hideDevicePixels, { hide: fallback });
     if (fakeCount) await context.addInitScript(fakeBoardCount);
     const page = await context.newPage();

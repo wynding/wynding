@@ -1,4 +1,4 @@
-import { test, expect, chromium, watchContext, type Page } from './fixtures';
+import { test, expect, chromium, type Page } from './fixtures';
 import { PNG } from 'pngjs';
 import { createProjection, resolvePalette, type CreepVM, type TowerVM } from '@wynding/render';
 import { contrastRatio } from './contrast';
@@ -106,7 +106,6 @@ for (const { cell, dsf } of [
     });
     try {
       const context = await browser.newContext({ viewport: null, deviceScaleFactor: undefined });
-      watchContext(context);
       const page = await context.newPage();
       await page.goto(`${HARNESS}?cell=${cell}`);
       await expect

@@ -1,4 +1,4 @@
-import { test, expect, chromium, watchContext, type Page } from './fixtures';
+import { test, expect, chromium, type Page } from './fixtures';
 import { PNG } from 'pngjs';
 import { createProjection, resolvePalette } from '@wynding/render';
 import { GRID } from './layout-probe';
@@ -216,7 +216,6 @@ for (const dsf of [0.9, 0.8] as const) {
         deviceScaleFactor: undefined,
         baseURL,
       });
-      watchContext(context);
       const page = await context.newPage();
       await stage(page);
       // A 1280×720 page at that scale, not an emulated one.

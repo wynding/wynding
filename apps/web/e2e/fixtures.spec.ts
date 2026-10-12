@@ -1,10 +1,11 @@
-import { test } from './fixtures';
+import { test, chromium } from './fixtures';
 
-// The error tripwire in `fixtures.ts` checks itself (#196). The first two describes declare an
+// The error tripwire in `fixtures.ts` checks itself (#196). The first three describes declare an
 // error and log it, so a tripwire that stopped seeing errors would leave the pattern unused and
-// fail them. The next two are expected failures: a tripwire that let an undeclared error or an
-// unused pattern through would make them pass, which fails the run. The last pins that a test
-// skipped at runtime under a `describe` that declares errors stays skipped.
+// fail them. The next three are expected failures: a tripwire that let an undeclared error (in
+// the test's own page, or in a browser the test launched itself) or an unused pattern through
+// would make them pass, which fails the run. The last pins that a test skipped at runtime under
+// a `describe` that declares errors stays skipped.
 
 const LOGGED = 'tripwire self-check: console';
 const THROWN = 'tripwire self-check: uncaught';
@@ -49,6 +50,20 @@ test.describe('the error tripwire (#196)', () => {
     test.fail(true, 'the tripwire must fail this test');
     await page.goto('about:blank');
     await page.evaluate(() => console.error('tripwire self-check: undeclared'));
+  });
+
+  test('fails a test on a console error in a browser it launched itself', async () => {
+    test.fail(true, 'the tripwire must fail this test');
+    const browser = await chromium.launch();
+    try {
+      const page = await browser.newPage();
+      await page.goto('about:blank');
+      const logged = page.waitForEvent('console');
+      await page.evaluate(() => console.error('tripwire self-check: launched'));
+      await logged;
+    } finally {
+      await browser.close();
+    }
   });
 
   test.describe('a declared error that never comes', () => {
