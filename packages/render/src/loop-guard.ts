@@ -12,7 +12,10 @@
 // for good: the board went blank behind a run that played on, and only the console knew.
 //
 // A THROW COSTS PHASER A FRAME, NOT ITS LOOP. `runStep` runs one step and records what it threw,
-// never rethrowing it, so Phaser asks for its next frame and tries the next step. `runReady` does
+// never rethrowing it, so Phaser asks for its next frame and tries the next step. A step that
+// threw partway through its render leaves the renderer's half-built batch of quads, which the next
+// frame would draw: `runStep` hands the failure to a callback that discards it (`scene.ts`,
+// `batch-discard.ts`), so the next frame draws clean. `runReady` does
 // the same for the READY listener: Phaser emits READY and only then starts its loop
 // (`Game#texturesReady`), so a throw out of the listener would leave the loop never started.
 //
@@ -64,8 +67,10 @@ export interface LoopFailure {
 
 export interface LoopGuard {
   /** Run one of Phaser's steps. What it throws is recorded for `check` and never rethrown, so
-   *  Phaser's loop goes on to its next frame (until `destroy`). */
-  runStep(step: () => void): void;
+   *  Phaser's loop goes on to its next frame (until `destroy`). When the step threw, `onFailure`
+   *  then runs, once, to clean up what the half-finished step left; what IT throws is contained,
+   *  as the frame already counts as failed. */
+  runStep(step: () => void, onFailure?: () => void): void;
   /** Run the READY listener: Phaser's loop starts after it, and is watched from the next
    *  `check`. What it throws is recorded for `check` and never rethrown, so Phaser still starts
    *  its loop. */
@@ -99,7 +104,7 @@ export function createLoopGuard(): LoopGuard {
   let neverStarted: LoopFailure | null = null;
 
   return {
-    runStep(step) {
+    runStep(step, onFailure) {
       if (destroyed) {
         step();
         return;
@@ -109,6 +114,12 @@ export function createLoopGuard(): LoopGuard {
         stepFailure = null;
       } catch (error) {
         stepFailure = { error };
+        try {
+          onFailure?.();
+        } catch {
+          // The step's own error is the one `check` hands back; a clean-up that fails too leaves
+          // nothing more to do for this frame, and Phaser's next `preRender` still runs.
+        }
       }
     },
     runReady(listener) {

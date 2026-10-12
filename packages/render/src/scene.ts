@@ -13,7 +13,13 @@
 // drawn, and apps/web's frame loop takes that as a failed frame: its sim holds, each distinct
 // error is logged once, and a failure that lasts stops the run, or holds a paused one (#191). A
 // bake that fails throws nothing (`bake-runner.ts`). A step of Phaser's loop that throws costs
-// Phaser that frame, not its loop, and the next `draw()` throws what it threw; so does every
+// Phaser that frame, not its loop, and the next `draw()` throws what it threw. The quads the
+// failed frame had batched but not yet drawn are discarded (`batch-discard.ts`), so the next frame
+// draws clean, and a render that keeps failing piles nothing up behind the message. Under the
+// Canvas renderer (no batch) a failed frame leaves only its unmatched `ctx.save()` calls
+// (`CanvasRenderer#preRender`, `#render`, Phaser 3.90.0), which `preRender`'s reset of the
+// transform, alpha and blend mode outlasts and nothing here clips, so nothing is drawn stale; the
+// saved states pile up, one per frame, until the run stops. So does every
 // `draw()` after a READY listener that threw, or once Phaser's loop has stopped stepping (#195,
 // `loop-guard.ts`). A loop that never started (Phaser's boot failed before our READY listener ran)
 // is reported the same way once about ten seconds of frames have passed with no READY. These last
@@ -34,6 +40,7 @@ import { createProjection, type Projection } from './projection';
 import { createDprTracker, clampDpr } from './dpr-tracker';
 import { createBakeRunner, type BakedArt } from './bake-runner';
 import { createLoopGuard } from './loop-guard';
+import { discardPendingBatch, type PipelineHolder } from './batch-discard';
 import { createSpritePool } from './sprite-pool';
 import { createSparkStore } from './sparks';
 import { createScorchTracker } from './scorches';
@@ -239,10 +246,15 @@ export function mount(el: HTMLElement, geometry: BoardGeometry): RenderHandle {
     callbacks: {
       // Phaser binds `game.step` for its loop right after this hook (`Game#start`, Phaser
       // 3.90.0), so the step its loop runs is this one: Phaser's own, through the guard, where
-      // a throw costs Phaser a frame rather than its loop.
+      // a throw costs Phaser a frame rather than its loop, and the half-built batch that frame
+      // left in the WebGL renderer is discarded, so the next frame draws clean.
       postBoot: (g) => {
         const step = g.step.bind(g);
-        g.step = (time, delta) => loopGuard.runStep(() => step(time, delta));
+        g.step = (time, delta) =>
+          loopGuard.runStep(
+            () => step(time, delta),
+            () => discardPendingBatch(g.renderer as PipelineHolder | null),
+          );
       },
     },
   });

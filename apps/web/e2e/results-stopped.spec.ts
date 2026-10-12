@@ -15,8 +15,12 @@ import { HARNESS, toggleOf } from './results-harness';
 // breaks Phaser's real render pass (`render`): a render that keeps failing must stop the run as a
 // draw that keeps failing does, with nothing escaping to the page, and one that fails once must
 // cost a frame, not the board: Phaser's loop goes on, the board is drawn again and the run
-// carries on, with no stopped form. These run in WebKit too, since the render path is the
-// browser's; the other stops are the app's own JavaScript, and run in Chromium only.
+// carries on, with no stopped form. The break throws part-way through Phaser's render, with two
+// images batched and undrawn, and the batch such a frame leaves behind is discarded (`scene.ts`):
+// the frame after a failed one starts with nothing batched, and so does every frame behind the
+// stopped message, where the leftovers would otherwise be drawn once, or pile up. These run in
+// WebKit too, since the render path is the browser's; the other stops are the app's own
+// JavaScript, and run in Chromium only.
 
 /** Why a render break is skipped: what the harness breaks is Phaser's WebGL render pass. */
 const NEEDS_WEBGL =
@@ -39,6 +43,25 @@ async function skipUnlessWebGL(page: Page, browserName: string): Promise<void> {
   const webgl = await drawsWithWebGL(page);
   if (browserName === 'chromium') expect(webgl, 'Chromium draws the board with WebGL').toBe(true);
   test.skip(!webgl, NEEDS_WEBGL);
+}
+
+/** What `window.__wyRenderBreak` (`results-entry.ts`) lets a spec read. */
+interface RenderBreakReport {
+  threw: number;
+  breakFrame: number;
+  frame: () => number;
+  starts: { frame: number; vertexCount: number; batch: number }[];
+}
+
+/** The Phaser frames that began after the first failed one, each with the batch it started
+ *  with: the failed frame's leftovers, if they were not discarded, are in the first of them. */
+async function startsAfterBreak(
+  page: Page,
+): Promise<{ frame: number; vertexCount: number; batch: number }[]> {
+  return page.evaluate(() => {
+    const b = (window as unknown as { __wyRenderBreak: RenderBreakReport }).__wyRenderBreak;
+    return b.breakFrame < 0 ? [] : b.starts.filter((s) => s.frame > b.breakFrame);
+  });
 }
 
 const SIZES = [
@@ -157,6 +180,15 @@ for (const stop of ['step', 'draw', 'render'] as const) {
             consoleErrors.filter((m) => m.startsWith('Wynding: a frame failed')),
             "the render's own error, logged once",
           ).toEqual([expect.stringContaining('results harness: the render broke')]);
+          // ...and every frame Phaser began after the first failed one started with nothing
+          // batched: each failed frame's half-built batch was discarded, so no stale quads pile up
+          // behind the message (3.90.0 flushes them with the next frame's first draw otherwise).
+          const starts = await startsAfterBreak(page);
+          expect(starts.length, 'frames began after the first failure').toBeGreaterThan(5);
+          expect(
+            starts.filter((s) => s.vertexCount !== 0 || s.batch !== 0),
+            'frames that began with a batch left over',
+          ).toEqual([]);
         }
       });
     }
@@ -299,7 +331,7 @@ test.describe('a one-off render break', () => {
     await page.goto(`${HARNESS}?stop=render-once`);
     await skipUnlessWebGL(page, browserName);
 
-    type Break = { threw: number; frame: () => number };
+    type Break = RenderBreakReport;
     const threw = (): Promise<number> =>
       page.evaluate(() => (window as unknown as { __wyRenderBreak: Break }).__wyRenderBreak.threw);
     const phaserFrame = (): Promise<number> =>
@@ -330,6 +362,19 @@ test.describe('a one-off render break', () => {
       .toBeGreaterThan(0.001);
     // And the run carries on: the sim held for the frame that failed, then stepped on.
     await expect.poll(tick, { timeout: 10_000 }).toBeGreaterThan(tickAtBreak + 10);
+
+    // The failed frame had batched two images and drawn neither; the frame after it starts with
+    // nothing batched, so those quads are not drawn with it (3.90.0 would flush them there).
+    const after = await startsAfterBreak(page);
+    expect(after.length, 'frames began after the failed one').toBeGreaterThan(5);
+    const breakFrame = await page.evaluate(
+      () => (window as unknown as { __wyRenderBreak: Break }).__wyRenderBreak.breakFrame,
+    );
+    expect(after[0]!.frame, 'the very next frame').toBe(breakFrame + 1);
+    expect(
+      after.filter((s) => s.vertexCount !== 0 || s.batch !== 0),
+      'frames that began with a batch left over',
+    ).toEqual([]);
 
     // One failed frame: held and logged once, with what the render threw, and never a stop.
     await expect(page.getByRole('dialog')).toBeHidden();

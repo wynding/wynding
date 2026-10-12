@@ -107,6 +107,41 @@ describe('createLoopGuard — a step that throws', () => {
     });
     expect(ran).toBe(true);
   });
+
+  it('runs onFailure once for a step that threw, and not for one that completed', () => {
+    const { guard } = started();
+    let cleanups = 0;
+    const onFailure = (): void => {
+      cleanups += 1;
+    };
+    guard.runStep(ok, onFailure);
+    expect(cleanups).toBe(0);
+    guard.runStep(throwing(new Error('a step broke')), onFailure);
+    expect(cleanups).toBe(1);
+    guard.runStep(ok, onFailure);
+    expect(cleanups).toBe(1);
+  });
+
+  it('contains a throw from onFailure: the step’s own error is still the one handed back', () => {
+    const { guard } = started();
+    const broke = new Error('a step broke');
+    expect(() =>
+      guard.runStep(throwing(broke), throwing(new Error('the clean-up broke'))),
+    ).not.toThrow();
+    expect(guard.check(0)).toEqual({ error: broke });
+  });
+
+  it('runs no onFailure once destroyed: the step runs bare', () => {
+    const { guard } = started();
+    guard.destroy();
+    let cleanups = 0;
+    expect(() =>
+      guard.runStep(throwing(new Error('the teardown broke')), () => {
+        cleanups += 1;
+      }),
+    ).toThrow();
+    expect(cleanups).toBe(0);
+  });
 });
 
 describe('createLoopGuard — a READY listener that throws', () => {
