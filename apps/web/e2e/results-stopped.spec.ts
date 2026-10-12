@@ -154,7 +154,10 @@ test('a renderer that never starts stops the run, rather than letting it play on
   page,
   browserName,
 }) => {
-  test.skip(browserName === 'webkit', "the boot break is Phaser's own JavaScript: Chromium runs it");
+  test.skip(
+    browserName === 'webkit',
+    "the boot break is Phaser's own JavaScript: Chromium runs it",
+  );
   const pageErrors: string[] = [];
   const consoleErrors: string[] = [];
   page.on('pageerror', (e) => pageErrors.push(e.message));
@@ -163,11 +166,15 @@ test('a renderer that never starts stops the run, rather than letting it play on
   });
   await page.goto(`${HARNESS}?stop=boot`);
   // Phaser's boot threw where nothing can catch it, in an image's load handler: uncaught, once.
-  await expect.poll(() => pageErrors, { timeout: 15_000 }).toEqual(['results harness: the boot broke']);
+  await expect
+    .poll(() => pageErrors, { timeout: 15_000 })
+    .toEqual(['results harness: the boot broke']);
   // READY never comes, so the draws' bound says so, and the frame loop stops the run.
   const dialog = page.getByRole('dialog', { name: 'Something went wrong.' });
   await expect(dialog).toBeVisible({ timeout: 40_000 });
-  await expect(dialog).toHaveAccessibleDescription('The run stopped at wave 3 because of an error.');
+  await expect(dialog).toHaveAccessibleDescription(
+    'The run stopped at wave 3 because of an error.',
+  );
   expect(
     consoleErrors.filter((m) => m.startsWith('Wynding: a frame failed')),
     'the never-started error, logged once',
