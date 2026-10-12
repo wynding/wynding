@@ -186,7 +186,21 @@ function breakRender(once: boolean): () => void {
   };
 }
 
+/** Break Phaser's boot ahead of the scene's READY listener (#195): `SceneManager#bootQueue`, which
+ *  Phaser's own READY listener runs before the scene's, throws once, so READY never reaches the
+ *  scene, Phaser's loop never starts and nothing draws the board, as a renderer whose boot failed
+ *  (a shader that will not compile, a context lost while booting) leaves it. */
+function breakBoot(): void {
+  const proto = Phaser.Scenes.SceneManager.prototype as unknown as { bootQueue: () => void };
+  const bootQueue = proto.bootQueue;
+  proto.bootQueue = function () {
+    proto.bootQueue = bootQueue;
+    throw new Error('results harness: the boot broke');
+  };
+}
+
 const stop = params.get('stop');
+if (stop === 'boot') breakBoot();
 const armRenderBreak =
   stop === 'render' || stop === 'render-once' ? breakRender(stop === 'render-once') : null;
 const root = document.getElementById('app');
@@ -223,7 +237,7 @@ createApp(document, root, {
   seed: SCENARIO_SEED,
   controllerFactory: (seed) => {
     if (stop === 'step' || stop === 'draw') return stoppingRun(seed, stop);
-    if (armRenderBreak !== null) return stoppingRun(seed, 'render');
+    if (armRenderBreak !== null || stop === 'boot') return stoppingRun(seed, 'render');
     if (params.get('endOnPress') === '1') return endingOnPress(seed);
     const controller = createController(seed);
     playScript(controller, plan);

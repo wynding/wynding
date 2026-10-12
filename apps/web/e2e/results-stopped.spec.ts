@@ -32,6 +32,15 @@ async function drawsWithWebGL(page: Page): Promise<boolean> {
     .evaluate((c) => (c as HTMLCanvasElement).getContext('webgl') !== null);
 }
 
+/** Skip a render break where Phaser draws with Canvas, but never in Chromium: Playwright launches
+ *  it with SwiftShader allowed, so CI's Chromium draws with WebGL, and one that stopped would
+ *  otherwise skip every render test without a word. */
+async function skipUnlessWebGL(page: Page, browserName: string): Promise<void> {
+  const webgl = await drawsWithWebGL(page);
+  if (browserName === 'chromium') expect(webgl, 'Chromium draws the board with WebGL').toBe(true);
+  test.skip(!webgl, NEEDS_WEBGL);
+}
+
 const SIZES = [
   { width: 1440, height: 900 },
   { width: 658, height: 320 }, // Galaxy S9+ landscape — Compact
@@ -67,7 +76,7 @@ for (const stop of ['step', 'draw', 'render'] as const) {
         if (m.type() === 'error') consoleErrors.push(m.text());
       });
       await page.goto(`${HARNESS}?stop=${stop}`);
-      if (stop === 'render') test.skip(!(await drawsWithWebGL(page)), NEEDS_WEBGL);
+      if (stop === 'render') await skipUnlessWebGL(page, browserName);
 
       const dialog = page.getByRole('dialog', { name: 'Something went wrong.' });
       await expect(dialog).toBeVisible({ timeout: 30_000 });
@@ -141,6 +150,30 @@ for (const stop of ['step', 'draw', 'render'] as const) {
   }
 }
 
+test('a renderer that never starts stops the run, rather than letting it play on behind a blank board', async ({
+  page,
+  browserName,
+}) => {
+  test.skip(browserName === 'webkit', "the boot break is Phaser's own JavaScript: Chromium runs it");
+  const pageErrors: string[] = [];
+  const consoleErrors: string[] = [];
+  page.on('pageerror', (e) => pageErrors.push(e.message));
+  page.on('console', (m) => {
+    if (m.type() === 'error') consoleErrors.push(m.text());
+  });
+  await page.goto(`${HARNESS}?stop=boot`);
+  // Phaser's boot threw where nothing can catch it, in an image's load handler: uncaught, once.
+  await expect.poll(() => pageErrors, { timeout: 15_000 }).toEqual(['results harness: the boot broke']);
+  // READY never comes, so the draws' bound says so, and the frame loop stops the run.
+  const dialog = page.getByRole('dialog', { name: 'Something went wrong.' });
+  await expect(dialog).toBeVisible({ timeout: 40_000 });
+  await expect(dialog).toHaveAccessibleDescription('The run stopped at wave 3 because of an error.');
+  expect(
+    consoleErrors.filter((m) => m.startsWith('Wynding: a frame failed')),
+    'the never-started error, logged once',
+  ).toEqual([expect.stringContaining("the board's renderer never started")]);
+});
+
 /** `n` animation frames from now. */
 async function animationFrames(page: Page, n: number): Promise<void> {
   await page.evaluate(
@@ -158,13 +191,33 @@ async function animationFrames(page: Page, n: number): Promise<void> {
   );
 }
 
+/** The board's screenshot, decoded. */
+async function boardShot(page: Page): Promise<PNG> {
+  const box = await page.locator('.wy-board').boundingBox();
+  expect(box, 'the board is laid out').not.toBeNull();
+  return PNG.sync.read(await page.screenshot({ clip: box! }));
+}
+
+/** The share of pixels that differ between two screenshots of the board. */
+function changedShare(a: PNG, b: PNG): number {
+  if (a.width !== b.width || a.height !== b.height) return 1;
+  let changed = 0;
+  for (let i = 0; i < a.data.length; i += 4) {
+    for (let k = 0; k < 3; k++) {
+      if (Math.abs((a.data[i + k] as number) - (b.data[i + k] as number)) > 8) {
+        changed++;
+        break;
+      }
+    }
+  }
+  return changed / (a.width * a.height);
+}
+
 /** The share of the board's screenshot that is not the canvas's clear colour (Phaser's
  *  `backgroundColor`, `scene.ts`): the floor alone covers most of a drawn board, and a blank one
  *  shows the clear colour and nothing else. */
 async function drawnShare(page: Page): Promise<number> {
-  const box = await page.locator('.wy-board').boundingBox();
-  expect(box, 'the board is laid out').not.toBeNull();
-  const png = PNG.sync.read(await page.screenshot({ clip: box! }));
+  const png = await boardShot(page);
   const clear = [0x12, 0x14, 0x1c];
   let drawn = 0;
   for (let i = 0; i < png.data.length; i += 4) {
@@ -175,6 +228,7 @@ async function drawnShare(page: Page): Promise<number> {
 
 test('a render that breaks once costs Phaser a frame: the board draws again, and the run carries on', async ({
   page,
+  browserName,
 }) => {
   const pageErrors: string[] = [];
   const consoleErrors: string[] = [];
@@ -183,7 +237,7 @@ test('a render that breaks once costs Phaser a frame: the board draws again, and
     if (m.type() === 'error') consoleErrors.push(m.text());
   });
   await page.goto(`${HARNESS}?stop=render-once`);
-  test.skip(!(await drawsWithWebGL(page)), NEEDS_WEBGL);
+  await skipUnlessWebGL(page, browserName);
 
   type Break = { threw: number; frame: () => number };
   const threw = (): Promise<number> =>
@@ -202,6 +256,13 @@ test('a render that breaks once costs Phaser a frame: the board draws again, and
   await animationFrames(page, 30);
   expect.soft(await phaserFrame(), "Phaser's frame count").toBeGreaterThan(frameAtBreak + 10);
   expect.soft(await drawnShare(page), 'the share of the board drawn').toBeGreaterThan(0.25);
+  // ...and drawn live, not frozen on its last good frame: wave 3's creeps are moving, so a board
+  // whose draws stopped recording (Phaser re-rendering what was last recorded while the app's
+  // frames complete) never changes, and fails here.
+  const drawnAgain = await boardShot(page);
+  await expect
+    .poll(async () => changedShare(drawnAgain, await boardShot(page)), { timeout: 2_000 })
+    .toBeGreaterThan(0.001);
   // And the run carries on: the sim held for the frame that failed, then stepped on.
   await expect.poll(tick, { timeout: 10_000 }).toBeGreaterThan(tickAtBreak + 10);
 
