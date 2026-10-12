@@ -7,7 +7,13 @@
 // READY, and across a hidden tab, nothing is.
 
 import { describe, it, expect } from 'vitest';
-import { LOOP_STALL_DRAWS, createLoopGuard, type LoopFailure, type LoopGuard } from './loop-guard';
+import {
+  BOOT_STALL_DRAWS,
+  LOOP_STALL_DRAWS,
+  createLoopGuard,
+  type LoopFailure,
+  type LoopGuard,
+} from './loop-guard';
 
 const ok = (): void => {};
 const throwing =
@@ -221,5 +227,44 @@ describe('createLoopGuard — when nothing is handed back', () => {
     // ...hidden...
     expect(animationFrame(guard, loop)?.error).toBe(broke);
     expect(animationFrame(guard, loop)).toBeNull();
+  });
+});
+
+describe('createLoopGuard — a READY that never comes (#195 QC)', () => {
+  // The kill test, written without the new constant so it runs unchanged against the PR's head:
+  // a READY that never reaches the listener must reach a draw within ten seconds of frames.
+  it('is handed to a draw within ten seconds of frames at 60 Hz', () => {
+    const guard = createLoopGuard();
+    let handed: LoopFailure | null = null;
+    for (let i = 0; i <= 600 && handed === null; i++) handed = guard.check(0);
+    expect(handed).not.toBeNull();
+  });
+
+  it(`is handed back after ${String(BOOT_STALL_DRAWS)} draws, not one before, and the same every draw`, () => {
+    const guard = createLoopGuard();
+    for (let i = 0; i < BOOT_STALL_DRAWS; i++) expect(guard.check(0)).toBeNull();
+    const handed = guard.check(0);
+    expect((handed?.error as Error).message).toBe(
+      `the board's renderer never started: Phaser's READY has not come in ` +
+        `${String(BOOT_STALL_DRAWS)} frames, so nothing draws the board`,
+    );
+    for (let i = 0; i < 60; i++) expect(guard.check(0)).toBe(handed);
+  });
+
+  it('holds the bounds the docs promise', () => {
+    // "about 50 ms" for a stopped loop, "about 10 s at 60 Hz" for one that never started.
+    expect(LOOP_STALL_DRAWS).toBe(3);
+    expect(BOOT_STALL_DRAWS).toBe(600);
+  });
+
+  it('clears when READY comes late, and the loop is watched from then on', () => {
+    const guard = createLoopGuard();
+    for (let i = 0; i <= BOOT_STALL_DRAWS; i++) guard.check(0);
+    guard.runReady(ok);
+    const loop = phaserLoop(guard);
+    for (let i = 0; i < 30; i++) expect(animationFrame(guard, loop)).toBeNull();
+    // ...and a loop that then stops is still noticed.
+    for (let i = 0; i < LOOP_STALL_DRAWS; i++) guard.check(loop.frame());
+    expect((guard.check(loop.frame())?.error as Error).message).toMatch(/has stopped/);
   });
 });

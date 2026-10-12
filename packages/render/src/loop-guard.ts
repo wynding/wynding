@@ -21,7 +21,8 @@
 // step, in that order. `draw()` throws it into the app's frame-failure policy (#191): the sim
 // holds, each distinct error is logged once, and a failure that lasts stops the run (a paused run
 // is only held). A step that failed once clears at Phaser's next good step, and the run carries
-// on. Nothing is handed back before READY, when Phaser's loop has not started.
+// on. Before READY, when Phaser's loop has not started, nothing is handed back until a READY
+// that is overdue says it never will (below).
 //
 // A LOOP THAT HAS STOPPED. Each `check` is given Phaser's frame count (`Game#getFrame`). Phaser's
 // `TimeStep` runs on animation frames and moves the count on every one, once the step (if any)
@@ -33,6 +34,15 @@
 // count that stands still across a draw means a loop that has stopped, or never started;
 // `LOOP_STALL_DRAWS` draws in a row is that, with a margin.
 //
+// A LOOP THAT NEVER STARTS. READY comes once Phaser has booted: its few built-in textures
+// decoded, then its renderer's boot (`WebGLRenderer#boot`, on the textures' READY), then the game's
+// READY listeners, Phaser's own (`SceneManager#bootQueue`, `ScaleManager#refresh`) ahead of ours. A
+// throw in any of those is uncaught, ends the boot, and READY never reaches ours: Phaser's loop
+// never starts and the board stays blank while the run plays on. So the draws before READY are
+// counted, and `BOOT_STALL_DRAWS` of them is a READY that will not come. A READY that comes later
+// all the same clears it, and the loop is watched from then on. That is the whole case: a loop
+// that never started is reported, after about ten seconds of frames at 60 Hz, like one that stopped.
+//
 // AFTER `destroy`, Phaser's steps run bare: its next step is its teardown (`Game#destroy` only
 // marks the game), and no draw is left to report a teardown that kept failing, frame after frame.
 
@@ -40,6 +50,12 @@
  *  `check` reports its loop stopped. Between two draws the count moves once, so one such draw is
  *  already a stopped loop; three leave a margin and cost the player nothing: about 50 ms. */
 export const LOOP_STALL_DRAWS = 3;
+
+/** Draws before READY after which `check` reports that Phaser's loop never started. READY needs
+ *  only Phaser's own boot, a few frames after mount; a boot that blocks the main thread (a cold
+ *  software-WebGL shader compile on CI) holds the draws too, so only frames that came and went
+ *  count. 600 are ten seconds of them at 60 Hz. */
+export const BOOT_STALL_DRAWS = 600;
 
 /** What keeps the board from being drawn: a thrown value, which can be anything. */
 export interface LoopFailure {
@@ -73,6 +89,9 @@ export function createLoopGuard(): LoopGuard {
   /** The stopped loop's failure, made once a stall is found and kept while it lasts. */
   let stall: LoopFailure | null = null;
   let destroyed = false;
+  /** The draws before READY, and the never-started failure once they pass `BOOT_STALL_DRAWS`. */
+  let bootDraws = 0;
+  let neverStarted: LoopFailure | null = null;
 
   return {
     runStep(step) {
@@ -96,7 +115,17 @@ export function createLoopGuard(): LoopGuard {
       }
     },
     check(frame) {
-      if (!ready) return null;
+      if (!ready) {
+        bootDraws += 1;
+        if (bootDraws <= BOOT_STALL_DRAWS) return null;
+        neverStarted ??= {
+          error: new Error(
+            `the board's renderer never started: Phaser's READY has not come in ` +
+              `${String(BOOT_STALL_DRAWS)} frames, so nothing draws the board`,
+          ),
+        };
+        return neverStarted;
+      }
       if (frame === lastFrame) {
         stillDraws += 1;
       } else {

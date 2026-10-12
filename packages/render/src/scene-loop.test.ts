@@ -62,9 +62,15 @@ const phaser = vi.hoisted(() => {
     private frame = 0;
     private loopStep: ((time: number, delta: number) => void) | null = null;
     private readonly config: Config;
+    /** Set to make Phaser's own READY listener, ahead of ours, throw (`SceneManager#bootQueue`). */
+    sceneBootError: Error | null = null;
     constructor(config: Config) {
       this.config = config;
       games.push(this);
+      // Phaser's SceneManager listens for READY from its constructor, so ahead of `mount()`'s.
+      this.events.once('ready', () => {
+        if (this.sceneBootError !== null) throw this.sceneBootError;
+      });
     }
     step(_time: number, _delta: number): void {
       this.stepBody();
@@ -240,5 +246,32 @@ describe('mount — Phaser’s own frame loop', () => {
       throw teardown;
     };
     expect(() => game.tick()).toThrow(teardown);
+  });
+});
+
+describe('mount — a Phaser READY listener ahead of ours that throws (#195 QC)', () => {
+  afterEach(() => {
+    vi.unstubAllGlobals();
+    phaser.games.length = 0;
+    frames.inputs.length = 0;
+  });
+
+  it('never starts Phaser’s loop, and a draw says so within ten seconds of frames', () => {
+    vi.stubGlobal('ResizeObserver', undefined);
+    vi.stubGlobal('window', {
+      devicePixelRatio: 1,
+      matchMedia: () => ({ addEventListener: (): void => {}, removeEventListener: (): void => {} }),
+    });
+    const handle = mount(board as unknown as HTMLElement, GEOMETRY);
+    const game = phaser.games[0]!;
+    const broke = new Error('the scene manager’s boot broke');
+    game.sceneBootError = broke;
+    // As in Phaser: the throw ends `texturesReady` (uncaught), before our listener and `start`.
+    expect(() => game.texturesReady()).toThrow(broke);
+    expect(game.started).toBe(false);
+    let thrown: unknown = null;
+    for (let i = 0; i <= 600 && thrown === null; i++) thrown = drawCaught(handle);
+    expect((thrown as Error | null)?.message).toMatch(/^the board's renderer never started: /);
+    expect(frames.inputs).toHaveLength(0);
   });
 });
