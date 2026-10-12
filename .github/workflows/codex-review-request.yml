@@ -13,11 +13,10 @@ name: Codex review request
 # as a parsing drift in check-codex-freshness.mjs — the discriminator: does any NEW Codex
 # artifact, review or comment, appear after the bot's comment? No → Codex is ignoring the
 # trigger, this file's problem; yes → the script's parsing drifted.) Remedy here: route
-# the comment through a
-# fine-grained PAT (pull requests: write) stored as a secret instead of `github.token`, or
-# delete this workflow and fall back to the manual trigger documented in
-# docs/ai-workflow.md §4. A missed trigger is loud either way — the status never goes
-# green on its own.
+# the comment through a fine-grained PAT (pull requests: write, issues: read) stored as a
+# secret instead of `github.token`, or delete this workflow and fall back to the manual
+# trigger documented in docs/ai-workflow.md §4. A missed trigger is loud either way — the
+# status never goes green on its own.
 #
 # No duplicate-comment guard beyond the freshness pre-check and the concurrency group:
 # the only real overlap is a hand-posted trigger racing this workflow, and the cost of
@@ -44,8 +43,8 @@ on:
 
 permissions:
   contents: read
-  # The trigger POST below comments on a PR, which takes this scope: see the note above
-  # the step. The freshness pre-check's reads (the PR, its reviews) ride on it too.
+  # The trigger POST below comments on a PR: see the note above the step for why this
+  # scope. The freshness pre-check's reads (the PR, its reviews) ride on it too.
   pull-requests: write
   issues: read # the freshness pre-check reads the PR's comments through the issues API
 
@@ -73,13 +72,13 @@ jobs:
       - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
           node-version: 22
-      # #154 / #72 §3: with `issues: write` and `pull-requests: read`, every auto-trigger
-      # since the live probe on PR #156 (push 75e4f1a) had this POST refused with "Resource
-      # not accessible by integration"; the runs' own logs list exactly those two grants.
-      # #154 read that as an org-level token cap only an org admin could inspect. But the
-      # comment's target is a pull request: GitHub lists this endpoint under both the
-      # issues and the pull-requests scopes, and the issues one alone was refused for a PR,
-      # so the block above now grants `pull-requests: write`. A live run is the proof:
+      # #154 / #72 §3: every auto-trigger since the live probe on PR #156 (push 75e4f1a) had
+      # this POST refused with "Resource not accessible by integration", under the grants
+      # its run logs list: `issues: write`, `pull-requests: read`. #154 read that as an
+      # org-level token cap. But this workflow's first commit (111eba8) granted
+      # `pull-requests: write`, and 600923c narrowed it to `read` before any live run, so
+      # the refusal has only ever been seen without the PR scope. A comment on a pull
+      # request may need it, so the block above grants it again. A live run is the proof:
       # until one shows the POST going through, the 403 branch below still downgrades
       # ITSELF to a workflow warning — the `if`/`else` around the `gh api` call, not a
       # step-level flag. A step-wide `continue-on-error` was tried here and removed (Codex,
@@ -106,12 +105,11 @@ jobs:
             0) echo "Current head already has a Codex verdict — no trigger needed." ;;
             1)
               # The REST issues endpoint, deliberately not `gh pr comment` — that command
-              # posts via GraphQL addComment, whose scope mapping is murkier than the
-              # documented issues-write grant this call rides on. `gh` exits 1 for EVERY
-              # failure alike — a 500, a network outage, a bad endpoint, an expired token,
-              # and the known org-level 403 all land on the same exit code (Codex, PR #156
-              # round 3) — so the exit code alone cannot tell a known, admin-owned cap from
-              # a fresh, actionable problem; the OUTPUT has to be inspected. Captured
+              # posts via GraphQL addComment, whose scope mapping is murkier. `gh` exits 1
+              # for EVERY failure alike — a 500, a network outage, a bad endpoint, an expired
+              # token, and the known refusal all land on the same exit code (Codex, PR #156
+              # round 3) — so the exit code alone cannot tell the known refusal from a
+              # fresh, actionable problem; the OUTPUT has to be inspected. Captured
               # rather than streamed live so its content can be tested — `|| post_ec=$?`
               # keeps `set -e` from killing the script at the assignment itself (POSIX
               # exempts the first command of an OR list) — then reprinted verbatim before
@@ -127,26 +125,24 @@ jobs:
                 # alternative stood beside this one and was removed: it matched ANY 403 `gh`
                 # can emit — a secondary rate limit, SSO/SAML enforcement, an IP allow-list —
                 # so a fresh, actionable failure earned the same silent downgrade as the
-                # admin-owned cap, which is exactly what this step's header promises does not
+                # known refusal, which is exactly what this step's header promises does not
                 # happen. The narrow string is what the probe actually returned and what #154
                 # and `codex-freshness.yml` both quote. `-qF` rather than `-qE`: one fixed
                 # string now, so no regex surface to widen it again by accident.
                 #
                 # ONE RESIDUAL CASE THIS STRING CANNOT SEPARATE, stated rather than papered
-                # over: it is the message GitHub returns whenever a token lacks the scope,
-                # which is what #72 §3 found it meant here (`issues: write` alone, for a
-                # comment on a PR), and also what any other missing scope would return. If it
-                # still appears with `pull-requests: write` granted, the scope is not the
-                # whole story. Bounded by `codex-freshness` going red on its own when no
-                # verdict lands; re-check the permissions block before believing this
-                # warning. A grep of this file for the scope was considered and rejected — it
-                # would fire on any reformat, putting a flake inside a guard.
-                echo "::warning::auto-trigger POST refused (Resource not accessible by integration) with pull-requests: write granted; see #72 §3. Post '@codex review' manually."
+                # over: GitHub returns this message whenever a token lacks a scope a call
+                # needs, so it cannot say which scope is missing. Bounded by
+                # `codex-freshness` going red on its own when no verdict lands; re-check the
+                # permissions block before believing this warning. A grep of this file for
+                # the scope was considered and rejected — it would fire on any reformat,
+                # putting a flake inside a guard.
+                echo "::warning::auto-trigger POST refused (Resource not accessible by integration); see #72 §3. Post '@codex review' manually."
               else
-                # Anything else — INCLUDING ANY OTHER 403. A 403 that is not the cap above
+                # Anything else — INCLUDING ANY OTHER 403. A 403 that is not the refusal above
                 # has a different cause and a different owner, so it gets no graceful
                 # downgrade and fails as loudly as a 500, a network blip or an auth error.
-                echo "auto-trigger POST failed with an unrecognised error (exit $post_ec) — not the known token cap. Failing." >&2
+                echo "auto-trigger POST failed with an unrecognised error (exit $post_ec) — not the known refusal. Failing." >&2
                 exit "$post_ec"
               fi
               ;;
