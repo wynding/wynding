@@ -13,11 +13,10 @@ name: Codex review request
 # as a parsing drift in check-codex-freshness.mjs — the discriminator: does any NEW Codex
 # artifact, review or comment, appear after the bot's comment? No → Codex is ignoring the
 # trigger, this file's problem; yes → the script's parsing drifted.) Remedy here: route
-# the comment through a
-# fine-grained PAT (issues: write) stored as a secret instead of `github.token`, or
-# delete this workflow and fall back to the manual trigger documented in
-# docs/ai-workflow.md §4. A missed trigger is loud either way — the status never goes
-# green on its own.
+# the comment through a fine-grained PAT (pull requests: write, issues: read) stored as a
+# secret instead of `github.token`, or delete this workflow and fall back to the manual
+# trigger documented in docs/ai-workflow.md §4. A missed trigger is loud either way — the
+# status never goes green on its own.
 #
 # No duplicate-comment guard beyond the freshness pre-check and the concurrency group:
 # the only real overlap is a hand-posted trigger racing this workflow, and the cost of
@@ -44,8 +43,11 @@ on:
 
 permissions:
   contents: read
-  pull-requests: read # the freshness pre-check only reads PR metadata
-  issues: write # the trigger POSTs to the REST issues API below, which this scope covers
+  # The trigger POST below comments on a PR, which takes this scope: `issues: write` alone is
+  # refused for a pull request (A/B probe, run 38308574140). The freshness pre-check's reads
+  # (the PR, its reviews) ride on it too.
+  pull-requests: write
+  issues: read # the freshness pre-check reads the PR's comments through the issues API
 
 jobs:
   request:
@@ -71,21 +73,15 @@ jobs:
       - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
           node-version: 22
-      # #154: this POST has declared `issues: write` since this workflow's first commit —
-      # confirmed by git history — yet the live probe on PR #156 (push 75e4f1a) hit the
-      # identical 403 anyway. That rules out the permissions block; what remains is an
-      # org-level token cap only an org admin can inspect, not something fixable from this
-      # repo. #72 §3's `CODEX_TRIGGER_TOKEN` (a fine-grained PAT, owner lane) is the
-      # recorded fix. Until it lands, the 403 branch below downgrades ITSELF to a workflow
-      # warning — the `if`/`else` around the `gh api` call, not a step-level flag. A
-      # step-wide `continue-on-error` was tried here and removed (Codex, PR #156 round 2):
-      # it would also swallow a missing script, an indeterminate freshness read, or any
-      # other real failure in this step, exactly the silent-green #154 exists to prevent.
-      # Only the KNOWN 403 goes quiet; everything else in this step still fails the job
-      # loudly, as it should. `codex-freshness` still goes red separately and honestly
-      # when no verdict covers the head; that status is the one that matters. REVERT the
-      # warning-downgrade branch below (the `elif`, not the `else` — the `else` is the
-      # loud-failure path) the moment the PAT lands and the POST can succeed again.
+      # #154 / #72 §3: from this workflow's first live run (2026-07-30) on, this POST was refused
+      # with "Resource not accessible by integration" on every run, under `issues: write`
+      # and `pull-requests: read`. #154 read that as an org-level token cap; it was the
+      # scope. An A/B probe (run 38308574140, 2026-10-12) settled it: with `issues: write`
+      # a token comments on an issue but is refused on a pull request, and with
+      # `pull-requests: write` it comments on the pull request, whatever GitHub's
+      # permission table suggests. This workflow's first commit granted it; 600923c
+      # narrowed it to `read` before it ever ran on main. A failed POST now fails the job, with
+      # what gh said in its output, and `codex-freshness` stays red until a verdict lands.
       - name: Comment "@codex review" if the current head lacks a Codex verdict
         run: |
           set -euo pipefail
@@ -101,50 +97,10 @@ jobs:
             0) echo "Current head already has a Codex verdict — no trigger needed." ;;
             1)
               # The REST issues endpoint, deliberately not `gh pr comment` — that command
-              # posts via GraphQL addComment, whose scope mapping is murkier than the
-              # documented issues-write grant this call rides on. `gh` exits 1 for EVERY
-              # failure alike — a 500, a network outage, a bad endpoint, an expired token,
-              # and the known org-level 403 all land on the same exit code (Codex, PR #156
-              # round 3) — so the exit code alone cannot tell a known, admin-owned cap from
-              # a fresh, actionable problem; the OUTPUT has to be inspected. Captured
-              # rather than streamed live so its content can be tested — `|| post_ec=$?`
-              # keeps `set -e` from killing the script at the assignment itself (POSIX
-              # exempts the first command of an OR list) — then reprinted verbatim before
-              # any decision, on every path, so nothing here suppresses what gh actually
-              # said.
-              post_ec=0
-              post_out=$(gh api "repos/$GITHUB_REPOSITORY/issues/$PR_NUMBER/comments" -f body='@codex review' 2>&1) || post_ec=$?
-              printf '%s\n' "$post_out"
-              if [ "$post_ec" -eq 0 ]; then
-                echo "Requested a Codex review of the new head."
-              elif printf '%s\n' "$post_out" | grep -qF 'Resource not accessible by integration'; then
-                # THE KNOWN CAP, matched on the #154 probe's verbatim message. An `HTTP 403`
-                # alternative stood beside this one and was removed: it matched ANY 403 `gh`
-                # can emit — a secondary rate limit, SSO/SAML enforcement, an IP allow-list —
-                # so a fresh, actionable failure earned the same silent downgrade as the
-                # admin-owned cap, which is exactly what this step's header promises does not
-                # happen. The narrow string is what the probe actually returned and what #154
-                # and `codex-freshness.yml` both quote. `-qF` rather than `-qE`: one fixed
-                # string now, so no regex surface to widen it again by accident.
-                #
-                # ONE RESIDUAL CASE THIS STRING CANNOT SEPARATE, stated rather than papered
-                # over: GitHub returns the SAME message when a token simply lacks the scope,
-                # so if `issues: write` (the `permissions:` block above) is ever narrowed,
-                # that self-inflicted, one-line-fixable regression would be downgraded here
-                # wearing the org cap's clothes. The header's "what remains is an org-level
-                # token cap" was a finding about the state of the repo at the #154 probe, not
-                # a property of the string. Bounded by `codex-freshness` going red on its own
-                # when no verdict lands; re-check the permissions block before believing this
-                # warning. A grep of this file for the scope was considered and rejected — it
-                # would fire on any reformat, putting a flake inside a guard.
-                echo "::warning::auto-trigger POST failed with the known org-level token cap (Resource not accessible by integration; see #154 probe + #72 §3). Post '@codex review' manually."
-              else
-                # Anything else — INCLUDING ANY OTHER 403. A 403 that is not the cap above
-                # has a different cause and a different owner, so it gets no graceful
-                # downgrade and fails as loudly as a 500, a network blip or an auth error.
-                echo "auto-trigger POST failed with an unrecognised error (exit $post_ec) — not the known token cap. Failing." >&2
-                exit "$post_ec"
-              fi
+              # posts via GraphQL addComment, whose scope mapping is murkier. Under
+              # `set -e` a failed POST ends the step with gh's own error and exit code.
+              gh api "repos/$GITHUB_REPOSITORY/issues/$PR_NUMBER/comments" -f body='@codex review'
+              echo "Requested a Codex review of the new head."
               ;;
             *)
               # Exit 2 = the check could not determine freshness. Do NOT comment on a
