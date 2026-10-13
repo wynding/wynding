@@ -11,16 +11,23 @@ name: Codex review request
 # `github-actions[bot]`, it got "To use Codex here, create a Codex account and connect to
 # github" (probe PR #201, 2026-10-12). So the comment is posted with `CODEX_TRIGGER_TOKEN`,
 # an Actions secret holding a fine-grained PAT of a connected account (the owner's; #72
-# §3), scoped to this repository with Pull requests: read and write — a comment on a pull
-# request through the issues endpoint needs that scope, not Issues (A/B probe, run
-# 38308574140). Without the secret the run warns and posts nothing; once the PAT expires
-# its POST fails the job. If Codex ever stops answering, the symptom is a
-# `codex-freshness` status that stays red after pushes while this workflow reports
-# success. (Same symptom as a parsing drift in check-codex-freshness.mjs — the
-# discriminator: does any NEW Codex artifact, review or comment, appear after the
-# trigger? No → Codex is ignoring it, this file's problem; yes → the script's parsing
-# drifted.) The manual fallback is docs/ai-workflow.md §4. A missed trigger is loud either
-# way — the status never goes green on its own.
+# §3), scoped to this repository with Pull requests: read and write. For the workflow's
+# own token that is the scope a comment on a pull request takes, where Issues alone is
+# refused (A/B probe, run 38308574140); a PAT draws on the same permission sets, and its
+# first run confirms it. Without the secret the run warns and posts nothing; once the PAT
+# expires its POST fails the job.
+#
+# If a trigger goes unanswered, `codex-freshness` stays red after the push while this
+# workflow reports success. Codex's reply under the trigger says why: none at all, Codex
+# ignored it; a refusal (an account not connected, a usage limit), the token's account;
+# a verdict the status does not count, check-codex-freshness.mjs's parsing drifted. The
+# manual fallback is docs/ai-workflow.md §4. A missed trigger is loud either way — the
+# status never goes green on its own.
+#
+# Same-repo PRs only. The repository is public, `pull_request_target` runs on fork PRs
+# without anyone approving the run, and every trigger posts as the owner and spends a
+# Codex review: a stranger's PR could otherwise buy one per push. A fork PR's review is
+# requested by hand, or by dispatch.
 #
 # No duplicate-comment guard beyond the freshness pre-check and the concurrency group:
 # the only real overlap is a hand-posted trigger racing this workflow, and the cost of
@@ -56,14 +63,16 @@ jobs:
   request:
     name: codex-review-request
     # draft == false: a draft is not waiting on review, and a review spent on it would be
-    # spent again at ready_for_review (which self-triggers Codex). The dispatch branch
+    # spent again at ready_for_review (which self-triggers Codex). The head repo check is
+    # the header's same-repo rule. The dispatch branch
     # enforces the aim-at-main rule (SAFETY INVARIANT): aimed anywhere else, the run is
     # skipped instead of executing that ref's copy. Honest-path tripwire only — a modified
     # ref's copy could drop the guard; the insider boundary is rulesets (docs).
     if: >-
       (github.event_name == 'workflow_dispatch' &&
        github.ref_name == github.event.repository.default_branch) ||
-      (github.event_name == 'pull_request_target' && github.event.pull_request.draft == false)
+      (github.event_name == 'pull_request_target' && github.event.pull_request.draft == false &&
+       github.event.pull_request.head.repo.full_name == github.repository)
     concurrency:
       group: codex-review-request-${{ inputs.pr_number || github.event.pull_request.number }}
       cancel-in-progress: true
@@ -80,10 +89,16 @@ jobs:
         id: fresh
         run: |
           set -euo pipefail
-          # A missing script also makes node exit 1 — the same code as a confirmed-stale
-          # verdict — so close that overload before it can buy a spurious trigger comment.
+          # A missing script, or one that fails to parse, also makes node exit 1 — the same
+          # code as a confirmed-stale verdict — so close that overload before it can buy a
+          # spurious trigger comment. (Failures once it runs exit 2: the script's own
+          # handlers.)
           [ -f scripts/check-codex-freshness.mjs ] || {
             echo "check-codex-freshness.mjs is missing from the default branch" >&2
+            exit 2
+          }
+          node --check scripts/check-codex-freshness.mjs || {
+            echo "check-codex-freshness.mjs does not parse" >&2
             exit 2
           }
           ec=0
