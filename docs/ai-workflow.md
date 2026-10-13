@@ -324,6 +324,11 @@ typecheck, lint, test)`, `codex-freshness`, and `e2e (functional + axe)` — con
   (required workflows), an owner decision.
 - The **CodeRabbit** GitHub app installed on the repo.
 - **Codex** available for review (and the grill / plan loops).
+- `CODEX_TRIGGER_TOKEN`, an Actions secret: a fine-grained PAT of an account connected to
+  Codex (resource owner `wynding`, repository `wynding/wynding`, Pull requests: read and
+  write). `codex-review-request.yml` posts its `@codex review` with it, since Codex answers
+  no bot, and only on same-repo PRs; without the secret it warns and posts nothing. The PAT
+  expires: renew it before then, or the trigger fails.
 
 ## The rule that matters most
 

@@ -21,12 +21,12 @@
 // Codex comments without a parseable verdict line (e.g. its infrastructure-error
 // comments) never count.
 // If Codex is ever renamed or changes that line, every PR presents as "permanently red
-// status + one @codex review comment per push". That symptom has two causes with one
-// discriminator: does any NEW Codex artifact — review or comment — appear after the
-// bot's trigger comment? If yes, Codex answered and the parsing here drifted — update
-// CODEX_LOGIN and RE_REVIEWED below, AND the exact-login comment filter in
-// codex-freshness.yml's job `if`, which gates that workflow's job on the old name.
-// If no, Codex stopped honoring bot-authored triggers — see codex-review-request.yml.
+// status + one @codex review comment per push". Codex's reply under the trigger comment
+// tells that apart from its look-alikes: a verdict this script does not count means the
+// parsing here drifted — update CODEX_LOGIN and RE_REVIEWED below, AND the exact-login
+// comment filter in codex-freshness.yml's job `if`, which gates that workflow's job on the
+// old name; a refusal (an account not connected to Codex, a usage limit) or no reply at
+// all is the trigger's side — see codex-review-request.yml.
 //
 // Exit codes: 0 = fresh, 1 = stale or no verdict (actionable: trigger a review),
 // 2 = could not determine (API/config failure). Automation reacting to this script must
