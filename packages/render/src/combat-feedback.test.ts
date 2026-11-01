@@ -279,10 +279,11 @@ describe('createFeedbackTracker — kills and leaks', () => {
     expect(fb.pulseSinceMs(0)).toBeNull();
     fb.update(frame({ nowMs: 100, leaks: [0, 0] }));
     expect(fb.pulseSinceMs(0)).toBe(0);
-    fb.update(frame({ nowMs: 400, leaks: [0] })); // inside the gap: the pulse plays on
+    fb.update(frame({ nowMs: 400, leaks: [0] })); // while its pulse shows: already shown
     expect(fb.pulseSinceMs(0)).toBe(300);
     fb.update(frame({ nowMs: 100 + LEAK_PULSE_MS }));
     expect(fb.pulseSinceMs(0)).toBeNull(); // played out
+    fb.update(frame({ nowMs: 800, leaks: [0] })); // after it played out, inside the gap: waits
     fb.update(frame({ nowMs: 100 + LEAK_PULSE_GAP_MS - 1 }));
     expect(fb.pulseSinceMs(0)).toBeNull(); // still inside the gap: nothing
     // A second on, the leak that came inside the gap gets its pulse, with no new leak needed.
@@ -293,15 +294,25 @@ describe('createFeedbackTracker — kills and leaks', () => {
     expect(fb.pulseSinceMs(0)).toBeNull();
   });
 
+  it('a leak at the exit whose pulse is still showing queues nothing: no empty catch-up pulse', () => {
+    const fb = createFeedbackTracker();
+    fb.update(frame({ nowMs: 100, leaks: [0] }));
+    fb.update(frame({ nowMs: 400, leaks: [0] })); // shown by the pulse already playing
+    fb.update(frame({ nowMs: 100 + LEAK_PULSE_GAP_MS }));
+    expect(fb.pulseSinceMs(0)).toBeNull();
+  });
+
   it('pulses the exit a leak left by, under one gap for the whole board (M3: one exit per pair)', () => {
     const fb = createFeedbackTracker();
     fb.update(frame({ nowMs: 100, leaks: [1] }));
     expect(fb.pulseSinceMs(1)).toBe(0);
     expect(fb.pulseSinceMs(0)).toBeNull(); // the other exit saw no leak
     // Inside the gap exit 1's pulse began, a leak at exit 0 begins nothing yet: the gap is shared.
-    fb.update(frame({ nowMs: 300, leaks: [0, 1] }));
+    fb.update(frame({ nowMs: 300, leaks: [0] }));
     expect(fb.pulseSinceMs(0)).toBeNull();
     expect(fb.pulseSinceMs(1)).toBe(200);
+    // Exit 1 leaks again once its pulse has played out, still inside the gap: it waits too.
+    fb.update(frame({ nowMs: 800, leaks: [1] }));
     // Past it, both waiting: exit 0 has never pulsed, so it goes, and only it.
     fb.update(frame({ nowMs: 100 + LEAK_PULSE_GAP_MS }));
     expect(fb.pulseSinceMs(0)).toBe(0);

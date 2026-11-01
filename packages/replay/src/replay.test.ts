@@ -173,7 +173,8 @@ describe('replay validate() — re-simulation budget caps', { timeout: 120_000 }
   });
 
   /**
-   * Play a juggling build on M2's own board and validate its log: `kept` basics placed and
+   * Play a juggling build on the shipped board and validate its log (it doesn't depend on the
+   * board's shape): `kept` basics placed and
    * kept, then `flips` sell-and-rebuild flips of one more, every command committed and paid
    * for (5 a placement, 5 − 3 a flip). The bundle starts with enough bounty and a long first
    * countdown that the whole script plays before a creep exists, so nothing blocks an anchor.
