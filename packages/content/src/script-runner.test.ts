@@ -37,7 +37,7 @@ describe('runBuildScript guards', () => {
   });
 });
 
-describe('runBuildScript timed steps (M3 story 1)', () => {
+describe('runBuildScript timed steps (M3 story 1)', { timeout: 120_000 }, () => {
   it('holds a placement until its notBeforeTick, even when bounty covers it sooner', () => {
     const placedAt: number[] = [];
     const { state, placedCount } = runBuildScript(

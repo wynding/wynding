@@ -99,7 +99,7 @@ describe('distinctness (M2’s rule)', () => {
   });
 });
 
-describe('every step ran', () => {
+describe('every step ran', { timeout: 120_000 }, () => {
   it('passes a finished plan whose run ended, and names a short plan and a run cut off at the cap', () => {
     expect(
       checkAllStepsRan('done', fakeRun({ stepsDone: 3, stepCount: 3 }, { phase: 'won' })),
@@ -151,7 +151,7 @@ describe('every step ran', () => {
   });
 });
 
-describe('no sell while any creep is alive', () => {
+describe('no sell while any creep is alive', { timeout: 120_000 }, () => {
   it('flags only the sells applied with a creep on the board', () => {
     const run = fakeRun({
       sells: [

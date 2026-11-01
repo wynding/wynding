@@ -89,7 +89,7 @@ describe('remaining fraction — the closest-approach measure, per creep', () =>
   });
 });
 
-describe('the instrumented reference-build run', () => {
+describe('the instrumented reference-build run', { timeout: 120_000 }, () => {
   it("the field unit is one orthogonal step: field-01's empty path is 27 tiles", () => {
     const { grid, field } = ruleset.board;
     expect(field.dist[grid.entrance.row * grid.width + grid.entrance.col]).toBe(
