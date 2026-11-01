@@ -238,7 +238,7 @@ describe('replay validate() — re-simulation budget caps', { timeout: 120_000 }
     expect(run.placements).toBe(521);
     expect(run.result.ok, run.result.reason).toBe(true);
     expect(run.result.finalHash).toBe(run.liveFinalHash);
-  }, 30_000);
+  });
 
   it('admits a run at both budgets exactly: 1,000 placements, 2,000 commands', () => {
     const run = juggle(0, 1_000);
@@ -246,7 +246,7 @@ describe('replay validate() — re-simulation budget caps', { timeout: 120_000 }
     expect(run.commands).toBe(MAX_TOTAL_TOWER_COMMANDS);
     expect(run.result.ok, run.result.reason).toBe(true);
     expect(run.result.finalHash).toBe(run.liveFinalHash);
-  }, 30_000);
+  });
 });
 
 describe('replay validate() — command-union validation (ADR 0006 §4)', () => {
