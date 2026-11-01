@@ -223,6 +223,18 @@ describe('runBuildScript timed steps (M3 story 1)', { timeout: 120_000 }, () => 
       expect(sent.length).toBeGreaterThan(1);
     });
 
+    it('a placement held by a mine AND a tower that stays is sent, not held back for the mine', () => {
+      // (3,2) overlaps the mine at (2,2) and the basic at (4,2): the mine would clear, the
+      // basic never will, so the placement goes out every tick and the run reads as stalled.
+      const r = runBuildScript(ruleset, SEED, [
+        { col: 2, row: 2, towerId: 'mine' },
+        { col: 4, row: 2, towerId: 'basic' },
+        { col: 3, row: 2, towerId: 'basic' },
+      ]);
+      expect(r.placedCount).toBe(2);
+      expect(r.stalled).toBe(true);
+    });
+
     it('a mine that fires on the tick it lands is credited once, not placed again', () => {
       // Dropped at (16,12) on tick 645, a creep is already inside its trigger range, so it
       // lands and detonates within one step: the tower count never moves.

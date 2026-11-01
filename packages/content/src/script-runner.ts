@@ -170,8 +170,8 @@ function emptyEvents(): StepEvents {
 /**
  * Runs `plan` against `ruleset` from a fresh `createInitialState(seed, ruleset)`: while
  * the sim is `'running'` (capped at `MAX_MATCH_TICKS`), attempt `plan[cursor]` — a
- * placement the first tick its footprint is clear of towers and `state.bounty` covers its
- * cost, a sell the first tick it is due, neither before its `notBeforeTick` — and advance
+ * placement the first tick no burst tower still holds its footprint and `state.bounty`
+ * covers its cost, a sell the first tick it is due, neither before its `notBeforeTick` — and advance
  * `cursor` once the sim accepts it (a placement it rejects — e.g. one that would seal the
  * path — never advances it, and is sent again the next tick). This is the entire shared
  * core (#94) — every other measurement is a caller's own `observer`.
