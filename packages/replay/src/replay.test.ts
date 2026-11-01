@@ -113,7 +113,10 @@ describe('replay validate() — envelope structural validation', () => {
   });
 });
 
-describe('replay validate() — re-simulation budget caps', () => {
+// Several cases here play a whole run with ~1,000 placements, each a full maze check: under
+// coverage on a CI runner one took 40 s, past the 30 s default, so the block gets the full-run
+// budget the content package's story files use.
+describe('replay validate() — re-simulation budget caps', { timeout: 120_000 }, () => {
   it('rejects a replay whose tick count exceeds the budget — 72,001 since sv17, and not 72,000', () => {
     expect(MAX_MATCH_TICKS).toBe(72_000);
     const r = validate(
