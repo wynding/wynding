@@ -3,45 +3,77 @@
 // (27,11)). Pure compilation: nothing here runs the sim.
 
 import { describe, it, expect } from 'vitest';
-import { compileRuleset } from '@wynding/sim';
+import { compileRuleset, type CompiledRuleset } from '@wynding/sim';
+import type { Ruleset } from '@wynding/types';
 import { getBundledRuleset } from './registry';
-import { compileReferenceBuild, TOWER_LETTERS, type ReferenceBuild } from './reference-build';
+import {
+  compileReferenceBuild,
+  drawGrid,
+  TOWER_LETTERS,
+  type ReferenceBuild,
+} from './reference-build';
+import { M2_PINNED_LOSER } from './reference-builds';
 
 const ruleset = compileRuleset(getBundledRuleset('wynding-core'), 'field-01');
-const { grid } = ruleset.board;
 
-/** The board drawn empty, with `towers` (anchor + letter) drawn over it as 2×2 blocks. */
-function draw(towers: readonly (readonly [number, number, string])[]): string[] {
-  const rows: string[][] = [];
-  for (let row = 0; row < grid.height; row++) {
-    const line: string[] = [];
-    for (let col = 0; col < grid.width; col++) {
-      const cls = grid.classAt({ col, row });
-      line.push(cls === 'blocked' ? '#' : cls === 'walkable-unbuildable' ? '+' : '.');
-    }
-    rows.push(line);
-  }
-  for (const [col, row, letter] of towers) {
-    for (const [dc, dr] of [
-      [0, 0],
-      [1, 0],
-      [0, 1],
-      [1, 1],
-    ] as const) {
-      rows[row + dr]![col + dc] = letter;
-    }
-  }
-  return rows.map((r) => r.join(''));
-}
+/** The board drawn with `towers` (anchor + letter) over it, one string per row. */
+const draw = (towers: readonly (readonly [number, number, string])[]): string[] =>
+  drawGrid(ruleset, towers).split('\n');
 
 function build(gridLines: readonly string[], order: string): ReferenceBuild {
   return { id: 'probe', summary: 'a test build', grid: gridLines.join('\n'), order };
 }
 
-const compile = (gridLines: readonly string[], order: string) =>
-  compileReferenceBuild(build(gridLines, order), ruleset);
+const compile = (gridLines: readonly string[], order: string, on: CompiledRuleset = ruleset) =>
+  compileReferenceBuild(build(gridLines, order), on);
 
 describe('the grid reference-build format', () => {
+  it('draws the board it reads: an empty board, and a registered build’s own maze', () => {
+    expect(drawGrid(ruleset)).toBe(
+      M2_PINNED_LOSER.grid.replace(/[a-z]/g, '.').trim().replace(/\n\s+/g, '\n'),
+    );
+    const loser = drawGrid(ruleset, [
+      [2, 10, 'b'],
+      [2, 12, 'b'],
+      [6, 10, 'b'],
+      [6, 12, 'b'],
+      [10, 10, 'b'],
+      [10, 12, 'b'],
+      [14, 10, 'v'],
+      [14, 12, 'v'],
+      [18, 10, 's'],
+      [18, 12, 's'],
+      [22, 10, 'v'],
+      [22, 12, 'v'],
+    ]);
+    expect(loser).toBe(M2_PINNED_LOSER.grid.trim().replace(/\n\s+/g, '\n'));
+  });
+
+  it('re-arms a mine: placing one again while it may already have fired is allowed, unlike any other tower', () => {
+    const lines = draw([
+      [10, 12, 'm'],
+      [2, 10, 'b'],
+    ]);
+    expect(compile(lines, 'm10,12 b2,10 m10,12@900 m10,12')).toStrictEqual([
+      { col: 10, row: 12, towerId: 'mine' },
+      { col: 2, row: 10, towerId: 'basic' },
+      { col: 10, row: 12, towerId: 'mine', notBeforeTick: 900 },
+      { col: 10, row: 12, towerId: 'mine' },
+    ]);
+    expect(() => compile(lines, 'm10,12 b2,10 b2,10')).toThrow(/already standing/);
+  });
+
+  it('rejects a letter whose tower this ruleset’s catalog does not carry', () => {
+    const bundle = getBundledRuleset('wynding-core');
+    const withoutMine: Ruleset = {
+      ...bundle,
+      towerCatalog: bundle.towerCatalog.filter((t) => t.id !== 'mine'),
+    };
+    expect(() =>
+      compile(draw([[10, 12, 'm']]), 'm10,12', compileRuleset(withoutMine, 'field-01')),
+    ).toThrow(/'m' at \(10,12\) names no tower in this ruleset/);
+  });
+
   it('compiles an order into the runner plan: placements, timed placements, sells, re-placements', () => {
     const lines = draw([
       [2, 10, 'b'],

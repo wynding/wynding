@@ -5,14 +5,19 @@
 //
 // For every registered reference build: one summary line, then the per-wave pressure
 // profile `balance-run.ts` measures. After each set: the board-full wave of its strongest
-// build — the build that won on the most lives (then the highest score) — which is the
-// wave whose window held that build's last placement.
+// build — the build that won on the most lives (then the highest score), leaving out any
+// that sold with a creep alive (the juggling build is reported beside the honest
+// winners, never as one) — which is the wave whose window held that build's last
+// placement, unless its plan never finished.
+//
+// Beside the text it returns what makes the report untrustworthy — no set registered, or
+// a build whose plan didn't finish or whose run never ended — so the command can fail.
 
 import { compileRuleset, deriveScore, deriveStars, type CompiledRuleset } from '@wynding/sim';
 import type { Ruleset } from '@wynding/types';
 import { compileReferenceBuild, type ReferenceBuild, type ReferenceSet } from './reference-build';
 import { runReferenceBuild, type BuildRun } from './balance-run';
-import { locateLoss } from './balance-checks';
+import { checkAllStepsRan, checkNoSellWithLiveCreep, locateLoss } from './balance-checks';
 
 /** Where a placement fell: a wave's window as the arc numbers it, before the first, or
  *  nowhere. */
@@ -77,8 +82,8 @@ function profileTable(run: BuildRun): string[] {
   ];
 }
 
-/** The build that won on the most lives, then the highest score; first wins a tie.
- *  `null` if no build won. */
+/** The build that won on the most lives, then the highest score, never selling with a
+ *  creep alive; first wins a tie. `null` if no build qualifies. */
 function strongest(
   runs: readonly { readonly build: ReferenceBuild; readonly run: BuildRun }[],
   ruleset: CompiledRuleset,
@@ -86,7 +91,9 @@ function strongest(
   let best: { readonly build: ReferenceBuild; readonly run: BuildRun } | null = null;
   for (const entry of runs) {
     const { state } = entry.run;
-    if (state.phase !== 'won') continue;
+    if (state.phase !== 'won' || checkNoSellWithLiveCreep(entry.build.id, entry.run).length > 0) {
+      continue;
+    }
     if (
       best === null ||
       state.lives > best.run.state.lives ||
@@ -99,12 +106,35 @@ function strongest(
   return best;
 }
 
+/** The board-full line for one set's runs. */
+function boardFullLine(
+  runs: readonly { readonly build: ReferenceBuild; readonly run: BuildRun }[],
+  ruleset: CompiledRuleset,
+): string {
+  const best = strongest(runs, ruleset);
+  if (best === null) return 'board-full: no build won without a live sell, so none is strongest';
+  const { run } = best;
+  const where =
+    run.stepsDone < run.stepCount
+      ? `plan incomplete (${run.stepsDone}/${run.stepCount})`
+      : `placed its last tower ${placementLabel(run.lastPlacementWave)}`;
+  return `board-full: the strongest build, ${best.build.id} (won on ${run.state.lives} lives), ${where}`;
+}
+
+export interface BalanceReport {
+  readonly text: string;
+  /** What makes the report untrustworthy; the command fails on any. */
+  readonly failures: readonly string[];
+}
+
 /** Run every build of every set and render the report. `load` returns a bundled ruleset
  *  by id — the registry in tests, the on-disk artifact from the command line. */
 export function balanceReport(
   sets: readonly ReferenceSet[],
   load: (rulesetId: string) => Ruleset,
-): string {
+): BalanceReport {
+  const failures: string[] = [];
+  if (sets.length === 0) failures.push('no reference sets are registered');
   const lines: string[] = [
     "Per wave — leaks, lost (lives): the wave's own creeps · closest: the smallest fraction of",
     'its empty-board distance any of them still had to cover (0 = a leak) · lives, towers',
@@ -124,15 +154,9 @@ export function balanceReport(
     for (const { build, run } of runs) {
       lines.push(`${build.id} — ${build.summary}`, `  ${summaryLine(run, ruleset)}`);
       lines.push(...profileTable(run).map((l) => `  ${l}`), '');
+      failures.push(...checkAllStepsRan(`${set.id}/${build.id}`, run));
     }
-    const best = strongest(runs, ruleset);
-    lines.push(
-      best === null
-        ? 'board-full: no build won, so there is no strongest build'
-        : `board-full: the strongest build, ${best.build.id} (won on ${best.run.state.lives} ` +
-            `lives), placed its last tower ${placementLabel(best.run.lastPlacementWave)}`,
-      '',
-    );
+    lines.push(boardFullLine(runs, ruleset), '');
   }
-  return lines.join('\n');
+  return { text: lines.join('\n'), failures };
 }

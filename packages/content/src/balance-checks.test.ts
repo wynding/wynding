@@ -1,13 +1,16 @@
 // balance-checks.test.ts — M3 story 1: the section-A checks (`balance-checks.ts`) on
 // synthetic runs and paths, so each verdict is pinned on both sides of its line without
-// running the sim. `balance-calibration.test.ts` runs them on M2's real builds.
+// running the sim — plus one short grid build compiled, run and checked end to end.
+// `balance-calibration.test.ts` runs them on M2's real builds.
 
 import { describe, it, expect } from 'vitest';
 import { compileRuleset, createInitialState, type SimState } from '@wynding/sim';
 import type { Cell } from '@wynding/types';
 import { getBundledRuleset } from './registry';
-import type { BuildRun } from './balance-run';
+import { runReferenceBuild, type BuildRun } from './balance-run';
+import { compileReferenceBuild, drawGrid, type ReferenceBuild } from './reference-build';
 import {
+  checkAllStepsRan,
   checkDistinctness,
   checkLossWindow,
   checkNoSellWithLiveCreep,
@@ -80,6 +83,33 @@ describe('distinctness (M2’s rule)', () => {
       checkDistinctness([{ id: 'a', spendById: { venom: 60, antiair: 25, basic: 15 } }]),
     ).toEqual([]);
   });
+
+  it('fails what has no top two to judge: no builds, a build that spent nothing, a one-id build', () => {
+    expect(checkDistinctness([])).toEqual(['distinctness: no builds to compare']);
+    expect(
+      checkDistinctness([
+        { id: 'idle', spendById: {} },
+        { id: 'mono', spendById: { venom: 90 } },
+      ]),
+    ).toEqual([
+      'idle: spent nothing, so it has no top two',
+      'mono: spent on 1 tower id, not a top two',
+    ]);
+  });
+});
+
+describe('every step ran', () => {
+  it('passes a finished plan whose run ended, and names a short plan and a run cut off at the cap', () => {
+    expect(
+      checkAllStepsRan('done', fakeRun({ stepsDone: 3, stepCount: 3 }, { phase: 'won' })),
+    ).toEqual([]);
+    expect(
+      checkAllStepsRan(
+        'stuck',
+        fakeRun({ stepsDone: 2, stepCount: 3 }, { phase: 'running', tick: 36000 }),
+      ),
+    ).toEqual(['stuck: ran 2 of its 3 steps', 'stuck: still running at tick 36000, the cap']);
+  });
 });
 
 describe('no sell while any creep is alive', () => {
@@ -94,6 +124,28 @@ describe('no sell while any creep is alive', () => {
       'juggler: sold the basic at (6,10) on tick 812 with 3 creep(s) alive',
     ]);
     expect(checkNoSellWithLiveCreep('honest', fakeRun({}))).toEqual([]);
+  });
+
+  it('end to end — a grid build compiled, run and checked: a sell before wave 1 passes, one mid-wave is named', () => {
+    const build: ReferenceBuild = {
+      id: 'seller',
+      summary: 'two basics off the path, sold before and during wave 1',
+      grid: drawGrid(ruleset, [
+        [2, 2, 'b'],
+        [6, 2, 'b'],
+      ]),
+      order: 'b2,2 b6,2 -b2,2@100 -b6,2@560',
+    };
+    const run = runReferenceBuild(ruleset, 0x5eed, compileReferenceBuild(build, ruleset));
+    // Wave 1 launches on tick 500 and spawns a creep every 20 ticks; out of every tower's
+    // range, the three spawned before tick 560 are all still walking when it sells.
+    expect(run.sells).toEqual([
+      { tick: 100, col: 2, row: 2, towerId: 'basic', creepsAlive: 0 },
+      { tick: 560, col: 6, row: 2, towerId: 'basic', creepsAlive: 3 },
+    ]);
+    expect(checkNoSellWithLiveCreep(build.id, run)).toEqual([
+      'seller: sold the basic at (6,2) on tick 560 with 3 creep(s) alive',
+    ]);
   });
 });
 
@@ -133,6 +185,13 @@ describe('plausibility floors for a loser', () => {
       `loser: never launched wave ${ARMORED_FLYER + 1}, the first with 'armored-flyer'`,
     ]);
   });
+
+  it('a run that received no bounty at all spent none of it', () => {
+    const broke = fakeRun({ spend: 0 }, { bounty: 0 });
+    expect(checkPlausibility('broke', broke, ruleset, { minSpentShare: 0.5 })).toEqual([
+      'broke: spent share 0.000, under 0.5',
+    ]);
+  });
 });
 
 describe('loss location, by creep id', () => {
@@ -165,9 +224,29 @@ describe('loss location, by creep id', () => {
     expect(checkLossWindow('loser', lost, ruleset, { fromWaveOf: 'boss' })).toHaveLength(1);
   });
 
-  it('fails a run that did not lose', () => {
+  it('judges every fatal leak when the last lives went to creeps of more than one wave', () => {
+    const split = fakeRun(
+      {
+        leaks: [
+          { tick: 2925, creepId: 'flying', wave: FLYING },
+          { tick: 2925, creepId: 'armored-flyer', wave: ARMORED_FLYER },
+        ],
+      },
+      { phase: 'lost', tick: 2926, waveCursor: ARMORED_FLYER + 1 },
+    );
+    expect(checkLossWindow('loser', split, ruleset, { fromWaveOf: 'flying' })).toEqual([]);
+    expect(checkLossWindow('loser', split, ruleset, { fromWaveOf: 'armored-flyer' })).toEqual([
+      `loser: lost to flying from wave ${FLYING + 1}, outside waves ${ARMORED_FLYER + 1}–10`,
+    ]);
+  });
+
+  it('fails a run that did not lose, and a loss with no leak to locate it by', () => {
     expect(checkLossWindow('winner', fakeRun({}, { phase: 'won' }), ruleset, {})).toEqual([
       'winner: did not lose (won)',
+    ]);
+    const unexplained = fakeRun({}, { phase: 'lost', tick: 900, waveCursor: 1 });
+    expect(checkLossWindow('odd', unexplained, ruleset, {})).toEqual([
+      'odd: lost with no leak on its final tick',
     ]);
   });
 });

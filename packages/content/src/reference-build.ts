@@ -25,7 +25,10 @@
 // Every tower in the grid must be placed at least once; a step may place only a tower
 // not standing and sell only one that is. A juggling build re-places the same tower on
 // the same anchor; a tower of a DIFFERENT kind on a sold tower's cells can't be drawn
-// (one letter per cell) and is out of this format's scope until a build needs it.
+// (one letter per cell) and is out of this format's scope until a build needs it. A
+// `burst` tower (`mine`) is the exception to "not standing": it removes itself when it
+// detonates, which the order can't see, so placing one again RE-ARMS it — the runner
+// retries the placement each tick until the spent mine's cells are clear.
 //
 // `compileReferenceBuild` turns the strings into the runner's plan (`script-runner.ts`),
 // checking the drawing against the board's own cell classes so a grid drawn one row or
@@ -74,6 +77,16 @@ const CELL_GLYPH = {
   'buildable-open': '.',
 } as const;
 
+// Every tower is 2×2 — PRD 0001 fixes it and the sim holds it as a constant (`tower.ts`),
+// not as ruleset data — so the footprint is fixed here too: the anchor and the three
+// cells right, below and diagonal of it.
+const FOOTPRINT = [
+  [0, 0],
+  [1, 0],
+  [0, 1],
+  [1, 1],
+] as const;
+
 const STEP = /^(-?)([a-z])(\d+),(\d+)(?:@(\d+))?$/;
 
 function reject(build: ReferenceBuild, msg: string): never {
@@ -119,12 +132,7 @@ function readGrid(build: ReferenceBuild, ruleset: CompiledRuleset): Map<string, 
       if (towerId === undefined || ruleset.towerById[towerId] === undefined) {
         reject(build, `'${glyph}' at (${col},${row}) names no tower in this ruleset`);
       }
-      for (const [dc, dr] of [
-        [0, 0],
-        [1, 0],
-        [0, 1],
-        [1, 1],
-      ] as const) {
+      for (const [dc, dr] of FOOTPRINT) {
         const c = col + dc;
         const r = row + dr;
         if (at(c, r) !== glyph || claimed.has(`${c},${r}`)) {
@@ -136,6 +144,22 @@ function readGrid(build: ReferenceBuild, ruleset: CompiledRuleset): Map<string, 
     }
   }
   return anchors;
+}
+
+/** Draw `ruleset`'s board in this format with `towers` (anchor and letter) over it — an
+ *  empty board to start authoring from, and the tests' fixture maker. */
+export function drawGrid(
+  ruleset: CompiledRuleset,
+  towers: readonly (readonly [col: number, row: number, letter: string])[] = [],
+): string {
+  const { grid } = ruleset.board;
+  const rows = Array.from({ length: grid.height }, (_, row) =>
+    Array.from({ length: grid.width }, (_, col) => CELL_GLYPH[grid.classAt({ col, row })]),
+  ) as string[][];
+  for (const [col, row, letter] of towers) {
+    for (const [dc, dr] of FOOTPRINT) rows[row + dr]![col + dc] = letter;
+  }
+  return rows.map((r) => r.join('')).join('\n');
 }
 
 /**
@@ -173,7 +197,8 @@ export function compileReferenceBuild(
       standing.delete(key);
       steps.push({ kind: 'sell', col, row, ...timing } satisfies Sell);
     } else {
-      if (standing.has(key))
+      const rearm = ruleset.towerById[drawn]!.attack?.mode === 'burst';
+      if (standing.has(key) && !rearm)
         reject(build, `order step '${token}' places a tower that is already standing`);
       standing.add(key);
       everPlaced.add(key);

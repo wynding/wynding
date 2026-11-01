@@ -57,7 +57,8 @@ export interface WaveProfile {
   readonly unspent: number;
   /** Placements accepted during the wave's window. */
   readonly placed: number;
-  /** The most creeps alive at once during the wave's window. */
+  /** The most creeps alive at once during the wave's window — a tick counting the creeps
+   *  its own leaks and kills removed, since they were all on the board as it began. */
   readonly peakAlive: number;
 }
 
@@ -88,7 +89,7 @@ export interface BuildRun {
   readonly kills: number;
   readonly leaks: readonly LeakRecord[];
   readonly sells: readonly SellRecord[];
-  /** The most creeps alive at once, over the whole run. */
+  /** The most creeps alive at once over the whole run, counted as `WaveProfile`'s is. */
   readonly peakAlive: number;
   /** The wave whose window held the last accepted placement: `-1` if it came before
    *  wave 1 launched, `null` if nothing was ever placed. */
@@ -198,6 +199,8 @@ export function runReferenceBuild(
       const window = rows[state.waveCursor - 1];
       const creeps = state.creeps;
       const alive = creeps.id.length;
+      const leaked = events!.leaked!;
+      const killed = events!.killed!;
       for (let i = 0; i < alive; i++) {
         const id = creeps.id[i]!;
         if (!known.has(id)) known.set(id, { creepId: creeps.creepId[i]!, wave: creeps.wave[i]! });
@@ -205,15 +208,16 @@ export function runReferenceBuild(
 
       // A creep leaks in the movement phase, so it was on the board after an earlier tick
       // and `known` already holds it.
-      for (const id of events!.leaked!) {
-        const creep = known.get(id)!;
+      for (const id of leaked) {
+        const creep = known.get(id);
+        if (creep === undefined) throw new Error(`balance run: creep ${id} leaked unseen`);
         leaks.push({ tick: tickBefore, ...creep });
         const row = rows[creep.wave]!;
         row.leaks++;
         row.livesLost += resolveCreepLeakCost(ruleset.creepById, creep.creepId);
         row.closestApproach = 0;
       }
-      kills += events!.killed!.length;
+      kills += killed.length;
 
       if (placed !== undefined) {
         const cost = ruleset.towerById[placed.towerId]!.cost;
@@ -225,22 +229,27 @@ export function runReferenceBuild(
       }
       if (sold !== undefined) {
         const key = `${sold.col},${sold.row}`;
+        const towerId = standing.get(key);
+        if (towerId === undefined) throw new Error(`balance run: sold (${key}), never placed`);
         sells.push({
           tick: tickBefore,
           col: sold.col,
           row: sold.row,
-          towerId: standing.get(key)!,
+          towerId,
           creepsAlive: aliveBefore,
         });
         standing.delete(key);
       }
 
-      peakAlive = Math.max(peakAlive, alive);
+      // The tick's own peak: every creep on the board when movement began — those still
+      // standing, plus the ones this tick's leaks and kills removed.
+      const inTick = alive + leaked.length + killed.length;
+      peakAlive = Math.max(peakAlive, inTick);
       if (window !== undefined) {
         window.lives = state.lives;
         window.towers = state.towers.id.length;
         window.unspent = state.bounty;
-        window.peakAlive = Math.max(window.peakAlive, alive);
+        window.peakAlive = Math.max(window.peakAlive, inTick);
       }
 
       if (alive > 0) {

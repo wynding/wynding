@@ -5,7 +5,8 @@
 // format and the checker's own instrumented run:
 //
 //   - each grid build compiles to exactly the plan M2's pins run (`showcase-builds.ts`),
-//     and drives the sim to the same final world-hash as that plan run bare;
+//     runs every step, and drives the sim to the same final world-hash as that plan run
+//     bare — Winner A's to the M2 golden's own pinned hash;
 //   - both winners win — on 10 lives, 3★, at M2's measured ticks, every creep killed;
 //   - the loser loses at arc wave 8, LOCATED BY CREEP ID (the armored-flyer wave), and
 //     clears M2's plausibility floors;
@@ -32,6 +33,7 @@ import { LOSER, WINNER_A, WINNER_B } from './showcase-builds';
 import { runBuildScript, type ScriptStep } from './script-runner';
 import { runReferenceBuild, type BuildRun } from './balance-run';
 import {
+  checkAllStepsRan,
   checkDistinctness,
   checkLossWindow,
   checkNoSellWithLiveCreep,
@@ -84,11 +86,22 @@ describe('M3 story 1 — the balance checker, calibrated on M2', () => {
   });
 
   it.each(CASES)(
-    '$build.id drives the sim to the same final world-hash as that plan run bare',
+    '$build.id drives the sim to the same final world-hash as that plan run bare, every step run',
     { timeout: 120_000 },
     ({ build, legacy }) => {
       const bare = runBuildScript(ruleset, SEED, legacy);
-      expect(hashSimState(measured(build.id).state)).toBe(hashSimState(bare.state));
+      const run = measured(build.id);
+      expect(hashSimState(run.state)).toBe(hashSimState(bare.state));
+      expect(checkAllStepsRan(build.id, run)).toEqual([]);
+    },
+  );
+
+  it(
+    'Winner A in grid form lands on the M2 determinism golden’s own final hash',
+    { timeout: 120_000 },
+    () => {
+      // `m2-golden.test.ts`'s `GOLDEN.finalHash` — the one M2 pin that holds a literal hash.
+      expect(hashSimState(measured(M2_WINNER_A.id).state)).toBe('34cb27bf');
     },
   );
 
@@ -181,8 +194,8 @@ describe('M3 story 1 — the balance checker, calibrated on M2', () => {
     () => {
       // M2's set only: the command runs every registered set, and M3's full-arc runs
       // belong there, not in the default suite.
-      const text = balanceReport([M2_SHOWCASE], getBundledRuleset);
-      console.log(text);
+      const { text, failures } = balanceReport([M2_SHOWCASE], getBundledRuleset);
+      expect(failures).toEqual([]);
       for (const build of M2_SHOWCASE.builds)
         expect(text).toContain(`${build.id} — ${build.summary}`);
       expect(text).toContain('won · tick 4070 · lives 10 · score 711 · 3★ · steps 40/40');

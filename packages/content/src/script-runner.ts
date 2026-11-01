@@ -24,9 +24,19 @@
 // it), and a step may SELL the tower standing on an anchor. Both ride the same single
 // cursor, so a script is still one ordered list and a step never runs ahead of the one
 // before it. A plan with neither (every pre-M3 caller) runs exactly as it always did.
+//
+// A STEP IS CREDITED BY THE SIM'S OWN ACCEPTANCE, not by the tower count. The count
+// lies once a `burst` tower (`mine`) is on the board: it removes itself in combat on the
+// tick it detonates, so a count-based runner credits a sell nobody sent on that tick and
+// misses a placement made on it (the count stays flat, and the cursor stalls forever).
+// Instead each tick's command is put through `previewInputs` — the sim's read-only run of
+// the very input phase `step()` opens with, on the same state — and its verdict is what
+// `step()` then does. For a plan without burst towers the two rules agree exactly, which
+// is what keeps every pre-M3 caller byte-identical.
 
 import {
   createInitialState,
+  previewInputs,
   step,
   MAX_MATCH_TICKS,
   type SimInput,
@@ -66,7 +76,8 @@ export interface ScriptTickDetail {
 }
 
 /** Per-tick hooks a caller wires its own instrumentation through — both optional, both
- *  called exactly once per tick, in this order. */
+ *  called exactly once per tick, in this order. They observe; a hook that changed the
+ *  state `step()` is about to consume would void the acceptance the runner read first. */
 export interface ScriptRunObserver {
   /** Immediately BEFORE `step()` — `state` is still the PREVIOUS tick's terminal state
    *  (this tick has not been applied yet). */
@@ -133,9 +144,9 @@ function emptyEvents(): StepEvents {
  * Runs `plan` against `ruleset` from a fresh `createInitialState(seed, ruleset)`: while
  * the sim is `'running'` (capped at `MAX_MATCH_TICKS`), attempt `plan[cursor]` — a
  * placement the first tick `state.bounty` covers its cost, a sell the first tick it is
- * due, neither before its `notBeforeTick` — and advance `cursor` once the tower count
- * actually moves the right way (a placement the sim rejects — e.g. an occupied anchor —
- * never advances it). This is the entire shared core (#94) — every other measurement is a
+ * due, neither before its `notBeforeTick` — and advance `cursor` once the sim accepts it
+ * (a placement it rejects — e.g. an occupied anchor — never advances it, and is retried
+ * the next tick). This is the entire shared core (#94) — every other measurement is a
  * caller's own `observer`.
  */
 export function runBuildScript(
@@ -155,22 +166,21 @@ export function runBuildScript(
         next.kind === 'sell' ? sellInput(state, next) : placementInput(state, ruleset, next);
       if (input !== null) inputs.push(input);
     }
-    const towersBefore = state.towers.id.length;
+    // The sim's verdict on this tick's command, read before `step()` consumes the state.
+    const accepted = inputs.length > 0 && previewInputs(state, ruleset, inputs).accepted[0]!;
 
     observer?.beforeStep?.(state, ruleset);
 
     const events = observer?.collectEvents === true ? emptyEvents() : undefined;
     state = step(state, ruleset, inputs, events);
 
-    const towersAfter = state.towers.id.length;
     let placed: Placement | undefined;
     let sold: Sell | undefined;
-    if (next?.kind === 'sell') {
-      if (towersAfter < towersBefore) sold = next;
-    } else if (next !== undefined && towersAfter > towersBefore) {
-      placed = next;
+    if (accepted && next !== undefined) {
+      if (next.kind === 'sell') sold = next;
+      else placed = next;
+      cursor++;
     }
-    if (placed !== undefined || sold !== undefined) cursor++;
 
     observer?.afterStep?.(state, ruleset, inputs, placed, { sold, events });
   }

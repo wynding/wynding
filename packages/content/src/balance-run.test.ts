@@ -114,10 +114,12 @@ describe('the instrumented reference-build run', () => {
       towers: 0,
       placed: 0,
     });
-    expect(run.waves[0]!.lives).toBeGreaterThan(0);
+    expect(run.waves[0]!.lives).toBe(8);
     expect(run.waves[1]).toMatchObject({ wave: 1, leaks: 0, livesLost: 0, lives: 0 });
-    expect(run.peakAlive).toBe(Math.max(...run.waves.map((w) => w.peakAlive)));
-    expect(run.peakAlive).toBeGreaterThan(0);
+    // All ten of wave 1 on the board at once, then wave 2's sixteen with wave 1's last four;
+    // each tick counts the creeps its own leaks removed, so the peak isn't read low.
+    expect(run.waves.map((w) => w.peakAlive)).toEqual([10, 20]);
+    expect(run.peakAlive).toBe(20);
     expect(run.lastPlacementWave).toBeNull();
     expect(run.spend).toBe(0);
     expect(run.stepsDone).toBe(0);
@@ -139,10 +141,13 @@ describe('the instrumented reference-build run', () => {
     // Wave 1 launches at tick 500, so the second basic lands in its window.
     expect(run.lastPlacementWave).toBe(0);
     expect(run.waves[0]!.placed).toBe(1);
-    expect(run.sells).toEqual([
-      { tick: 560, col: 6, row: 10, towerId: 'basic', creepsAlive: expect.any(Number) },
+    // Three of wave 1 have spawned by tick 560, and one has already died to the basics.
+    expect(run.sells).toEqual([{ tick: 560, col: 6, row: 10, towerId: 'basic', creepsAlive: 2 }]);
+    expect([run.state.towers.col, run.state.towers.row, run.state.towers.towerId]).toEqual([
+      [2],
+      [10],
+      ['basic'],
     ]);
-    expect(run.sells[0]!.creepsAlive).toBeGreaterThan(0);
 
     const early = runReferenceBuild(ruleset, SEED, plan.slice(0, 1));
     expect(early.lastPlacementWave).toBe(-1);
@@ -150,12 +155,16 @@ describe('the instrumented reference-build run', () => {
     expect(early.waves[0]!.towers).toBe(1);
   });
 
-  it('a wave held off the exit books the fraction its nearest creep still had to cover — above 0, with no leak', () => {
+  it('a held wave’s row, exactly: closest approach, lives, towers, placed, unspent, peak', () => {
+    // Winner A's first fourteen towers hold waves 1–3 without a leak. Measured, and pinned
+    // whole, so a change to how any column is booked moves a number here.
     const run = runReferenceBuild(ruleset, SEED, WINNER_A.slice(0, 14));
-    expect(run.waves[0]!.leaks).toBe(0);
-    const closest = run.waves[0]!.closestApproach!;
-    expect(closest).toBeGreaterThan(0);
-    expect(closest).toBeLessThan(1);
+    const [w1, w2] = run.waves;
+    expect(w1).toMatchObject({ wave: 0, leaks: 0, livesLost: 0, lives: 10, towers: 14 });
+    expect([w1!.placed, w1!.unspent, w1!.peakAlive]).toEqual([2, 0, 5]);
+    expect(w1!.closestApproach).toBeCloseTo(0.8405092592592592, 12);
+    expect([w2!.placed, w2!.unspent, w2!.peakAlive]).toEqual([0, 20, 12]);
+    expect(w2!.closestApproach).toBeCloseTo(0.45653935185185185, 12);
   });
 
   it('measures without changing the run: the same final hash as the bare runner', () => {

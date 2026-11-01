@@ -24,15 +24,24 @@ export function idsBySpend(spendById: Readonly<Record<string, number>>): string[
 /**
  * M2's structural-distinctness rule across a set of builds: no tower id is in the top two
  * by spend of more than one build, and each build's own top-two ids each carry at least
- * {@link TOP_TWO_SPEND_SHARE_FLOOR} of its spend.
+ * {@link TOP_TWO_SPEND_SHARE_FLOOR} of its spend. A build needs a top two to be judged,
+ * so no builds, a build that spent nothing, or one that spent on a single id fails.
  */
 export function checkDistinctness(
   builds: readonly { readonly id: string; readonly spendById: Readonly<Record<string, number>> }[],
 ): string[] {
+  if (builds.length === 0) return ['distinctness: no builds to compare'];
   const violations: string[] = [];
   const topTwo = builds.map((b) => idsBySpend(b.spendById).slice(0, 2));
   builds.forEach((b, i) => {
     const total = Object.values(b.spendById).reduce((sum, v) => sum + v, 0);
+    if (total <= 0) {
+      violations.push(`${b.id}: spent nothing, so it has no top two`);
+      return;
+    }
+    if (topTwo[i]!.length < 2) {
+      violations.push(`${b.id}: spent on ${topTwo[i]!.length} tower id, not a top two`);
+    }
     for (const id of topTwo[i]!) {
       const share = b.spendById[id]! / total;
       if (share < TOP_TWO_SPEND_SHARE_FLOOR) {
@@ -47,6 +56,20 @@ export function checkDistinctness(
       }
     }
   });
+  return violations;
+}
+
+/** Every step of the plan ran and the run reached a result. A step the sim never accepted
+ *  means the build measured is not the build drawn, and a run still `running` stopped at
+ *  the tick cap (`MAX_MATCH_TICKS`) without ending. */
+export function checkAllStepsRan(id: string, run: BuildRun): string[] {
+  const violations: string[] = [];
+  if (run.stepsDone < run.stepCount) {
+    violations.push(`${id}: ran ${run.stepsDone} of its ${run.stepCount} steps`);
+  }
+  if (run.state.phase === 'running') {
+    violations.push(`${id}: still running at tick ${run.state.tick}, the cap`);
+  }
   return violations;
 }
 
@@ -67,7 +90,9 @@ export function checkNoSellWithLiveCreep(id: string, run: BuildRun): string[] {
 export interface PlausibilityFloors {
   /** Total bounty spent on placements. */
   readonly minSpend?: number;
-  /** Spend as a share of all the bounty the run ever received (spend + what is left). */
+  /** Spend as a share of all the bounty the run ever received: spend + what is left. A
+   *  sell's refund is bounty received, so it counts once it is spent again or left over,
+   *  and the sold tower's own cost stays in the spend. */
   readonly minSpentShare?: number;
   /** Distinct tower ids placed. */
   readonly minTowerKinds?: number;
@@ -89,7 +114,8 @@ export function checkPlausibility(
       violations.push(`${id}: ${what} ${shown}, under ${floor}`);
   };
   below('spend', run.spend, floors.minSpend);
-  const share = run.spend / (run.spend + run.state.bounty);
+  const received = run.spend + run.state.bounty;
+  const share = received > 0 ? run.spend / received : 0; // received nothing: spent none of it
   below('spent share', share, floors.minSpentShare, share.toFixed(3));
   below('tower kinds', Object.keys(run.spendById).length, floors.minTowerKinds);
   below('kills', run.kills, floors.minKills);
@@ -146,6 +172,7 @@ export function checkLossWindow(
 ): string[] {
   const loss = locateLoss(run);
   if (loss === null) return [`${id}: did not lose (${run.state.phase})`];
+  if (loss.fatalLeaks.length === 0) return [`${id}: lost with no leak on its final tick`];
   const from = window.fromWaveOf === undefined ? 0 : waveIndexForCreep(ruleset, window.fromWaveOf);
   const to =
     window.toWaveOf === undefined
