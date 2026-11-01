@@ -8,7 +8,7 @@ import { compileRuleset, DIAG_LEN, MAX_MATCH_TICKS, RulesetError, SIM_VERSION } 
 import { getBundledRuleset } from '@wynding/content';
 import type { Ruleset } from '@wynding/types';
 import { validate, currentRulesetHash } from './index';
-import { playScript, thirtyWaveBundle, THIRTY_WAVE_BOARD_ID } from './test-support';
+import { DEFENSE_PLAN, playScript, thirtyWaveBundle, THIRTY_WAVE_BOARD_ID } from './test-support';
 
 const M2 = getBundledRuleset();
 const SV16_CAP = 36_000;
@@ -97,11 +97,14 @@ describe('the synthetic 30-wave arc compiles at sv17 and would not have at sv16'
 });
 
 describe('a played 30-wave run validates, and so does one that ends past 36,000 ticks', () => {
+  // Sized for a test suite: a sixteen-tower slice of the scripted defense, and a hands-off
+  // run for the long one. The whole 56-tower plan is what the Verify wall-time measurement
+  // replays; under coverage it costs this suite a minute.
   it('a scripted defense of the whole arc re-simulates to the live terminal state', () => {
-    const run = playScript(thirtyWaveBundle(M2), 7);
+    const run = playScript(thirtyWaveBundle(M2), 7, DEFENSE_PLAN.slice(0, 16));
     expect(run.state.phase).toBe('won');
     expect(run.state.waveCursor).toBe(30);
-    expect(run.placed).toBeGreaterThan(40); // a real defense, so a real workload
+    expect(run.placed).toBe(16);
     const ticks = run.replay.tickInputs.length;
     expect(ticks).toBe(run.state.tick);
 
@@ -115,7 +118,7 @@ describe('a played 30-wave run validates, and so does one that ends past 36,000 
     // Under sv16 this bundle failed to compile, and a log this long was rejected for its
     // length before anything ran: both halves of the cap moved, or neither would pass.
     const bundle = thirtyWaveBundle(M2, { finaleDelayTicks: 20_000 });
-    const run = playScript(bundle, 7);
+    const run = playScript(bundle, 7, []);
     expect(run.state.phase).toBe('won');
     const ticks = run.replay.tickInputs.length;
     expect(ticks).toBeGreaterThan(SV16_CAP);
