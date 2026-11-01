@@ -394,9 +394,9 @@ export interface RenderOverlay {
    *  the controller, like `sparks`, so a catch-up frame still bursts every kill. */
   readonly kills: readonly KillVM[];
   /** The creeps that reached an exit since the last frame (C1), one entry per leak: the index,
-   *  in the board's exit order, of the exit it left by (M3) — the ids the step reported as
-   *  leaked (`StepEvents.leaked`). Each exit pulses for its own, rate-limited
-   *  (`combat-feedback.ts`); how many is the length. */
+   *  in the board's exit order, of the exit it left by (M3), as the step reported it
+   *  (`StepEvents.leakedExits`). A leak pulses its own exit, under one rate limit for the
+   *  whole board (`combat-feedback.ts`); how many is the length. */
   readonly leaks: readonly number[];
 }
 

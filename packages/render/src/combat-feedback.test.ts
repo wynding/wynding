@@ -216,6 +216,32 @@ describe('createFeedbackTracker — photosensitivity (ADR 0003, WCAG 2.3.1)', ()
     expect(pulses.length).toBeGreaterThan(LEAK_PULSES * 5); // it does pulse, as often as it may
     expect(mostInAnySecond(pulses)).toBeLessThanOrEqual(MAX_FLASHES_PER_SECOND);
   });
+
+  it('the board’s exits together pulse no more than three times in any second, though creeps leak at both in turn every frame (M3)', () => {
+    // Each exit under a gap of its own would pulse as often as one exit may, and the two would
+    // interleave: four to six pulses a second on the board. Pooled, they keep the one bound.
+    // A creep leaks every frame, the exit switching every seven frames — a run of leaks at one
+    // exit, then the other — so the pulse after each gap can fall to either.
+    const fb = createFeedbackTracker();
+    const pulses: number[] = [];
+    const began = new Set<number>();
+    for (let i = 0; i <= 600; i++) {
+      const nowMs = (i * 1000) / 60;
+      fb.update(frame({ nowMs, leaks: Math.floor(i / 7) % 2 === 0 ? [0] : [1] }));
+      for (const exit of [0, 1]) {
+        if (fb.pulseSinceMs(exit) === 0) {
+          began.add(exit);
+          for (let p = 0; p < LEAK_PULSES; p++)
+            pulses.push(nowMs + (p * LEAK_PULSE_MS) / LEAK_PULSES);
+        }
+      }
+      // Never two at once: one exit pulses at a time.
+      expect([0, 1].filter((exit) => fb.pulseSinceMs(exit) !== null).length).toBeLessThanOrEqual(1);
+    }
+    expect(began).toEqual(new Set([0, 1])); // both exits do pulse
+    expect(pulses.length).toBeGreaterThan(LEAK_PULSES * 5);
+    expect(mostInAnySecond(pulses)).toBeLessThanOrEqual(MAX_FLASHES_PER_SECOND);
+  });
 });
 
 describe('createFeedbackTracker — kills and leaks', () => {
@@ -263,15 +289,19 @@ describe('createFeedbackTracker — kills and leaks', () => {
     expect(fb.pulseSinceMs(0)).toBe(0); // a second on: another
   });
 
-  it('pulses each exit for its own leaks, each with its own gap (M3: one exit per pair)', () => {
+  it('pulses the exit a leak left by, under one gap for the whole board (M3: one exit per pair)', () => {
     const fb = createFeedbackTracker();
     fb.update(frame({ nowMs: 100, leaks: [1] }));
     expect(fb.pulseSinceMs(1)).toBe(0);
     expect(fb.pulseSinceMs(0)).toBeNull(); // the other exit saw no leak
-    // Inside exit 1's gap, a leak at exit 0 still begins exit 0's pulse: the gap is per exit.
+    // Inside the gap exit 1's pulse began, a leak at exit 0 begins nothing: the gap is shared.
     fb.update(frame({ nowMs: 300, leaks: [0, 1] }));
-    expect(fb.pulseSinceMs(0)).toBe(0);
+    expect(fb.pulseSinceMs(0)).toBeNull();
     expect(fb.pulseSinceMs(1)).toBe(200);
+    // Past it, the first leak in the step's order takes the next pulse, and only it.
+    fb.update(frame({ nowMs: 100 + LEAK_PULSE_GAP_MS, leaks: [0, 1] }));
+    expect(fb.pulseSinceMs(0)).toBe(0);
+    expect(fb.pulseSinceMs(1)).toBeNull();
   });
 
   it('reset forgets everything: no flash, no kill, no pulse', () => {

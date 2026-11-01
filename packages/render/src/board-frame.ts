@@ -368,7 +368,7 @@ export function drawBoardFrame(t: BoardTargets, input: BoardFrameInput): void {
       pops.push(p);
     }
   }
-  // Each exit pulses for its own leaks (M3): a leak shows where the creep left.
+  // A leak pulses the exit it left by (M3), one exit at a time: the tracker's gap is the board's.
   for (let i = 0; i < input.exits.length; i++) {
     const pulse = feedback.pulseSinceMs(i);
     if (pulse === null) continue;

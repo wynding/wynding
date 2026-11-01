@@ -4,7 +4,8 @@ import { gameVersionDefine, hostedDefine } from './build-config';
 // vite.e2e.config.ts — the e2e harnesses' OWN build (#158), on the perf harness's pattern
 // (`vite.perf.config.ts`): a separate config, separate entries (`e2e-harness/survey.html`; since
 // #181 H2 `e2e-harness/results.html`, which plays a scripted run to its results; and
-// `e2e-harness/turned-heads.html`, #181's renderer-only page for turned heads) and a separate
+// `e2e-harness/turned-heads.html`, #181's renderer-only page for turned heads; and M3's
+// `e2e-harness/waves.html`, the real app with the shipped waves changed) and a separate
 // output (`dist-e2e`). Nothing in `vite.config.ts`'s module graph reaches a harness, so their
 // fake survey transports and the scene hook are structurally incapable of entering the
 // shipped artifact.
@@ -35,6 +36,7 @@ export default defineConfig({
         'e2e-harness/survey.html',
         'e2e-harness/results.html',
         'e2e-harness/turned-heads.html',
+        'e2e-harness/waves.html',
       ],
     },
   },

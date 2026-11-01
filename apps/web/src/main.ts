@@ -462,7 +462,7 @@ export function createApp(doc: Document, root: HTMLElement, deps: AppDeps): AppH
     cols: grid.width,
     rows: grid.height,
     // Every entrance and exit, in board order (M3: the crossing board's two pairs) — the scene
-    // draws each with its pair's heading and pulses each exit for its own leaks.
+    // draws each with its pair's heading and pulses the exit each leak left by.
     entrances: grid.entrances.map(({ col, row }) => ({ col, row })),
     exits: grid.exits.map(({ col, row }) => ({ col, row })),
   };

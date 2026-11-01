@@ -553,7 +553,9 @@ async function compactColumn(page: Page): Promise<{
     const bottom = h.bottom - parseFloat(getComputedStyle(hud).borderBottomWidth);
     const items = [
       ...hud.querySelectorAll<HTMLElement>(
-        ':scope > .wy-chip, :scope > .wy-wave-preview .wy-wave-preview-title, :scope > .wy-wave-preview .wy-preview-entry',
+        // `hud-cut.ts`'s items, the wave's hit-point clause (M3) among them: hidden on every
+        // shipped wave, so it adds nothing here until a wave grows.
+        ':scope > .wy-chip, :scope > .wy-wave-preview .wy-wave-preview-title, :scope > .wy-wave-preview .wy-wave-preview-hp, :scope > .wy-wave-preview .wy-preview-entry',
       ),
     ]
       .map((el) => ({ el, r: el.getBoundingClientRect() }))
@@ -564,10 +566,14 @@ async function compactColumn(page: Page): Promise<{
       const b = el.getBoundingClientRect();
       return [b.x, b.y, b.width, b.height].map((v) => v.toFixed(3)).join(',');
     };
-    // Each item's painted lines, from its visible form: a chip's glance, a strip line's glance, the
-    // title itself — never a visually hidden sentence, whose 1px box is not painted.
+    // Each item's painted lines, from its visible form: a chip's glance, a strip line's or the
+    // hit-point clause's glance, the title itself — never a visually hidden sentence, whose 1px
+    // box is not painted.
     const lines = (el: HTMLElement): DOMRect[] => {
-      const shown = el.querySelector<HTMLElement>('.wy-chip-glance, .wy-preview-glance') ?? el;
+      const shown =
+        el.querySelector<HTMLElement>(
+          '.wy-chip-glance, .wy-preview-glance, .wy-preview-hp-glance',
+        ) ?? el;
       const out = [...shown.querySelectorAll('svg')].map((svg) => svg.getBoundingClientRect());
       const walker = document.createTreeWalker(shown, NodeFilter.SHOW_TEXT);
       for (let n = walker.nextNode(); n; n = walker.nextNode()) {

@@ -19,9 +19,12 @@
 //
 // PHOTOSENSITIVITY (ADR 0003, WCAG 2.3.1: no more than three flashes in any second). A creep's
 // hit flashes begin at least `MIN_FLASH_GAP_MS` apart, however many towers hit it: a hit inside
-// the gap shows nothing new, so four of one creep's flashes span more than a second. The exit's
-// pulse plays `LEAK_PULSES` pulses and does not begin again until `LEAK_PULSE_GAP_MS` after it
-// began, whatever leaks in between. The kill burst needs no bound: a creep dies once.
+// the gap shows nothing new, so four of one creep's flashes span more than a second. A leak
+// pulse plays `LEAK_PULSES` pulses at the exit the creep left by, and no pulse begins again, at
+// THAT EXIT OR ANY OTHER, until `LEAK_PULSE_GAP_MS` after it began, whatever leaks in between.
+// The gap is the board's, not each exit's (M3): two exits pulsing in turn, each under a gap of
+// its own, would flash four to six times a second together. The kill burst needs no bound: a
+// creep dies once.
 //
 // REDUCE MOTION. The hit flash is the same: a white silhouette that fades where it is, with no
 // motion to remove (the frame's motion table). The kill burst is its ring alone, fading in place
@@ -73,8 +76,9 @@ export const BOUNTY_POP_HOLD = 0.4;
  *  frame's two over 600 ms. */
 export const LEAK_PULSE_MS = 600;
 export const LEAK_PULSES = 2;
-/** The least time between the starts of two leak pulses, ms. Two pulses of 300 ms each, then a
- *  wait until a full second from the first: at most three pulses fall in any second. */
+/** The least time between the starts of two leak pulses, ms — any two, at whichever exits: one
+ *  gap for the whole board. Two pulses of 300 ms each, then a wait until a full second from the
+ *  first: at most three pulses fall in any second, all exits together. */
 export const LEAK_PULSE_GAP_MS = 1000;
 
 /** How long a kill is kept, ms: the longer of its burst and its pop. */
@@ -121,7 +125,8 @@ export interface FeedbackTracker {
   /** The kills still showing, oldest first, each with its age as of the last update. */
   kills(): readonly LiveKill[];
   /** How long ago exit `exit`'s leak pulse began, ms, as of the last update — null when it is
-   *  not pulsing. Each exit pulses, and is rate-limited, on its own (M3: one per pair). */
+   *  not pulsing. A leak pulses the exit it left by (M3: one per pair), but under ONE gap for the
+   *  whole board, so at most one exit pulses at a time. */
   pulseSinceMs(exit: number): number | null;
   /** Forget everything — a new run starts with nothing showing. */
   reset(): void;
@@ -133,8 +138,9 @@ export function createFeedbackTracker(): FeedbackTracker {
   const flashedAt = new Map<number, number>();
   /** The kills still showing, oldest first, with the clock they arrived at. */
   let shown: { kill: KillVM; at: number }[] = [];
-  /** When each exit's latest leak pulse began, ms, by exit index. */
-  const pulseAt = new Map<number, number>();
+  /** The latest leak pulse — the exit it plays at and when it began, ms — or null before the
+   *  first. One for the board, not one per exit: its start is the gap every exit waits out. */
+  let pulse: { exit: number; at: number } | null = null;
   const live: LiveKill[] = [];
 
   const flash = (id: number): void => {
@@ -156,9 +162,10 @@ export function createFeedbackTracker(): FeedbackTracker {
       }
       live.length = 0;
       for (const s of shown) live.push({ kill: s.kill, sinceMs: now - s.at });
+      // The first leak past the gap takes it, in the step's order; any other inside it, at
+      // either exit, begins nothing (the lives chip still counts it).
       for (const exit of leaks) {
-        const at = pulseAt.get(exit);
-        if (at === undefined || now - at >= LEAK_PULSE_GAP_MS) pulseAt.set(exit, now);
+        if (pulse === null || now - pulse.at >= LEAK_PULSE_GAP_MS) pulse = { exit, at: now };
       }
     },
     flashOf(id) {
@@ -169,9 +176,8 @@ export function createFeedbackTracker(): FeedbackTracker {
       return live;
     },
     pulseSinceMs(exit) {
-      const at = pulseAt.get(exit);
-      if (at === undefined) return null;
-      const since = now - at;
+      if (pulse === null || pulse.exit !== exit) return null;
+      const since = now - pulse.at;
       return since < LEAK_PULSE_MS ? since : null;
     },
     reset() {
@@ -179,7 +185,7 @@ export function createFeedbackTracker(): FeedbackTracker {
       flashedAt.clear();
       shown = [];
       live.length = 0;
-      pulseAt.clear();
+      pulse = null;
     },
   };
 }

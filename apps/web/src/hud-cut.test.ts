@@ -99,7 +99,7 @@ describe('syncHudCut (#181 QC round 2)', () => {
   function column(opts: {
     room: number;
     bottoms: number[];
-    strip?: { title: number; lines: (number | readonly [number, number])[] };
+    strip?: { title: number; hp?: number; lines: (number | readonly [number, number])[] };
     zeroBox?: number[];
     boxSizing?: 'content-box' | 'border-box';
     pad?: [number, number];
@@ -116,7 +116,11 @@ describe('syncHudCut (#181 QC round 2)', () => {
     hud.style.paddingBottom = `${padBottom}px`;
     document.body.append(hud);
     const lineBottoms = (opts.strip?.lines ?? []).map((l) => (typeof l === 'number' ? l : l[0]));
-    const all = [...opts.bottoms, ...(opts.strip ? [opts.strip.title, ...lineBottoms] : [])];
+    const hpBottom = opts.strip?.hp === undefined ? [] : [opts.strip.hp];
+    const all = [
+      ...opts.bottoms,
+      ...(opts.strip ? [opts.strip.title, ...hpBottom, ...lineBottoms] : []),
+    ];
     const contentEnd = Math.max(0, ...all) + padBottom;
     /** The padding box's visible height: the room, or the cut where it bounds it. */
     const visible = (): number => {
@@ -155,7 +159,16 @@ describe('syncHudCut (#181 QC round 2)', () => {
         li.className = 'wy-preview-entry';
         list.append(typeof line === 'number' ? item(li, line, 12) : item(li, line[0], line[1]));
       }
-      strip.append(item(title, opts.strip.title, 14), list);
+      // The shell's own nesting (M3): the title and the hit-point clause share a head.
+      const head = document.createElement('div');
+      head.className = 'wy-wave-preview-head';
+      head.append(item(title, opts.strip.title, 14));
+      if (opts.strip.hp !== undefined) {
+        const hp = document.createElement('p');
+        hp.className = 'wy-wave-preview-hp';
+        head.append(item(hp, opts.strip.hp, 15));
+      }
+      strip.append(head, list);
       hud.append(strip);
     }
     return hud;
@@ -184,6 +197,25 @@ describe('syncHudCut (#181 QC round 2)', () => {
     });
     syncHudCut(hud, true);
     expect(cut(hud)).toBe('125px');
+  });
+
+  it('counts the wave’s hit-point clause as an item too, between the title and the lines (M3): the column rests after it whole, or before it', () => {
+    // The clause runs 97–112, under the title (81–95).
+    const whole = column({
+      room: 120,
+      bottoms: [20, 45, 70],
+      strip: { title: 95, hp: 112, lines: [130] },
+    });
+    syncHudCut(whole, true);
+    expect(cut(whole)).toBe('112px');
+    document.body.replaceChildren();
+    const through = column({
+      room: 105,
+      bottoms: [20, 45, 70],
+      strip: { title: 95, hp: 112, lines: [130] },
+    });
+    syncHudCut(through, true);
+    expect(cut(through)).toBe('95px'); // never through the clause
   });
 
   it('a strip row wrapped onto two lines is one item: where the room holds its icon’s line but not its count’s, the column stops above the row, never after its icon (#181)', () => {

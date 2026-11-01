@@ -233,8 +233,8 @@ export interface Controller {
   drainSparks(): SparkPoint[];
   /** The creeps killed and the leaks counted since the last call, then cleared (visual pass
    *  C1, #181). Accumulated per sim tick, like the sparks, so a catch-up frame still shows
-   *  every kill and every leak. As each step reports them (`StepEvents.killed` and `leaked`,
-   *  `combat-events.ts`), never from new sim state: each kill where the board last drew it,
+   *  every kill and every leak. As each step reports them (`StepEvents.killed` and
+   *  `leakedExits`, `combat-events.ts`'s `stepOutcome`), never from new sim state: each kill where the board last drew it,
    *  or, for a creep the step spawned and killed inside itself, where the step left it. */
   drainFeedback(): StepFeedback;
   /** Derived HUD fields for the DOM overlay. */
@@ -530,7 +530,8 @@ function diffPendingTowers(
 const NO_PENDING: readonly TowerAnchor[] = [];
 
 /** What `drainFeedback` hands back: the kills and the leaks since the last drain — each leak
- *  the index of the exit it left by (`combat-events.ts`'s `exitOfLeak`). */
+ *  the index of the exit it left by, as the step reported it (`StepEvents.leakedExits`, passed
+ *  through `combat-events.ts`'s `stepOutcome`). */
 export interface StepFeedback {
   readonly kills: readonly KillVM[];
   readonly leaks: readonly number[];

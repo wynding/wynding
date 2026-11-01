@@ -219,6 +219,12 @@ const MARKERS = [
     why: "the results harness entry's failure message for a scripted run that never ends (apps/web/e2e-harness/results-entry.ts, #181 H2) — an ordinary string literal in the controller factory that the module's top-level `createApp` call passes, so any graph that imports the module keeps it",
   },
   {
+    text: 'waves harness: the board has no wave',
+    module: 'apps/web/e2e-harness/',
+    emittedBy: 'apps/web/e2e-harness/waves-entry.ts',
+    why: "the waves harness entry's failure message for a `?wave=` the board does not have (apps/web/e2e-harness/waves-entry.ts, M3 story 4) — an ordinary string literal at the module's top level, so any graph that imports the module keeps it",
+  },
+  {
     text: '__wyTurnedHeads',
     module: 'apps/web/e2e-harness/',
     emittedBy: 'apps/web/e2e-harness/turned-heads-entry.ts',

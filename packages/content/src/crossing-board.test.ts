@@ -120,6 +120,11 @@ describe('the maze invariant holds per route on the crossing board', () => {
     expect(s.towers.id).toHaveLength(10);
     expect(towerAt(s, 5, 21)).toBe(false);
     expect(currentPath(ruleset, s, WEST)).not.toBeNull();
+    // And the other route is still open, to its own exit: north → south runs on as before.
+    const north = currentPath(ruleset, s, NORTH)!;
+    expect(north).not.toBeNull();
+    expect(north[0]).toEqual({ col: 13, row: 0 });
+    expect(north[north.length - 1]).toEqual({ col: 13, row: 23 });
   });
 });
 

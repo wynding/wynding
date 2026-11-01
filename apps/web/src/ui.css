@@ -763,6 +763,27 @@ a.wy-home:focus-visible {
     flex: none;
   }
 
+  /* THE HEAD STACKS THE WAVE'S HIT-POINT CLAUSE UNDER THE TITLE (M3), inside the strip's one
+     fixed line. Beside the title, "+70% hit points" took ~110px of a line the rows need: at
+     1280×720 a four-stream wave lost its last two rows to the scroll form for it. Stacked, the
+     clause costs the line only what it is wider than the title, and nothing is clipped: both
+     lines are set tight (1.15) and the clause smaller (0.8em) only while it shows, so title and
+     clause take ~30px of the strip's 34px content box at every text size (it scales with rem).
+     A title alone keeps the line height and place it always had. */
+  .wy-shell .wy-wave-preview-head {
+    flex: none;
+    display: flex;
+    flex-direction: column;
+  }
+
+  .wy-shell .wy-wave-preview-head:has(> .wy-wave-preview-hp:not([hidden])) > * {
+    line-height: 1.15;
+  }
+
+  .wy-shell .wy-wave-preview-hp {
+    font-size: 0.8em;
+  }
+
   /* The list's box IS its line (`flex: none`): a multi-entry line longer than the strip
      overflows it and the strip scrolls (below), and because the box tracks its content, the
      strip's observer (`overlay.ts`) sees every change in the line's length — a reflow, a font
@@ -1295,12 +1316,13 @@ a.wy-home:focus-visible {
   font-weight: 700;
 }
 
-/* The wave's hit-point clause (M3 creep HP growth), once, between the title and the rows; hidden
-   while a wave's creeps have the catalog's hit points. Its full sentence is positioned against
-   it, as a row's is against the row (`.wy-preview-entry`). */
+/* The wave's hit-point clause (M3 creep HP growth), once, under the title in the strip's head
+   (`.wy-wave-preview-head`); hidden while a wave's creeps have the catalog's hit points. Its
+   full sentence is positioned against it, as a row's is against the row (`.wy-preview-entry`).
+   Standard stacks it beside the rows in the strip's one line, Compact gives it a line or two of
+   its own in the column (each form's block). */
 .wy-wave-preview-hp {
   position: relative;
-  flex: none;
   margin: 0;
   font-weight: 700;
 }
@@ -3309,6 +3331,14 @@ a.wy-home:focus-visible {
     overflow-wrap: anywhere;
   }
 
+  /* The hit-point clause (M3) under it wraps the same way: between words, and inside "+70%"
+     only where that alone outgrows the column. It is one of the column's items for the cut
+     (`hud-cut.ts`), so the column rests after it whole or before it, never through it. */
+  .wy-wave-preview-hp {
+    margin-top: 0.15rem;
+    overflow-wrap: anywhere;
+  }
+
   /* An air entry's wings reach 0.1287em past the icon's box on each side (the armored flyer's,
      the widest that ships), and the column's scrollport has no gap to give them on the left:
      this margin does. 0.15em, not the reach, for a little room. The glance gives the same
@@ -3352,9 +3382,13 @@ a.wy-home:focus-visible {
     flex-wrap: wrap;
   }
 
+  /* Its inset is padding inside its 100% basis, not a margin beside it: a margin put the row
+     2px past the column, scrollable sideways. */
   .wy-wave-preview-list .wy-preview-arrow {
     flex-basis: 100%;
-    margin-inline: 0.15em 0;
+    box-sizing: border-box;
+    margin-inline: 0;
+    padding-inline-start: 0.15em;
   }
 
   .wy-preview-detail {

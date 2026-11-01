@@ -4585,6 +4585,25 @@ describe('overlay — routes, hit points and the wave counter on the crossing bo
     expect(li.querySelector('.wy-preview-arrow')).toBeNull();
   });
 
+  it('names every exit of a multi-exit destination, in board order, joined — not yet a list a translator can order (`routeText`)', () => {
+    // No shipped board has one: north is given both exits here, through the overlay's board.
+    const board: RulesetBoard = {
+      ...BOARD,
+      entrances: BOARD.entrances.map((e) =>
+        e.id === 'north' ? { ...e, destination: ['south', 'east'] } : e,
+      ),
+    };
+    const { overlay, shell } = setup(undefined, undefined, { board });
+    show(overlay, [north({ destination: ['south', 'east'] })]);
+    const li = rows(shell)[0]!;
+    expect(fullOf(li)).toBe(
+      '10 × Creep — north to south, east, ground, armor 0, leak cost 1, no immunities',
+    );
+    // The lone stream's words say the same, and its arrow is still the way it enters.
+    expect(li.querySelector('.wy-preview-route-name')!.textContent).toBe('north to south, east');
+    expect(li.querySelector('.wy-preview-arrow')!.textContent).toBe('↓');
+  });
+
   it('rebuilds the rows when a wave differs from the last only in a stream’s route (the preview key)', () => {
     const { overlay, shell } = setup();
     show(overlay, [entry()]);
@@ -4613,8 +4632,10 @@ describe('overlay — routes, hit points and the wave counter on the crossing bo
   it('says a wave below the catalog’s hit points too, and nothing at exactly 100', () => {
     const { overlay, shell } = setup();
     show(overlay, [entry()], { hpPercent: 80 });
-    expect(shell.preview.hpFull.textContent).toBe('Every creep in this wave has −20% hit points');
-    expect(shell.preview.hpGlance.textContent).toBe('−20% hit points');
+    expect(shell.preview.hpFull.textContent).toBe(
+      'Every creep in this wave has 20% fewer hit points',
+    );
+    expect(shell.preview.hpGlance.textContent).toBe('20% fewer hit points'); // never a bare minus sign
     show(overlay, [entry()], { hpPercent: 100 }); // only the hit points moved: the key rebuilds
     expect(shell.preview.hp.hidden).toBe(true);
     expect(shell.preview.hpFull.textContent).toBe('');
@@ -4643,6 +4664,22 @@ describe('overlay — routes, hit points and the wave counter on the crossing bo
     overlay.update({ hud: c.hud(), paused: false, speed: 1, ui: uiState(), refund: 0 });
     expect(shell.preview.title.textContent).toBe(`Wave 1 of ${c.ruleset.waves.length}`);
     expect(c.ruleset.waves).toHaveLength(10);
+  });
+
+  it('carries an authored hpPercent from the bundle through a real controller to the clause', () => {
+    // The shipped bundle with its first wave's creeps at 150% of the catalog's hit points.
+    const grown = structuredClone(bundle) as typeof bundle;
+    (grown.boards[0]!.waves[0] as { hpPercent: number }).hpPercent = 150;
+    const c = createController(1, { bundle: grown, boardId: defaultBoardId(grown) });
+    const preview = c.hud().preview;
+    expect(preview?.kind).toBe('upcoming');
+    expect(preview?.kind === 'upcoming' && preview.waveNumber).toBe(1);
+    expect(preview?.kind === 'upcoming' && preview.hpPercent).toBe(150);
+    const { overlay, shell } = setup(undefined, undefined, { ruleset: c.ruleset, board: c.board });
+    overlay.update({ hud: c.hud(), paused: false, speed: 1, ui: uiState(), refund: 0 });
+    expect(shell.preview.hp.hidden).toBe(false);
+    expect(shell.preview.hpFull.textContent).toBe('Every creep in this wave has +50% hit points');
+    expect(shell.preview.hpGlance.textContent).toBe('+50% hit points');
   });
 });
 

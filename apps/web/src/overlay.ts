@@ -2152,10 +2152,13 @@ export function createOverlay(
   };
 
   /** A stream's route in words: its entrance's wall, then its exit's ("north to south"). A
-   *  destination of several exits names each, joined like the immunities list — no M3 board
-   *  has one (ADR 0015). An entrance this overlay's board does not have — only a test or a
-   *  mismatched build could make one — is named by its ids rather than dropped, the
-   *  `creep.unknown.name` posture. */
+   *  destination of several exits names each, joined by `', '` like the immunities list
+   *  ("west to east, south") — no M3 board has one (ADR 0015). That join is punctuation
+   *  between already-translated words, so a translator cannot yet order the list or conjoin
+   *  it ("east and south"): locale-aware list formatting (ICU / `Intl.ListFormat`) is later
+   *  work. An entrance this overlay's board does not have — only a test or a mismatched build
+   *  could make one — is named by its ids rather than dropped, the `creep.unknown.name`
+   *  posture. */
   function routeText(entry: PreviewEntryVM): string {
     const route = routes.get(entry.entrance);
     if (route === undefined) {
@@ -2506,9 +2509,9 @@ export function createOverlay(
     // locale/catalog change would otherwise leave stale-language DOM until the wave
     // moved — defeating the module's deferred-`t()` convention (line ~86). Like
     // `renderPrimary`, the sentinel compares the exact strings this render would
-    // write: the title AND the first entry row (rows read five catalog keys the
+    // write: the title, the first entry row (rows read five catalog keys the
     // title doesn't — a title-only sentinel would self-heal the heading while the
-    // rows stayed stale). On drift, fall through and rebuild.
+    // rows stayed stale) and the hit-point clause (M3). On drift, fall through and rebuild.
     // Unreachable while only `en` ships; load-bearing the day a second locale
     // lands. (Consciously untested: exercising it would mean faking a runtime
     // catalog-swap mechanism that does not exist. The MEMO direction — unchanged
@@ -2531,10 +2534,15 @@ export function createOverlay(
           routeArrow(firstEntry) +
           previewEntryGlanceText(firstEntry, single);
     const firstRowCurrent = previewEl.list.firstElementChild?.textContent ?? null;
+    // The hit-point clause reads catalog keys neither the title nor a row does, so it is
+    // compared too: both its forms, in document order (full, then glance — `shell.ts`).
+    const expectedHp = preview.kind === 'upcoming' ? hpClause(preview.hpPercent) : null;
+    const expectedHpText = expectedHp === null ? '' : expectedHp.full + expectedHp.glance;
     if (
       key === lastPreviewKey &&
       previewEl.title.textContent === expectedTitle &&
-      firstRowCurrent === expectedFirstRow
+      firstRowCurrent === expectedFirstRow &&
+      previewEl.hp.textContent === expectedHpText
     ) {
       return;
     }
