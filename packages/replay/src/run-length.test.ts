@@ -56,7 +56,7 @@ function compileBound(bundle: Ruleset): { latestSpawn: number; walk: number } {
   return { latestSpawn, walk };
 }
 
-describe('the synthetic 30-wave arc compiles at sv17 and would not have at sv16', () => {
+describe('the synthetic 30-wave arc compiles under sv17’s cap (now sv18) and would not have at sv16', () => {
   const bundle = thirtyWaveBundle(M2);
 
   it('its bound is the spec’s 17,790 + 27,030 = 44,820: past 36,000, inside MAX_MATCH_TICKS', () => {

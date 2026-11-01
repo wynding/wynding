@@ -3,13 +3,13 @@
 // `packages/sim/src/test-support.ts` precedent.
 //
 // THE BUNDLE is M3's first-pass 30-wave arc (`docs/milestones/m3.md`, "First-pass arc"):
-// its compositions, spacings, offsets, countdowns and clear bonuses, with every stream
-// sent from the one entrance a format-2 board has (entrances arrive with format 3, story
-// 3) and no `hpPercent` (format 3 too). It stands on M2's 28 × 24 board geometry with
-// M2's catalog and economy, which the caller passes in, so this module needs no edge to
-// `@wynding/content`. Its compile bound is the spec's own: hands-off latest spawn 17,790
-// plus the worst-case walk 27,030 = 44,820 ticks, past sv16's 36,000 cap and inside
-// sv17's 72,000.
+// its compositions, spacings, offsets, countdowns and clear bonuses, in format 3 on one
+// west → east pair: every stream from the west entrance, every `hpPercent` 100 (the
+// crossing pairs and HP growth are the content stories'). It stands on M2's 28 × 24
+// board geometry with M2's catalog and economy, which the caller passes in, so this
+// module needs no edge to `@wynding/content`. Its compile bound is the spec's own:
+// hands-off latest spawn 17,790 plus the worst-case walk 27,030 = 44,820 ticks, past
+// sv16's 36,000 cap and inside sv17's 72,000.
 //
 // THE REPLAY is a fixed scripted defense played to its terminal tick and recorded the
 // way the client records: each tick's inputs through the terminal one and nothing after.
