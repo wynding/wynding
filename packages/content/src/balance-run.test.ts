@@ -11,8 +11,10 @@ import {
   computeDistanceField,
   createInitialState,
   hashSimState,
+  type DistanceField,
   type SimState,
 } from '@wynding/sim';
+import type { Ruleset } from '@wynding/types';
 import { getBundledRuleset } from './registry';
 import { FIELD_UNITS_PER_CELL, remainingFraction, runReferenceBuild } from './balance-run';
 import { runBuildScript, type ScriptStep } from './script-runner';
@@ -45,13 +47,16 @@ function oneCreep(
     slowMulFp: [0],
     slowUntilTick: [0],
     stunUntilTick: [0],
+    destination: [0], // field-01's one destination, west → east
   };
   return state;
 }
 
 describe('remaining fraction — the closest-approach measure, per creep', () => {
-  const { field } = ruleset.board;
-  const fraction = (state: SimState, f = field) => remainingFraction(ruleset, state, 0, f);
+  const { fields, grid } = ruleset.board;
+  const EAST = grid.exits[0]!;
+  const fraction = (state: SimState, f: readonly DistanceField[] = fields) =>
+    remainingFraction(ruleset, state, 0, f);
 
   it('is 1 for a creep resting on the entrance, ground or air, on the empty board', () => {
     expect(fraction(oneCreep('normal', [0, 11], [0, 11], 0))).toBe(1);
@@ -65,10 +70,9 @@ describe('remaining fraction — the closest-approach measure, per creep', () =>
     const wall = new Uint8Array(ruleset.board.grid.width * ruleset.board.grid.height);
     for (let row = 1; row <= 20; row++) wall[row * ruleset.board.grid.width + 20] = 1;
     expect(
-      fraction(
-        oneCreep('normal', [13, 11], [14, 11], 128),
-        computeDistanceField(ruleset.board.grid, wall),
-      ),
+      fraction(oneCreep('normal', [13, 11], [14, 11], 128), [
+        computeDistanceField(ruleset.board.grid, EAST, wall),
+      ]),
     ).toBeGreaterThan(13.5 / 27);
   });
 
@@ -81,18 +85,41 @@ describe('remaining fraction — the closest-approach measure, per creep', () =>
     const covered = new Uint8Array(ruleset.board.grid.width * ruleset.board.grid.height);
     covered[11 * ruleset.board.grid.width + 14] = 1;
     expect(
-      fraction(
-        oneCreep('normal', [13, 11], [14, 11], 128),
-        computeDistanceField(ruleset.board.grid, covered),
-      ),
+      fraction(oneCreep('normal', [13, 11], [14, 11], 128), [
+        computeDistanceField(ruleset.board.grid, EAST, covered),
+      ]),
     ).toBeNull();
+  });
+
+  it('has no reading for a row whose destination names no field', () => {
+    const forged = oneCreep('normal', [13, 11], [14, 11], 128);
+    forged.creeps.destination[0] = 7;
+    expect(fraction(forged)).toBeNull();
+  });
+
+  it('refuses a destination two entrances share: the creep’s own entrance is not recorded', () => {
+    // field-01 plus a second entrance bound for the same exit — which entrance a creep
+    // left is what its empty-board distance needs, and the sim keeps only its destination.
+    const b = structuredClone(getBundledRuleset('wynding-core')) as Ruleset;
+    (b.boards[0]!.entrances as unknown as object[]).push({
+      id: 'west-lo',
+      cell: { col: 0, row: 20 },
+      destination: ['east'],
+    });
+    const shared = compileRuleset(b, 'field-01');
+    const state = createInitialState(SEED, shared);
+    state.creeps = oneCreep('normal', [13, 11], [14, 11], 128).creeps;
+    expect(() => remainingFraction(shared, state, 0, shared.board.fields)).toThrow(
+      /destination 0 is served by 2 entrances/,
+    );
   });
 });
 
 describe('the instrumented reference-build run', { timeout: 120_000 }, () => {
   it("the field unit is one orthogonal step: field-01's empty path is 27 tiles", () => {
-    const { grid, field } = ruleset.board;
-    expect(field.dist[grid.entrance.row * grid.width + grid.entrance.col]).toBe(
+    const { grid, fields } = ruleset.board;
+    const entrance = grid.entrances[0]!;
+    expect(fields[0]!.dist[entrance.row * grid.width + entrance.col]).toBe(
       27 * FIELD_UNITS_PER_CELL,
     );
   });

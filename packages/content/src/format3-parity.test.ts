@@ -2,8 +2,9 @@
 // 3 reproduces format 2's run over the M2 golden replay, tick for tick.
 //
 // The reference below is NOT a golden to re-pin. It is the format-2 record: the
-// `m2-golden.test.ts` values measured on `main` immediately before story 3 began (sv16,
-// format 2, `field-01` with its single `entrance`/`exit`) — the per-tick world-hash trace
+// `m2-golden.test.ts` values measured on `main` immediately before story 3 began (sv16 at
+// 3d8d410, and the same at sv17 on 48881d1, whose `step` is byte-identical; format 2,
+// `field-01` with its single `entrance`/`exit`) — the per-tick world-hash trace
 // of WINNER A's run, its final hash, the terminal outcome, the score, the stars and the
 // final tick. Story 3 re-encodes `field-01` as one entrance → exit pair (`west` →
 // `east`, every wave entry on `west`, every `hpPercent` 100) and must change NOTHING about
@@ -32,8 +33,8 @@ import { fnv1a, withoutDestination } from './test-digest';
 const SCENARIO_SEED = 0x5eed;
 
 /** The format-2 run of WINNER A over `field-01` (sv16, measured on `main` at 3d8d410,
- *  before any story-3 change) — re-measured or deleted, never patched, at the next change
- *  that moves the run (see the header). */
+ *  before any story-3 change; sv17's `m2-golden.test.ts` pins the same pair) — re-measured
+ *  or deleted, never patched, at the next change that moves the run (see the header). */
 const FORMAT2_REFERENCE = {
   traceHashDigest: 'bb093415',
   finalStateHash: '34cb27bf',

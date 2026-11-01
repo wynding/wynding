@@ -21,7 +21,9 @@
 // wave's creeps still had to cover: a ground creep by path distance on the maze as it
 // stood that tick, an air creep by straight line to the exit, each over the same measure
 // on the empty board; a leak is 0. A maze longer than the empty board starts its creeps
-// above 1.
+// above 1. Every one of those is the creep's OWN destination's (M3 story 3, ADR 0015):
+// its own field, its own exit, and the empty-board distance from the entrance that
+// destination serves.
 
 import {
   cellCenterX,
@@ -34,6 +36,7 @@ import {
   type DistanceField,
   type SimState,
 } from '@wynding/sim';
+import type { Cell } from '@wynding/types';
 import { runBuildScript, type ScriptStep } from './script-runner';
 
 /** A distance field's unit: one orthogonal step costs this much (`pathfinding.ts`'s
@@ -114,20 +117,45 @@ function sameMask(a: Uint8Array, b: Uint8Array): boolean {
 }
 
 /**
+ * The entrance destination `d` serves — the empty-board distance a creep bound there is
+ * measured against. The sim records a creep's destination, not its entrance, so a
+ * destination two entrances share has no single answer: that throws, loudly, rather than
+ * measuring a creep from the wrong entrance. (Every board so far gives each destination
+ * one entrance; the first that shares one must record the creep's entrance first.)
+ */
+function entranceServing(ruleset: CompiledRuleset, d: number): Cell {
+  const { grid, entranceDestination } = ruleset.board;
+  const serving = grid.entrances.filter((_, e) => entranceDestination[e] === d);
+  if (serving.length !== 1) {
+    throw new Error(
+      `remainingFraction: destination ${d} is served by ${serving.length} entrances — the ` +
+        `empty-board distance needs the creep's own entrance, which the sim does not record`,
+    );
+  }
+  return serving[0]!;
+}
+
+/**
  * Creep row `i`'s remaining distance as a fraction of its empty-board distance (this
- * file's header), with `field` the maze's distance field this tick — or `null` for a row
- * whose position doesn't derive, or a ground creep whose next cell the maze has just
- * covered (it re-routes next tick; this tick it has no path distance to read). The board
- * has one entrance and one exit until M3 story 3 gives each creep its own destination.
+ * file's header), with `fields` the maze's distance fields this tick — one per
+ * destination, index-parallel to `ruleset.board.fields` — read at the creep's OWN
+ * destination. `null` for a row whose position doesn't derive, whose destination names
+ * no field, or a ground creep whose next cell the maze has just covered (it re-routes
+ * next tick; this tick it has no path distance to read).
  */
 export function remainingFraction(
   ruleset: CompiledRuleset,
   state: SimState,
   i: number,
-  field: DistanceField,
+  fields: readonly DistanceField[],
 ): number | null {
-  const { grid, field: emptyField } = ruleset.board;
-  const { entrance, exit } = grid;
+  const { grid } = ruleset.board;
+  const d = state.creeps.destination[i]!;
+  const emptyField = ruleset.board.fields[d];
+  const field = fields[d];
+  if (emptyField === undefined || field === undefined) return null;
+  const entrance = entranceServing(ruleset, d);
+  const { exit } = emptyField;
   const point = projectCreep(state.creeps, i, grid);
   if (point === null) return null;
   const exitX = cellCenterX(exit.col);
@@ -155,19 +183,19 @@ export function runReferenceBuild(
   seed: number,
   plan: readonly ScriptStep[],
 ): BuildRun {
-  const { grid, field: emptyField } = ruleset.board;
+  const { grid, fields: emptyFields } = ruleset.board;
 
-  // The maze's field, recomputed only when the tower mask changes.
-  let mazeField: DistanceField = emptyField;
+  // The maze's fields, one per destination, recomputed only when the tower mask changes.
+  let mazeFields: readonly DistanceField[] = emptyFields;
   let mazeMask: Uint8Array | null = null;
-  const fieldFor = (state: SimState): DistanceField => {
-    if (state.towers.id.length === 0) return emptyField;
+  const fieldsFor = (state: SimState): readonly DistanceField[] => {
+    if (state.towers.id.length === 0) return emptyFields;
     const mask = materializeTowerMask(grid, state.towers, ruleset.towerById);
     if (mazeMask === null || !sameMask(mask, mazeMask)) {
-      mazeField = computeDistanceField(grid, mask);
+      mazeFields = emptyFields.map((f) => computeDistanceField(grid, f.exit, mask));
       mazeMask = mask;
     }
-    return mazeField;
+    return mazeFields;
   };
 
   const rows: Mutable<WaveProfile>[] = [];
@@ -272,9 +300,9 @@ export function runReferenceBuild(
       }
 
       if (alive > 0) {
-        const field = fieldFor(state);
+        const fields = fieldsFor(state);
         for (let i = 0; i < alive; i++) {
-          const fraction = remainingFraction(ruleset, state, i, field);
+          const fraction = remainingFraction(ruleset, state, i, fields);
           if (fraction === null) continue;
           const row = rows[creeps.wave[i]!]!;
           if (row.closestApproach === null || fraction < row.closestApproach) {

@@ -91,10 +91,11 @@ export function thirtyWaveBundle(base: Ruleset, options: ThirtyWaveOptions = {})
     countdownTicks:
       index === ARC.length - 1 ? countdown + (options.finaleDelayTicks ?? 0) : countdown,
     clearBonus: clear,
+    hpPercent: 100, // format 3: catalog hit points, as M2 played them
     entries: streams.map(([creepId, count, spacingTicks, offsetTicks]): WaveEntry =>
       offsetTicks === undefined
-        ? { creepId, count, spacingTicks }
-        : { creepId, count, spacingTicks, offsetTicks },
+        ? { creepId, entrance: 'west', count, spacingTicks }
+        : { creepId, entrance: 'west', count, spacingTicks, offsetTicks },
     ),
   }));
   return {
@@ -106,8 +107,9 @@ export function thirtyWaveBundle(base: Ruleset, options: ThirtyWaveOptions = {})
         id: THIRTY_WAVE_BOARD_ID,
         widthTiles: 28,
         heightTiles: 24,
-        entrance: { col: 0, row: 11 },
-        exit: { col: 27, row: 11 },
+        // Format 3: one entrance → exit pair, `west` → `east` (M3 story 3).
+        entrances: [{ id: 'west', cell: { col: 0, row: 11 }, destination: ['east'] }],
+        exits: [{ id: 'east', cell: { col: 27, row: 11 } }],
         waves,
       },
     ],
