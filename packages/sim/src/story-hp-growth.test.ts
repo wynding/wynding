@@ -73,9 +73,17 @@ describe('step applies the wave’s hpPercent at spawn', () => {
     ],
   });
 
-  /** Every creep's (wave, hp) the first tick it is seen, across a whole hands-off run. */
-  function spawnRecords(): Map<number, { wave: number; hp: number; speed: number; bounty: number }> {
-    const seen = new Map<number, { wave: number; hp: number; speed: number; bounty: number }>();
+  interface SpawnRecord {
+    readonly wave: number;
+    readonly hp: number;
+    readonly speed: number;
+    readonly bounty: number;
+  }
+
+  /** Every creep's (wave, hp, speed, bounty) the first tick it is seen, across a whole
+   *  hands-off run, keyed by creep id. */
+  function spawnRecords(): Map<number, SpawnRecord> {
+    const seen = new Map<number, SpawnRecord>();
     let s = createInitialState(1, ruleset);
     s = step(s, ruleset, callEarly);
     for (let t = 0; t < 2000 && s.phase === 'running'; t++) {

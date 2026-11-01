@@ -383,7 +383,15 @@ describe('overlay — the wave preview surface (M2-S2, PLAN.md P3 steps 16-17/19
   const glanceOf = (entry: PreviewEntryVM): GlanceParts => {
     const { overlay, shell } = setup();
     overlay.update({
-      hud: hud({ preview: { kind: 'upcoming', waveNumber: 1, waveCount: 2, hpPercent: 100, entries: [entry] } }),
+      hud: hud({
+        preview: {
+          kind: 'upcoming',
+          waveNumber: 1,
+          waveCount: 2,
+          hpPercent: 100,
+          entries: [entry],
+        },
+      }),
       paused: false,
       speed: 1,
       ui: uiState(),
@@ -3996,7 +4004,9 @@ describe('overlay — the wave strip (#181 L1)', () => {
     waveNumber = 1,
   ): void => {
     overlay.update({
-      hud: hud({ preview: { kind: 'upcoming', waveNumber, waveCount: 9, hpPercent: 100, entries } }),
+      hud: hud({
+        preview: { kind: 'upcoming', waveNumber, waveCount: 9, hpPercent: 100, entries },
+      }),
       paused: false,
       speed: 1,
       ui: uiState(),
