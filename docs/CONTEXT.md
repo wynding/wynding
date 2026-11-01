@@ -11,13 +11,31 @@ PRs. This is vocabulary only; for _why_ decisions were made see the ADRs.
 ## Core gameplay
 
 **Board**:
-The open playfield — a rectangular grid of tiles with one or more creep entrances
-and an exit. Unlike fixed-lane defense, the board starts empty and the player
-shapes the route by building.
+The open playfield — a rectangular grid of tiles with one or more **entrances**
+and one or more **exits**, each entrance assigned a **destination**. Unlike
+fixed-lane defense, the board starts empty and the player shapes the route by
+building.
 _Avoid_: map, field, level.
 
+**Entrance**:
+A border cell where creeps enter the board. Every wave entry names the entrance
+its creeps come from, and the board assigns each entrance a **destination**.
+_Avoid_: spawn point, portal.
+
+**Exit**:
+A border cell where creeps leave the board. A creep leaks only at an exit in its
+own **destination**; to every other creep an exit is an ordinary walkable cell.
+_Avoid_: end zone.
+
+**Destination**:
+The set of exits a creep may leak at, assigned by the board to the entrance it
+came from (ADR 0015). A ground creep walks to the nearest exit in its
+destination. Once multi-exit destinations are enabled, a board that wants nearest-exit
+behaviour assigns the destination {all its exits}.
+_Avoid_: target exit (a tower's target is a creep).
+
 **Creep**:
-An enemy unit that travels the board from an entrance toward the exit. Creeps vary
+An enemy unit that travels the board from an entrance toward its **destination**. Creeps vary
 along **axes** — speed, durability (hit points + **armor**), **domain**
 (ground/air), effect-immunities, and role (e.g. a `boss`) — composed freely
 rather than as fixed kinds.
@@ -88,9 +106,10 @@ out of towers to lengthen the creeps' path.
 _Avoid_: labyrinth, layout.
 
 **Path**:
-The specific shortest route a creep follows from entrance to exit given the
-current towers. **Invariant: the exit is always reachable** — the player can never
-fully wall it off; a route must always remain.
+The specific shortest route a creep follows from its entrance to the nearest exit
+in its **destination**, given the current towers. **Invariant: every entrance can
+always reach its destination** — the player can never fully wall a route off; one
+must always remain.
 _Avoid_: route (interchangeable in prose, but "path" is canonical in code).
 
 **Pending**:
@@ -160,12 +179,12 @@ nothing, because there is no "early" for wave 1.
 _Avoid_: early send, rush, skip.
 
 **Lives**:
-The player's failure budget. Each creep that reaches the exit (a **leak**) costs
+The player's failure budget. Each creep that reaches an exit in its destination (a **leak**) costs
 its **leak cost** in lives; the run ends when lives reach zero or below.
 _Avoid_: health, HP (that's a creep stat), hearts.
 
 **Leak cost**:
-How many Lives one creep costs when it reaches the exit — a per-creep stat, never
+How many Lives one creep costs when it leaks — a per-creep stat, never
 less than one. A single leak may take Lives below zero.
 _Avoid_: leak penalty, life cost.
 

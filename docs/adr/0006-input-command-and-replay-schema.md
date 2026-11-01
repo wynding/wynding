@@ -50,7 +50,8 @@ the ordered command log.
 
 Structurally malformed input (unknown command, out-of-domain value) makes the replay
 **invalid and rejected** — the sim won't interpret it. A well-formed but illegal command
-(unaffordable, illegal placement, one that would fully block the exit) is a
+(unaffordable, illegal placement, one that would fully block the exit — since ADR 0015, an
+entrance's or live creep's route to its own destination) is a
 **deterministic no-op**, applying the same rule on client and server. The sim always has
 a defined result.
 
