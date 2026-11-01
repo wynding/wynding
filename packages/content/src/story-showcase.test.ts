@@ -36,7 +36,7 @@ import {
 } from '@wynding/sim';
 import { getBundledRuleset, defaultBoardId } from './registry';
 import { waveIndexForCreep } from './wave-lookup';
-import { WINNER_A, type Placement } from './showcase-builds';
+import { WINNER_A, WINNER_B, LOSER, type Placement } from './showcase-builds';
 import { runBuildScript } from './script-runner';
 
 const SCENARIO_SEED = 0x5eed;
@@ -378,85 +378,10 @@ function assertChannelFloors(r: BuildResult): void {
 // WINNER A — "the poisoner" — lives in `./showcase-builds.ts` (M2-S11 P5): the same
 // script is reused, unduplicated, by `m2-golden.test.ts`'s close-out determinism
 // golden, so both files place the same towers on the same cells in the same order.
+// WINNER B — "the control lattice" — and THE LOSER live there too (M3 story 1), with
+// their own headers, so the balance checker's calibration can compare its grid form of
+// each against the plan this file runs.
 // ---------------------------------------------------------------------------------
-// WINNER B — "the control lattice". No `venom` at all: the boss dies to beacon-buffed
-// `basic` (10 x 1.5 = 15 nominal, 15 - 8 = 7 net — the armor-piercing route
-// `story-finale.test.ts` pins), and it only gets there because `slow` doubles how long
-// everything spends inside the wall.
-//
-// THE ROW-15 SLOW BAND IS GEOMETRY, NOT DECORATION. `slow` is a BOTH-domain tower, so
-// a slow tower near the row-11 flight line would chip air creeps and eat into
-// `antiair`'s own damage share. A tower anchored at row 15 fires from y = 16 x 256 =
-// 4096 fp; the air line sits at y = 11 x 256 + 128 = 2944 fp, a gap of 1152 fp against
-// `slow`'s 1024 fp range — so it is arithmetically incapable of touching a flyer, while
-// still covering the row-14 ground corridor 384 fp away. That is what keeps `antiair`
-// the sole source of air damage in this build, and it is asserted below rather than
-// asserted about.
-// ---------------------------------------------------------------------------------
-const WINNER_B: readonly Placement[] = [
-  { col: 2, row: 10, towerId: 'basic' },
-  { col: 4, row: 10, towerId: 'basic' },
-  { col: 6, row: 10, towerId: 'basic' },
-  { col: 8, row: 10, towerId: 'basic' },
-  { col: 2, row: 12, towerId: 'beacon' },
-  { col: 10, row: 10, towerId: 'basic' },
-  { col: 12, row: 10, towerId: 'basic' },
-  { col: 6, row: 12, towerId: 'beacon' },
-  { col: 14, row: 10, towerId: 'basic' },
-  { col: 16, row: 10, towerId: 'basic' },
-  { col: 2, row: 8, towerId: 'antiair' },
-  { col: 6, row: 8, towerId: 'antiair' },
-  { col: 10, row: 12, towerId: 'beacon' },
-  { col: 18, row: 10, towerId: 'basic' },
-  { col: 20, row: 10, towerId: 'basic' },
-  { col: 2, row: 15, towerId: 'slow' },
-  { col: 4, row: 15, towerId: 'slow' },
-  { col: 6, row: 15, towerId: 'slow' },
-  { col: 8, row: 15, towerId: 'slow' },
-  { col: 10, row: 8, towerId: 'antiair' },
-  { col: 14, row: 8, towerId: 'antiair' },
-  { col: 14, row: 12, towerId: 'beacon' },
-  { col: 22, row: 10, towerId: 'basic' },
-  { col: 24, row: 10, towerId: 'basic' },
-  { col: 10, row: 15, towerId: 'slow' },
-  { col: 12, row: 15, towerId: 'slow' },
-  { col: 14, row: 15, towerId: 'slow' },
-  { col: 16, row: 15, towerId: 'slow' },
-  { col: 18, row: 8, towerId: 'antiair' },
-  { col: 22, row: 8, towerId: 'antiair' },
-  { col: 18, row: 12, towerId: 'beacon' },
-  { col: 22, row: 12, towerId: 'beacon' },
-  { col: 4, row: 12, towerId: 'basic' },
-  { col: 8, row: 12, towerId: 'basic' },
-  { col: 12, row: 12, towerId: 'basic' },
-  { col: 20, row: 12, towerId: 'basic' },
-  { col: 18, row: 15, towerId: 'slow' },
-  { col: 20, row: 15, towerId: 'slow' },
-  { col: 22, row: 15, towerId: 'slow' },
-  { col: 24, row: 15, towerId: 'slow' },
-];
-
-// ---------------------------------------------------------------------------------
-// THE LOSER — authored AFTER the last tuning change, per ruling 3, so it is measured
-// against the FINAL numbers rather than an earlier draft of them. It is a build that
-// ENGAGES the arc and loses: a real ground wall (`basic` + `venom`) with `slow` for
-// control and no answer whatsoever to the `air` domain, which is what eventually kills
-// it — not a build that declines to play.
-// ---------------------------------------------------------------------------------
-const LOSER: readonly Placement[] = [
-  { col: 2, row: 10, towerId: 'basic' },
-  { col: 2, row: 12, towerId: 'basic' },
-  { col: 6, row: 10, towerId: 'basic' },
-  { col: 6, row: 12, towerId: 'basic' },
-  { col: 10, row: 10, towerId: 'basic' },
-  { col: 10, row: 12, towerId: 'basic' },
-  { col: 14, row: 10, towerId: 'venom' },
-  { col: 14, row: 12, towerId: 'venom' },
-  { col: 18, row: 10, towerId: 'slow' },
-  { col: 18, row: 12, towerId: 'slow' },
-  { col: 22, row: 10, towerId: 'venom' },
-  { col: 22, row: 12, towerId: 'venom' },
-];
 
 describe('M2-S11 P4 — the showcase run: two winners, structurally distinct, and one selected loser', () => {
   // LAZY module-level memos, the sibling story files' pattern: running the two full-arc
