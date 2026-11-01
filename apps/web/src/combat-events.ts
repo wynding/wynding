@@ -1,11 +1,13 @@
 // combat-events.ts — what one sim step did that the board shows as combat feedback (visual pass
-// C1/C2, #181): which creeps it killed and how many it leaked, which flyer each targeted impact
-// struck, and which shots in flight lost their tower. Pure and Phaser-free; the controller calls
-// it once per tick, beside the impact points it already collects (`controller.ts`).
+// C1/C2, #181): which creeps it killed and which exit each leak left by, which flyer each
+// targeted impact struck, and which shots in flight lost their tower. Pure and Phaser-free; the
+// controller calls it once per tick, beside the impact points it already collects
+// (`controller.ts`).
 //
 // THE STEP REPORTS WHAT IT DID; NOTHING HERE GUESSES IT. The sim names, for a caller that asks,
-// the creeps it killed (`StepEvents.killed`), the creeps that leaked (`StepEvents.leaked`) and the
-// creep each targeted impact struck (`StepEvents.impactPoints`' `targetId`). Those are output-only
+// the creeps it killed (`StepEvents.killed`), the exit each leak left by
+// (`StepEvents.leakedExits`) and the creep each targeted impact struck (`StepEvents.impactPoints`'
+// `targetId`). Those are output-only
 // events, never new sim state: never hash-relevant, never saved, and invisible to determinism
 // and replay. All a view model still answers about a creep is where and how the board last drew
 // a kill, so its burst shows as the player last saw it. Which shots lost their tower is read
@@ -37,14 +39,15 @@ export type StepImpactPoint = StepEvents['impactPoints'][number];
 export interface StepOutcome {
   /** The creeps it killed, each where the board last drew it. */
   readonly kills: KillVM[];
-  /** How many creeps reached the exit: the ids the step named as leaked. */
-  readonly leaks: number;
+  /** The creeps that reached an exit, one entry each: the index, in the board's exit order, of
+   *  the exit it left by (M3: the crossing board has two). How many is the length. */
+  readonly leaks: number[];
 }
 
 /**
  * The kills and leaks of the step from `before`, as the step reports them: `killed`, every creep
- * its combat phase killed (`StepEvents.killed`), and `leaked`, the ids its movement phase removed
- * at the exit (`StepEvents.leaked`).
+ * its combat phase killed (`StepEvents.killed`), and `leakedExits`, the exit each creep its
+ * movement phase removed at an exit left by (`StepEvents.leakedExits`).
  *
  * Each kill carries the bounty the step credited for it and its position and look. A creep the
  * view model before the step drew keeps where it was drawn and the look it was drawn with, so its
@@ -56,10 +59,10 @@ export interface StepOutcome {
 export function stepOutcome(
   before: RenderVM,
   killed: readonly StepKill[],
-  leaked: readonly number[],
+  leakedExits: readonly number[],
   ruleset: CompiledRuleset,
 ): StepOutcome {
-  const leaks = leaked.length;
+  const leaks = [...leakedExits];
   if (killed.length === 0) return { kills: [], leaks };
   const drawn = new Map<number, CreepVM>();
   for (const c of before.creeps) drawn.set(c.id, c);

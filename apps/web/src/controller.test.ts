@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import { validate, MAX_INPUTS_PER_TICK } from '@wynding/replay';
-import { getBundledRuleset, defaultBoardId } from '@wynding/content';
+import { getBundledRuleset, defaultBoardId, type Ruleset } from '@wynding/content';
 import type { KillVM, TracerVM } from '@wynding/render';
 import { compileRuleset, type SimInput } from '@wynding/sim';
 import { isDetonation } from '@wynding/render';
@@ -1205,7 +1205,7 @@ describe('controller — kills and leaks for the board’s combat feedback (#181
     while (!c.isTerminal() && n < 6000) {
       c.advance(TICK);
       const fed = c.drainFeedback();
-      leaks += fed.leaks;
+      leaks += fed.leaks.length;
       kills += fed.kills.length;
       n++;
     }
@@ -1213,6 +1213,26 @@ describe('controller — kills and leaks for the board’s combat feedback (#181
     expect(leaks).toBeGreaterThan(0);
     expect(leaks).toBe(c.runStats().leaks);
     expect(kills).toBe(0);
+  });
+
+  it('names the exit each leak left by — west creeps at the east exit (0), north creeps at the south one (1) (M3)', () => {
+    // The shipped crossing board with its first wave split across both routes, so an
+    // undefended run leaks at both exits before its lives run out.
+    const bundle = structuredClone(getBundledRuleset()) as Ruleset;
+    const board = bundle.boards[0] as { waves: { entries: unknown[] }[] };
+    board.waves[0]!.entries = [
+      { creepId: 'normal', entrance: 'west', count: 2, spacingTicks: 20 },
+      { creepId: 'normal', entrance: 'north', count: 2, spacingTicks: 20 },
+    ];
+    const c = createController(1, { bundle, boardId: defaultBoardId(bundle) });
+    c.start();
+    const exits: number[] = [];
+    for (let n = 0; exits.length < 4 && !c.isTerminal() && n < 6000; n++) {
+      c.advance(TICK);
+      exits.push(...c.drainFeedback().leaks);
+    }
+    // North's 23-tile route leaks first, so the south exit's leaks come first.
+    expect(exits).toEqual([1, 1, 0, 0]);
   });
 
   it('a tower’s kills each carry the creep, its look, where it stood as the step began and its catalog bounty — one per creep stopped', () => {
@@ -1243,7 +1263,7 @@ describe('controller — kills and leaks for the board’s combat feedback (#181
         expect(k.bounty).toBe(c.ruleset.creepById[k.creepId]!.bounty);
         kills.push(k);
       }
-      leaks += fed.leaks;
+      leaks += fed.leaks.length;
       prev = c.frame().curVm;
       n++;
     }
@@ -1264,17 +1284,17 @@ describe('controller — kills and leaks for the board’s combat feedback (#181
       n++;
     }
     const fed = c.drainFeedback();
-    expect(fed.leaks).toBe(2);
-    expect(fed.leaks).toBe(c.runStats().leaks);
-    expect(c.drainFeedback()).toEqual({ kills: [], leaks: 0 }); // drained, not re-reported
+    expect(fed.leaks).toHaveLength(2);
+    expect(fed.leaks).toHaveLength(c.runStats().leaks);
+    expect(c.drainFeedback()).toEqual({ kills: [], leaks: [] }); // drained, not re-reported
     // More leaks pending, then Play again: none carries over.
-    while (c.runStats().leaks === fed.leaks && !c.isTerminal() && n < 12000) {
+    while (c.runStats().leaks === fed.leaks.length && !c.isTerminal() && n < 12000) {
       c.advance(TICK);
       n++;
     }
-    expect(c.runStats().leaks).toBeGreaterThan(fed.leaks);
+    expect(c.runStats().leaks).toBeGreaterThan(fed.leaks.length);
     c.startRun(2);
-    expect(c.drainFeedback()).toEqual({ kills: [], leaks: 0 });
+    expect(c.drainFeedback()).toEqual({ kills: [], leaks: [] });
   });
 
   it('a shot whose tower is sold while it flies carries that tower’s id from the sell’s tick on (C2)', () => {
@@ -2394,7 +2414,7 @@ describe('controller — combat feedback wiring the tests above could not tell a
     }
     expect(c.runStats().creepsStopped, 'the premise: a kill is pending').toBeGreaterThan(0);
     c.startRun(2);
-    expect(c.drainFeedback()).toEqual({ kills: [], leaks: 0 });
+    expect(c.drainFeedback()).toEqual({ kills: [], leaks: [] });
   });
 
   it('a tower built where one was sold, in the same tick, fires shots of its own: only the sold tower’s shots carry its id (C2)', () => {

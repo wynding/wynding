@@ -129,6 +129,8 @@ function targets() {
 
 /** The board's exit cell in these frames: the east wall's opening. */
 const EXIT = { col: 27, row: 11 } as const;
+/** The crossing board's second exit (M3), in the south wall — the feed below draws both. */
+const SOUTH_EXIT = { col: 13, row: 23 } as const;
 
 const PAL = resolvePalette('default');
 const hex = (n: number): string => n.toString(16);
@@ -174,7 +176,7 @@ const OVERLAY: RenderOverlay = {
   reducedMotion: false,
   tracers: [],
   kills: [],
-  leaks: 0,
+  leaks: [],
 };
 
 const vm = (towers: readonly TowerVM[], creeps: readonly CreepVM[]): RenderVM => ({
@@ -213,7 +215,7 @@ function busyFrame(projection = PROJECTION): BoardFrameInput {
     },
     projection,
     frames: framesFor(projection),
-    exit: EXIT,
+    exits: [EXIT],
     nowMs: 0,
     sparks,
     scorches: createScorchTracker(),
@@ -543,7 +545,7 @@ describe('drawBoardFrame — combat feedback: a hit’s flash, a kill’s burst 
         overlay: { ...OVERLAY, ...over },
         projection: PROJECTION,
         frames: framesFor(PROJECTION),
-        exit: EXIT,
+        exits: [EXIT, SOUTH_EXIT],
         nowMs,
         sparks,
         ...trackers,
@@ -652,8 +654,22 @@ describe('drawBoardFrame — combat feedback: a hit’s flash, a kill’s burst 
 
   it('a leak pulses the exit: the frame’s two rings in the lives colour, about the exit cell’s centre', () => {
     const { t, draw } = feed();
-    draw(0, 10, [], { leaks: 1 });
+    draw(0, 10, [], { leaks: [0] });
     const exit = PROJECTION.cellToPixel(EXIT.col, EXIT.row);
+    const half = PROJECTION.cellPx / 2;
+    const u = fxUnit(PROJECTION.cellPx);
+    expect(t.layers.cues.calls.filter((c) => c.method !== 'clear')).toEqual(
+      LEAK_RINGS.flatMap((r) => [
+        { method: 'lineStyle', args: [r.width * u, ART_LIVES, r.alpha] },
+        { method: 'strokeCircle', args: [exit.x + half, exit.y + half, r.r * u] },
+      ]),
+    );
+  });
+
+  it('a leak pulses the exit it left by and no other: exit 1’s rings, about the south exit’s centre (M3)', () => {
+    const { t, draw } = feed();
+    draw(0, 10, [], { leaks: [1] });
+    const exit = PROJECTION.cellToPixel(SOUTH_EXIT.col, SOUTH_EXIT.row);
     const half = PROJECTION.cellPx / 2;
     const u = fxUnit(PROJECTION.cellPx);
     expect(t.layers.cues.calls.filter((c) => c.method !== 'clear')).toEqual(
@@ -666,7 +682,7 @@ describe('drawBoardFrame — combat feedback: a hit’s flash, a kill’s burst 
 
   it('under Reduce motion a kill’s burst is its ring alone, and the exit’s pulse holds its rings’ size', () => {
     const { t, draw } = feed();
-    draw(0, 10, [], { kills: [KILL], leaks: 1, reducedMotion: true });
+    draw(0, 10, [], { kills: [KILL], leaks: [0], reducedMotion: true });
     draw(100, 10, [], { reducedMotion: true });
     const cues = t.layers.cues.calls.slice(
       t.layers.cues.calls.map((c) => c.method).lastIndexOf('clear'),
@@ -820,7 +836,7 @@ describe('drawBoardFrame — a spent mine’s scorch, in the scorches layer, on 
       overlay: { ...OVERLAY, tracers },
       projection: PROJECTION,
       frames: framesFor(PROJECTION),
-      exit: EXIT,
+      exits: [EXIT],
       nowMs: 0,
       sparks: [],
       feedback,
@@ -881,7 +897,7 @@ describe('drawBoardFrame — a spent mine’s scorch, in the scorches layer, on 
         overlay,
         projection: PROJECTION,
         frames: framesFor(PROJECTION),
-        exit: EXIT,
+        exits: [EXIT],
         nowMs: 0,
         sparks: [],
         scorches,
@@ -927,7 +943,7 @@ describe('drawBoardFrame — a spent mine’s scorch, in the scorches layer, on 
         overlay: { ...OVERLAY, tracers },
         projection: PROJECTION,
         frames: framesFor(PROJECTION),
-        exit: EXIT,
+        exits: [EXIT],
         nowMs: 0,
         sparks: [],
         scorches,
@@ -978,7 +994,7 @@ describe('drawBoardFrame — towers that aim and fire (visual pass T3)', () => {
         overlay: { ...OVERLAY, ...over },
         projection: PROJECTION,
         frames: framesFor(PROJECTION),
-        exit: EXIT,
+        exits: [EXIT],
         nowMs: 0,
         sparks: [],
         ...trackers,
@@ -1626,7 +1642,7 @@ describe('drawBoardFrame — a flyer’s kill bursts and pops on its lifted body
       overlay: { ...OVERLAY, kills: [kill] },
       projection: PROJECTION,
       frames: framesFor(PROJECTION),
-      exit: EXIT,
+      exits: [EXIT],
       nowMs: 500,
       sparks: [],
       scorches: createScorchTracker(),
@@ -1673,7 +1689,7 @@ describe('drawBoardFrame — a hit’s flash under Reduce motion (C1)', () => {
         overlay: { ...OVERLAY, sparks, reducedMotion: true },
         projection: PROJECTION,
         frames: framesFor(PROJECTION),
-        exit: EXIT,
+        exits: [EXIT],
         nowMs,
         sparks: [],
         ...trackers,

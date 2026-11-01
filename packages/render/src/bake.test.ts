@@ -63,7 +63,12 @@ function frameSegments(ops: readonly Op[]): Op[][] {
 }
 
 const PAL = resolvePalette('default');
-const GEOMETRY = { cols: 28, rows: 24, entrance: { col: 0, row: 11 }, exit: { col: 27, row: 11 } };
+const GEOMETRY = {
+  cols: 28,
+  rows: 24,
+  entrances: [{ col: 0, row: 11 }],
+  exits: [{ col: 27, row: 11 }],
+};
 
 describe('fitScale — degrade, never fail', () => {
   it('keeps the dpr when it fits', () => {
@@ -365,14 +370,19 @@ describe('layoutBoard / paintBoard', () => {
     const bake = layoutBoard(GEOMETRY, 10, 2, 8192);
     paintBoard(ctx, boardPaintOps(GEOMETRY, PAL), GEOMETRY, 10, bake);
     expect(ctx.ops[0]).toEqual({ op: 'setTransform', args: [2, 0, 0, 2, 0, 0] });
-    // Floor (one rect), then the 98 border cells in ONE fill, then entrance and exit.
+    // Floor (one rect), then the 98 border cells in ONE fill, then the entrance, then the
+    // exit's triangle and its bar (M3 story 4).
     const fills = ctx.ops.filter((o) => o.op === 'fill');
-    expect(fills).toHaveLength(4); // floor, the whole border ring, the entrance, the exit
+    expect(fills).toHaveLength(5); // floor, the whole border ring, the entrance, the exit's two
     const rects = ctx.ops.filter((o) => o.op === 'rect');
     expect(rects).toHaveLength(1 + 98 + 1);
     expect(rects[0]!.args).toEqual([0, 0, 280, 240]);
-    // The exit square closes the board — and is flushed, not left in the batch.
-    expect(rects[rects.length - 1]!.args).toEqual([27 * 10 + 2.5, 11 * 10 + 2.5, 5, 5]);
+    // The exit's bar closes the board — and is flushed, not left in the batch.
+    const bar = rects[rects.length - 1]!.args as number[];
+    expect(bar[0]).toBeCloseTo(27 * 10 + 7);
+    expect(bar[1]).toBeCloseTo(11 * 10 + 1.5);
+    expect(bar[2]).toBeCloseTo(1.5);
+    expect(bar[3]).toBeCloseTo(7);
     expect(ctx.ops[ctx.ops.length - 1]!.op).toBe('fill');
   });
 });

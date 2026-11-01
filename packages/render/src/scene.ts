@@ -68,8 +68,9 @@ import type { RenderVM, RenderOverlay, RenderHandle } from './types';
 export interface BoardGeometry {
   readonly cols: number;
   readonly rows: number;
-  readonly entrance: { readonly col: number; readonly row: number };
-  readonly exit: { readonly col: number; readonly row: number };
+  /** Every entrance and exit cell, in board order (M3: the crossing board has two of each). */
+  readonly entrances: readonly { readonly col: number; readonly row: number }[];
+  readonly exits: readonly { readonly col: number; readonly row: number }[];
 }
 
 /** The texture-size limit assumed when the renderer cannot report one (Phaser's Canvas
@@ -427,7 +428,7 @@ export function mount(el: HTMLElement, geometry: BoardGeometry): RenderHandle {
       overlay,
       projection,
       frames: art.atlas.frames,
-      exit: geometry.exit,
+      exits: geometry.exits,
       nowMs,
       sparks: sparks.live(nowMs, overlay.reducedMotion),
       scorches,

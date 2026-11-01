@@ -60,7 +60,7 @@ const frame = (opts: Partial<FeedbackFrame> = {}): FeedbackFrame => ({
   sparks: [],
   drawn: new Set<number>(),
   kills: [],
-  leaks: 0,
+  leaks: [],
   ...opts,
 });
 
@@ -206,8 +206,8 @@ describe('createFeedbackTracker — photosensitivity (ADR 0003, WCAG 2.3.1)', ()
     const pulses: number[] = [];
     for (let i = 0; i <= 600; i++) {
       const nowMs = (i * 1000) / 60;
-      fb.update(frame({ nowMs, leaks: 1 }));
-      if (fb.pulseSinceMs() === 0) {
+      fb.update(frame({ nowMs, leaks: [0] }));
+      if (fb.pulseSinceMs(0) === 0) {
         // One pulse begins, and the rest of its pulses follow at their spacing.
         for (let p = 0; p < LEAK_PULSES; p++)
           pulses.push(nowMs + (p * LEAK_PULSE_MS) / LEAK_PULSES);
@@ -250,28 +250,39 @@ describe('createFeedbackTracker — kills and leaks', () => {
   it('pulses the exit on a leak, for the pulse’s span — and a leak inside its gap does not begin another', () => {
     const fb = createFeedbackTracker();
     fb.update(frame({ nowMs: 0 }));
-    expect(fb.pulseSinceMs()).toBeNull();
-    fb.update(frame({ nowMs: 100, leaks: 2 }));
-    expect(fb.pulseSinceMs()).toBe(0);
-    fb.update(frame({ nowMs: 400, leaks: 1 })); // inside the gap: the pulse plays on
-    expect(fb.pulseSinceMs()).toBe(300);
+    expect(fb.pulseSinceMs(0)).toBeNull();
+    fb.update(frame({ nowMs: 100, leaks: [0, 0] }));
+    expect(fb.pulseSinceMs(0)).toBe(0);
+    fb.update(frame({ nowMs: 400, leaks: [0] })); // inside the gap: the pulse plays on
+    expect(fb.pulseSinceMs(0)).toBe(300);
     fb.update(frame({ nowMs: 100 + LEAK_PULSE_MS }));
-    expect(fb.pulseSinceMs()).toBeNull(); // played out
-    fb.update(frame({ nowMs: 100 + LEAK_PULSE_GAP_MS - 1, leaks: 1 }));
-    expect(fb.pulseSinceMs()).toBeNull(); // still inside the gap: nothing
-    fb.update(frame({ nowMs: 100 + LEAK_PULSE_GAP_MS, leaks: 1 }));
-    expect(fb.pulseSinceMs()).toBe(0); // a second on: another
+    expect(fb.pulseSinceMs(0)).toBeNull(); // played out
+    fb.update(frame({ nowMs: 100 + LEAK_PULSE_GAP_MS - 1, leaks: [0] }));
+    expect(fb.pulseSinceMs(0)).toBeNull(); // still inside the gap: nothing
+    fb.update(frame({ nowMs: 100 + LEAK_PULSE_GAP_MS, leaks: [0] }));
+    expect(fb.pulseSinceMs(0)).toBe(0); // a second on: another
+  });
+
+  it('pulses each exit for its own leaks, each with its own gap (M3: one exit per pair)', () => {
+    const fb = createFeedbackTracker();
+    fb.update(frame({ nowMs: 100, leaks: [1] }));
+    expect(fb.pulseSinceMs(1)).toBe(0);
+    expect(fb.pulseSinceMs(0)).toBeNull(); // the other exit saw no leak
+    // Inside exit 1's gap, a leak at exit 0 still begins exit 0's pulse: the gap is per exit.
+    fb.update(frame({ nowMs: 300, leaks: [0, 1] }));
+    expect(fb.pulseSinceMs(0)).toBe(0);
+    expect(fb.pulseSinceMs(1)).toBe(200);
   });
 
   it('reset forgets everything: no flash, no kill, no pulse', () => {
     const fb = createFeedbackTracker();
     const drawn = new Set([7]);
-    fb.update(frame({ nowMs: 50, sparks: [hit(7)], drawn, kills: [kill()], leaks: 1 }));
+    fb.update(frame({ nowMs: 50, sparks: [hit(7)], drawn, kills: [kill()], leaks: [0] }));
     expect(fb.flashOf(7)).toBe(HIT_FLASH_ALPHA);
     fb.reset();
     expect(fb.flashOf(7)).toBe(0);
     expect(fb.kills()).toEqual([]);
-    expect(fb.pulseSinceMs()).toBeNull();
+    expect(fb.pulseSinceMs(0)).toBeNull();
     // The new run's first hit flashes at once, though the clock starts over: no gap carries on.
     fb.update(frame({ nowMs: 0, sparks: [hit(7)], drawn }));
     expect(fb.flashOf(7)).toBe(HIT_FLASH_ALPHA);

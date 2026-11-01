@@ -84,7 +84,12 @@ vi.mock('./board-frame', async (importActual) => ({
 import { mount } from './scene';
 import type { RenderOverlay, RenderVM } from './types';
 
-const GEOMETRY = { cols: 10, rows: 10, entrance: { col: 0, row: 5 }, exit: { col: 9, row: 5 } };
+const GEOMETRY = {
+  cols: 10,
+  rows: 10,
+  entrances: [{ col: 0, row: 5 }],
+  exits: [{ col: 9, row: 5 }],
+};
 const board = { getBoundingClientRect: () => ({ left: 0, top: 0, width: 280, height: 240 }) };
 
 const vm = (tick: number): RenderVM => ({ tick, phase: 'running', creeps: [], towers: [] });
@@ -98,7 +103,7 @@ const overlay = (sparks: RenderOverlay['sparks']): RenderOverlay => ({
   reducedMotion: false,
   tracers: [],
   kills: [],
-  leaks: 0,
+  leaks: [],
 });
 // A mine going off with no tracer drawn: only its marked landing, at its footprint centre.
 const LANDING = [{ x: 7 * 256, y: 3 * 256, radiusFp: 2.5 * 256, detonation: true }] as const;

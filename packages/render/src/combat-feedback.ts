@@ -100,9 +100,10 @@ export interface FeedbackFrame {
   readonly sparks: readonly SparkPoint[];
   /** The creeps drawn this frame, by entity id. */
   readonly drawn: { has(id: number): boolean };
-  /** The kills and leaks since the last frame (`RenderOverlay.kills`, `.leaks`). */
+  /** The kills and leaks since the last frame (`RenderOverlay.kills`, `.leaks`): each leak is
+   *  the index of the exit it reached. */
   readonly kills: readonly KillVM[];
-  readonly leaks: number;
+  readonly leaks: readonly number[];
 }
 
 /** A kill still showing its burst or its pop: the kill, and how long ago it showed, ms. */
@@ -119,9 +120,9 @@ export interface FeedbackTracker {
   flashOf(id: number): number;
   /** The kills still showing, oldest first, each with its age as of the last update. */
   kills(): readonly LiveKill[];
-  /** How long ago the exit's leak pulse began, ms, as of the last update — null when it is not
-   *  pulsing. */
-  pulseSinceMs(): number | null;
+  /** How long ago exit `exit`'s leak pulse began, ms, as of the last update — null when it is
+   *  not pulsing. Each exit pulses, and is rate-limited, on its own (M3: one per pair). */
+  pulseSinceMs(exit: number): number | null;
   /** Forget everything — a new run starts with nothing showing. */
   reset(): void;
 }
@@ -132,7 +133,8 @@ export function createFeedbackTracker(): FeedbackTracker {
   const flashedAt = new Map<number, number>();
   /** The kills still showing, oldest first, with the clock they arrived at. */
   let shown: { kill: KillVM; at: number }[] = [];
-  let pulseAt: number | null = null;
+  /** When each exit's latest leak pulse began, ms, by exit index. */
+  const pulseAt = new Map<number, number>();
   const live: LiveKill[] = [];
 
   const flash = (id: number): void => {
@@ -154,7 +156,10 @@ export function createFeedbackTracker(): FeedbackTracker {
       }
       live.length = 0;
       for (const s of shown) live.push({ kill: s.kill, sinceMs: now - s.at });
-      if (leaks > 0 && (pulseAt === null || now - pulseAt >= LEAK_PULSE_GAP_MS)) pulseAt = now;
+      for (const exit of leaks) {
+        const at = pulseAt.get(exit);
+        if (at === undefined || now - at >= LEAK_PULSE_GAP_MS) pulseAt.set(exit, now);
+      }
     },
     flashOf(id) {
       const at = flashedAt.get(id);
@@ -163,9 +168,10 @@ export function createFeedbackTracker(): FeedbackTracker {
     kills() {
       return live;
     },
-    pulseSinceMs() {
-      if (pulseAt === null) return null;
-      const since = now - pulseAt;
+    pulseSinceMs(exit) {
+      const at = pulseAt.get(exit);
+      if (at === undefined) return null;
+      const since = now - at;
       return since < LEAK_PULSE_MS ? since : null;
     },
     reset() {
@@ -173,7 +179,7 @@ export function createFeedbackTracker(): FeedbackTracker {
       flashedAt.clear();
       shown = [];
       live.length = 0;
-      pulseAt = null;
+      pulseAt.clear();
     },
   };
 }

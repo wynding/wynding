@@ -19,7 +19,12 @@ import { resolvePalette, roleColour } from './palette';
 import { TOWER_ROLES } from './tower-paint';
 import type { ColourMode } from './types';
 
-const GEOMETRY = { cols: 28, rows: 24, entrance: { col: 0, row: 11 }, exit: { col: 27, row: 11 } };
+const GEOMETRY = {
+  cols: 28,
+  rows: 24,
+  entrances: [{ col: 0, row: 11 }],
+  exits: [{ col: 27, row: 11 }],
+};
 const MAX_TEX = 8192;
 const at = (cellPx: number, dpr = 1, mode: ColourMode = 'default'): BakeInputs => ({
   cellPx,

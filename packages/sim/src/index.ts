@@ -1072,6 +1072,12 @@ export function step(
     if (outcome.kind === 'drop') continue;
     if (outcome.kind === 'leak') {
       events?.leaked?.push(src.id[i] as number);
+      if (events?.leakedExits !== undefined) {
+        const exit = fields[destination]!.exit;
+        events.leakedExits.push(
+          board.grid.exits.findIndex((x) => x.col === exit.col && x.row === exit.row),
+        );
+      }
       // Guarded: a non-safe `lives` or one at MIN_SAFE_INTEGER removes the creep but
       // leaves `lives` unchanged; otherwise subtract `leakCost`. No low clamp — win/
       // loss resolution reads `lives <= 0`. `leakedCount` is presentation/telemetry;

@@ -70,7 +70,12 @@ vi.mock('phaser', () => phaser.module);
 
 import { mount } from './scene';
 
-const GEOMETRY = { cols: 10, rows: 10, entrance: { col: 0, row: 5 }, exit: { col: 9, row: 5 } };
+const GEOMETRY = {
+  cols: 10,
+  rows: 10,
+  entrances: [{ col: 0, row: 5 }],
+  exits: [{ col: 9, row: 5 }],
+};
 
 /** A window whose ResizeObservers and dpr listeners are counted, each observer's callback
  *  kept so a test can deliver a notification the browser had already gathered. */

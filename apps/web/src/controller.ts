@@ -520,14 +520,18 @@ function diffPendingTowers(
 
 const NO_PENDING: readonly TowerAnchor[] = [];
 
-/** What `drainFeedback` hands back: the kills and the leaks since the last drain. */
+/** What `drainFeedback` hands back: the kills and the leaks since the last drain — each leak
+ *  the index of the exit it left by (`combat-events.ts`'s `exitOfLeak`). */
 export interface StepFeedback {
   readonly kills: readonly KillVM[];
-  readonly leaks: number;
+  readonly leaks: readonly number[];
 }
 
 /** No kills and no leaks — what nearly every frame drains, without an allocation. */
-const NO_FEEDBACK: StepFeedback = Object.freeze({ kills: Object.freeze([]), leaks: 0 });
+const NO_FEEDBACK: StepFeedback = Object.freeze({
+  kills: Object.freeze([]),
+  leaks: Object.freeze([]),
+});
 
 /**
  * Deep-freeze an immutable copy of a tick's commands for the recorded log. The commands
@@ -620,7 +624,7 @@ export function createController(
   // Kills and leaks since the last drain (visual pass C1, #181) — accumulated per tick beside
   // the sparks, and for the same reason: a catch-up frame still shows every one.
   let pendingKills: KillVM[];
-  let pendingLeaks: number;
+  let pendingLeaks: number[];
   // Live in-flight-shot list (Tracer, #32/P6): appended from each tick's drained `fired`
   // events, pruned in `frame()` once render time passes a flight's `impactTick` — no
   // tracer crosses run identity (cleared on `reset()`) or survives past terminal.
@@ -754,13 +758,13 @@ export function createController(
     // costs an increment only on the drop path.
     // Combat feedback (visual pass C1/C2, #181) asks the step what it did rather than working it
     // out from the states either side (`combat-events.ts`): the creeps it killed (`killed`) and
-    // leaked (`leaked`), output-only events no hash or replay ever sees, and the creep each
-    // targeted impact struck, which its impact point names (`targetId`).
+    // the exit each leak left by (`leakedExits`), output-only events no hash or replay ever sees,
+    // and the creep each targeted impact struck, which its impact point names (`targetId`).
     const events: StepEvents = {
       impactPoints: [],
       fired: [],
       dotDropped: 0,
-      leaked: [],
+      leakedExits: [],
       killed: [],
     };
     hooks?.begin('step');
@@ -798,9 +802,9 @@ export function createController(
     hooks?.end('derive');
     // What the step removed, as it reports it: its kills, each where the board last drew it (a
     // creep it spawned and killed inside itself, never drawn, where it left it), and its leaks.
-    const outcome = stepOutcome(before, events.killed ?? [], events.leaked ?? [], ruleset);
+    const outcome = stepOutcome(before, events.killed ?? [], events.leakedExits ?? [], ruleset);
     for (const kill of outcome.kills) pendingKills.push(kill);
-    pendingLeaks += outcome.leaks;
+    for (const exit of outcome.leaks) pendingLeaks.push(exit);
     for (const pt of markFlyerSparks(events.impactPoints, curVm, outcome.kills)) {
       // A blast landing at a detonation tracer's origin (still listed: `frame()` prunes it,
       // and a catch-up frame may never have drawn it) is that mine going off — mark it so
@@ -863,6 +867,8 @@ export function createController(
     spd = 1;
     frozen = isTerminalPhase(state.phase);
     stopped = false; // a fresh run identity is a healthy one (#191)
+    // The keyboard cursor starts on the board's first entrance — a starting place, not a pair:
+    // it roams the whole board from there, both routes alike (M3).
     cur = {
       col: Math.min(grid.entrances[0]!.col, cols - 1),
       row: Math.min(grid.entrances[0]!.row, rows - 1),
@@ -871,7 +877,7 @@ export function createController(
     selection = null;
     pendingSparks = [];
     pendingKills = []; // nor any kill or leak (C1)
-    pendingLeaks = 0;
+    pendingLeaks = [];
     tracers = []; // no tracer crosses run identity
     bufferRev = 0;
     builtTowerIds.clear(); // "Towers built" is per run (#181 H2)
@@ -1447,10 +1453,10 @@ export function createController(
       return out;
     },
     drainFeedback(): StepFeedback {
-      if (pendingKills.length === 0 && pendingLeaks === 0) return NO_FEEDBACK;
+      if (pendingKills.length === 0 && pendingLeaks.length === 0) return NO_FEEDBACK;
       const out = { kills: pendingKills, leaks: pendingLeaks };
       pendingKills = [];
-      pendingLeaks = 0;
+      pendingLeaks = [];
       return out;
     },
     // Reads the SHARED projection whenever the buffer is non-empty, so bounty (and, while

@@ -460,10 +460,10 @@ export function createApp(doc: Document, root: HTMLElement, deps: AppDeps): AppH
   const geometry: BoardGeometry = {
     cols: grid.width,
     rows: grid.height,
-    // One pair drawn, as before (M3 story 3 changes data only): the shipped board is a
-    // single entrance → exit pair, and drawing every pair is M3 story 4's.
-    entrance: { col: grid.entrances[0]!.col, row: grid.entrances[0]!.row },
-    exit: { col: grid.exits[0]!.col, row: grid.exits[0]!.row },
+    // Every entrance and exit, in board order (M3: the crossing board's two pairs) — the scene
+    // draws each with its pair's heading and pulses each exit for its own leaks.
+    entrances: grid.entrances.map(({ col, row }) => ({ col, row })),
+    exits: grid.exits.map(({ col, row }) => ({ col, row })),
   };
   const handle = deps.sceneFactory(board, geometry);
   const inputCards = shell.cards.map((c) => ({ el: c.root, towerId: c.towerId }));
@@ -1321,7 +1321,7 @@ export function createApp(doc: Document, root: HTMLElement, deps: AppDeps): AppH
     // Kills and leaks since the last frame (#181 C1): the board bursts and pulses for them, and
     // the lives chip shows the leaks, no more often than its cue allows (`leak-cue.ts`).
     const fed = controller.drainFeedback();
-    const leakShowing = leakCue.update(now, fed.leaks);
+    const leakShowing = leakCue.update(now, fed.leaks.length);
     if (leakShowing !== leakCueShown) {
       leakCueShown = leakShowing;
       overlay.setLeakCue(leakShowing);
