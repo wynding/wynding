@@ -68,8 +68,8 @@ describe('M3 story 1 — the balance checker, calibrated on M2', () => {
     return run;
   };
 
-  it('registers M2’s showcase on its own board and seed, and nothing else yet', () => {
-    expect(REFERENCE_SETS).toEqual([M2_SHOWCASE]);
+  it('registers M2’s showcase on its own board and seed', () => {
+    expect(REFERENCE_SETS).toContain(M2_SHOWCASE);
     expect(M2_SHOWCASE).toMatchObject({
       rulesetId: 'wynding-core',
       boardId: 'field-01',
@@ -176,10 +176,12 @@ describe('M3 story 1 — the balance checker, calibrated on M2', () => {
   );
 
   it(
-    'the balance report runs every registered build and names the board-full wave',
+    'the balance report runs every M2 build and names the board-full wave',
     { timeout: 120_000 },
     () => {
-      const text = balanceReport(REFERENCE_SETS, getBundledRuleset);
+      // M2's set only: the command runs every registered set, and M3's full-arc runs
+      // belong there, not in the default suite.
+      const text = balanceReport([M2_SHOWCASE], getBundledRuleset);
       console.log(text);
       for (const build of M2_SHOWCASE.builds)
         expect(text).toContain(`${build.id} — ${build.summary}`);
