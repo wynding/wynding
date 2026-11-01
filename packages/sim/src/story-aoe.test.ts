@@ -67,6 +67,7 @@ function creepAtPoint(id: number, px: number, py: number, hp: number): CombatCre
     slowMulFp: [0],
     slowUntilTick: [0],
     stunUntilTick: [0],
+    destination: [0],
   };
 }
 
@@ -91,6 +92,7 @@ function restingCreeps(
     slowMulFp: rows.map(() => 0),
     slowUntilTick: rows.map(() => 0),
     stunUntilTick: rows.map(() => 0),
+    destination: rows.map(() => 0),
   };
 }
 
@@ -110,7 +112,7 @@ function aoeTower(): TowerArrays {
 }
 
 const RULESET = testRuleset(LANE, { extraTowers: [TEST_AOE_TOWER] });
-const FIELD = RULESET.board.field;
+const FIELD = RULESET.board.fields[0]!;
 const GRID = RULESET.board.grid;
 const SF_NUM = RULESET.balance.slowFloorNum;
 const SF_DEN = RULESET.balance.slowFloorDen;

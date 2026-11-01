@@ -11,13 +11,13 @@ import { buildGrid, type Grid } from './board';
 import { emptyTowers, type TowerArrays } from './tower';
 import { buildAuraIndex, auraMulFor, buffAmount, SUPPORT_MUL_IDENTITY } from './support';
 
-/** A plain open board with the standard blocked border ring and the two openings. */
+/** A plain open board with the standard blocked border ring and one entrance → exit pair. */
 function grid(width = 12, height = 12): Grid {
   return buildGrid({
     widthTiles: width,
     heightTiles: height,
-    entrance: { col: 0, row: Math.floor(height / 2) },
-    exit: { col: width - 1, row: Math.floor(height / 2) },
+    entrances: [{ col: 0, row: Math.floor(height / 2) }],
+    exits: [{ col: width - 1, row: Math.floor(height / 2) }],
   });
 }
 

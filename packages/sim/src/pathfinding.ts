@@ -1,11 +1,18 @@
 // pathfinding.ts — the exit-sourced distance field and shortest path over the
 // grid. Pure, deterministic, integer-only.
 //
-// Distances are uniform-cost (Dijkstra) from the EXIT outward, with octile edge
+// Distances are uniform-cost (Dijkstra) from an EXIT outward, with octile edge
 // weights: orthogonal steps cost 10 and diagonal steps cost 14 (≈ 10·√2), so a
 // diagonal costs ~1.4× an orthogonal one and paths follow the true-shortest
 // route rather than a hop-count approximation that can't tell routes apart. The
-// resulting field is a descent map every creep can follow toward the exit.
+// resulting field is a descent map every creep bound for that exit can follow.
+//
+// One field per DESTINATION (ADR 0015 — `context.ts` builds them): a destination is
+// a set of exits, and its field is the same calculation seeded from every exit in
+// the set. M3's capability profile admits only one-exit destinations, so a field is
+// seeded from exactly one exit here and `DistanceField.exit` names it; the story that
+// first admits a multi-exit destination widens the seed (and decides the two
+// questions ADR 0015 leaves open — which exit wins a tie, how a flyer picks).
 //
 // Injected blocks are ADDITIVE, exactly as in `neighbors`: the effective topology
 // is `grid.baseMask | extraBlocked`, materialized once into the field's private
@@ -27,7 +34,9 @@ import { blockedAt, distAt } from './field-access';
 /**
  * A distance-to-exit field. `dist` is row-major, in the octile integer metric,
  * with `-1` marking unreachable cells. `blockedMask` is the field's own private
- * snapshot of the effective topology it was computed against.
+ * snapshot of the effective topology it was computed against. `exit` is the one
+ * exit it was seeded from — the destination every creep reading this field leaks at;
+ * to those creeps every OTHER exit is an ordinary walkable cell.
  *
  * Produced only by {@link computeDistanceField}. It is read-only by convention —
  * consumers must not mutate `dist`/`blockedMask` (TypedArray elements can't be
@@ -42,18 +51,30 @@ export interface DistanceField {
   readonly blockedMask: Uint8Array;
 }
 
+/** Whether `cell` is one of `grid`'s exit openings. */
+function isGridExit(grid: Grid, cell: Cell): boolean {
+  return grid.exits.some((x) => x.col === cell.col && x.row === cell.row);
+}
+
 /**
- * Compute the exit-sourced distance field for `grid`. Blocking is additive: the
- * effective topology is the grid's base terrain OR the optional `extraBlocked`
- * mask (row-major, `width · height` bytes, nonzero = blocked). Throws
- * {@link GridError} if `extraBlocked` has the wrong length or if the exit is
- * blocked in the effective mask. The returned field owns a private copy of the
- * effective mask, so mutating the caller's `extraBlocked` afterward cannot change
- * an already-computed field.
+ * Compute the distance field toward `exit` — one of `grid`'s exits — for `grid`.
+ * Blocking is additive: the effective topology is the grid's base terrain OR the
+ * optional `extraBlocked` mask (row-major, `width · height` bytes, nonzero =
+ * blocked). Throws {@link GridError} if `exit` is not one of the grid's exits, if
+ * `extraBlocked` has the wrong length, or if the exit is blocked in the effective
+ * mask. The returned field owns a private copy of the effective mask, so mutating
+ * the caller's `extraBlocked` afterward cannot change an already-computed field.
  */
-export function computeDistanceField(grid: Grid, extraBlocked?: Uint8Array): DistanceField {
+export function computeDistanceField(
+  grid: Grid,
+  exit: Cell,
+  extraBlocked?: Uint8Array,
+): DistanceField {
   const { width, height } = grid;
   const cellCount = width * height;
+  if (exit == null || !isGridExit(grid, exit)) {
+    throw new GridError(`(${exit?.col},${exit?.row}) is not one of the grid's exits`);
+  }
   if (extraBlocked !== undefined && extraBlocked.length !== cellCount) {
     throw new GridError(`extraBlocked length ${extraBlocked.length} !== ${cellCount}`);
   }
@@ -66,11 +87,9 @@ export function computeDistanceField(grid: Grid, extraBlocked?: Uint8Array): Dis
     }
   }
 
-  const exitIndex = grid.exit.row * width + grid.exit.col;
+  const exitIndex = exit.row * width + exit.col;
   if (blockedMask[exitIndex] !== 0) {
-    throw new GridError(
-      `exit (${grid.exit.col},${grid.exit.row}) is blocked in the effective mask`,
-    );
+    throw new GridError(`exit (${exit.col},${exit.row}) is blocked in the effective mask`);
   }
 
   const blocked = (c: number, r: number): boolean => {
@@ -144,15 +163,15 @@ export function computeDistanceField(grid: Grid, extraBlocked?: Uint8Array): Dis
     dist,
     width,
     height,
-    exit: Object.freeze({ col: grid.exit.col, row: grid.exit.row }),
+    exit: Object.freeze({ col: exit.col, row: exit.row }),
     blockedMask,
   };
 }
 
 /**
- * Whether `cell` can reach the exit in `field`. Out-of-bounds cells are not
+ * Whether `cell` can reach the field's exit. Out-of-bounds cells are not
  * reachable (returns `false`) rather than throwing — the caller may probe cells
- * near the edge. Enforcement of the maze invariant (rejecting a build) is Story 3.
+ * near the edge. The maze invariant (rejecting a build) is `canPlaceTower`'s.
  */
 export function isReachable(field: DistanceField, cell: Cell): boolean {
   const { col, row } = cell;
@@ -161,10 +180,11 @@ export function isReachable(field: DistanceField, cell: Cell): boolean {
 }
 
 /**
- * The shortest path from `from` (default: the grid entrance) to the exit, as an
- * ordered `Cell[]` beginning at `from` and ending at the exit — or `null` on a
- * typed failure: the field does not match the grid (dimensions or exit differ),
- * or `from` is out of bounds, blocked, or unreachable.
+ * The shortest path from `from` (an entrance, or any cell) to the field's exit, as
+ * an ordered `Cell[]` beginning at `from` and ending at that exit — or `null` on a
+ * typed failure: the field does not match the grid (dimensions differ, or its exit
+ * is not one of the grid's exits), or `from` is out of bounds, blocked, or
+ * unreachable.
  *
  * Reconstruction steps cell-by-cell via {@link firstDescentNeighbor} — the single
  * canonical descent rule the creep follower also uses, so a stored path can never
@@ -172,17 +192,8 @@ export function isReachable(field: DistanceField, cell: Cell): boolean {
  * non-negative integer every step, so the walk always terminates at the exit; the
  * fixed neighbour order makes the chosen path deterministic.
  */
-export function shortestPath(
-  grid: Grid,
-  field: DistanceField,
-  from: Cell = grid.entrance,
-): Cell[] | null {
-  if (
-    field.width !== grid.width ||
-    field.height !== grid.height ||
-    field.exit.col !== grid.exit.col ||
-    field.exit.row !== grid.exit.row
-  ) {
+export function shortestPath(grid: Grid, field: DistanceField, from: Cell): Cell[] | null {
+  if (field.width !== grid.width || field.height !== grid.height || !isGridExit(grid, field.exit)) {
     return null;
   }
   if (blockedAt(field, from.col, from.row)) return null; // out of bounds or on a wall

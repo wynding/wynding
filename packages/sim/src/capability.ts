@@ -143,11 +143,33 @@ export interface CapabilityProfile {
    *  a real rejection witness. Checked per tower (burst bundles only) in
    *  `checkCapabilityGlobal`. */
   readonly maxBurstTravelTicks: number;
-  /** Ceilings on a board's entrance and exit counts (format 3, ADR 0015) — 1 each at
-   *  sv16: the format can describe several pairs, but this sim build spawns at one
-   *  entrance and routes to one exit. Board-scoped, checked in `checkCapabilityBoard`. */
-  readonly maxEntrancesPerBoard: number;
-  readonly maxExitsPerBoard: number;
+  /** Ceiling on how many exits ONE destination may hold (format 3, ADR 0015) — 1. The
+   *  format keeps a destination's set shape so "nearest exit" never needs a second
+   *  format change, but a multi-exit destination raises two questions ADR 0015
+   *  deliberately leaves to the first board that needs one — which exit wins when two
+   *  are equally near, and how a flyer picks among several — so this build rejects it
+   *  and answers neither by accident. Genuinely narrower than the schema's own 1..16, so
+   *  it carries a live rejection witness. Board-scoped, checked per entrance in
+   *  `checkCapabilityBoard`.
+   *
+   *  The number of entrances and exits is NOT capped here — the schema's own 1..16 per
+   *  list stands. Neither count costs anything a destination does not: an entrance adds
+   *  one O(1) reachability read per placement check, an exit adds a walkable border
+   *  cell. "Send this entrance to any exit" therefore stays content alone, as ADR 0015
+   *  promises, up to the destination ceiling below. */
+  readonly maxDestinationExits: number;
+  /** Ceiling on a board's DISTINCT destinations (M3, ADR 0015) — 4. This is the bound
+   *  that replaced every "one flow-field" assumption: the sim keeps one field per
+   *  distinct destination, so every maze change (a placement, a sell, a mine consuming
+   *  itself) rebuilds this many full-board Dijkstra fields instead of one, every
+   *  placement that reaches the maze invariant builds this many candidate fields, and
+   *  the field cache holds this many resident fields per board. 4 is a pair per border
+   *  side — M3's crossing board uses 2 — so the per-maze-change cost is at most 4× the
+   *  single-field cost every earlier perf measurement (ADR 0005) and the replay layer's
+   *  `MAX_TOTAL_TOWER_COMMANDS` budget were sized on. Genuinely narrower than the
+   *  schema's 16 entrances, so it carries a live rejection witness. Board-scoped,
+   *  checked in `checkCapabilityBoard`. */
+  readonly maxDestinationsPerBoard: number;
   /** The one `hpPercent` every wave must carry (format 3) — 100 at sv16, where spawn
    *  reads the catalog's hit points unscaled. The `requiredLeakCost` precedent: a value
    *  the schema already admits but this build does not yet simulate is pinned, not
@@ -206,8 +228,8 @@ const PROFILES: Readonly<Record<number, CapabilityProfile>> = {
     maxSupportDamageMulFp: 1024,
     allowedBurstForms: ['aoe'],
     maxBurstTravelTicks: 8,
-    maxEntrancesPerBoard: 1,
-    maxExitsPerBoard: 1,
+    maxDestinationExits: 1,
+    maxDestinationsPerBoard: 4,
     requiredHpPercent: 100,
   },
 };

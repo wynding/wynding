@@ -453,9 +453,9 @@ describe('compiled-board mutation regression (#21/P4)', () => {
   // entry — compiling ONCE and running ≥2 full matches on the SAME compiled object
   // below models that reuse directly (sim tests must not import replay; actual
   // cache-hit coverage lives in replay's own tests).
-  it('board.field.dist/blockedMask and board.grid.baseMask are never mutated across 2 full matches on ONE compiled ruleset', () => {
-    const distSnapshot = SCENARIO_RULESET.board.field.dist.slice();
-    const blockedMaskSnapshot = SCENARIO_RULESET.board.field.blockedMask.slice();
+  it('board.fields[0].dist/blockedMask and board.grid.baseMask are never mutated across 2 full matches on ONE compiled ruleset', () => {
+    const distSnapshot = SCENARIO_RULESET.board.fields[0]!.dist.slice();
+    const blockedMaskSnapshot = SCENARIO_RULESET.board.fields[0]!.blockedMask.slice();
     const baseMaskSnapshot = SCENARIO_RULESET.board.grid.baseMask.slice();
 
     // toEqual does a deep, element-by-element structural comparison meant for
@@ -474,8 +474,12 @@ describe('compiled-board mutation regression (#21/P4)', () => {
 
     const assertUnmutated = (): void => {
       const checks: Array<[string, ArrayLike<number>, ArrayLike<number>]> = [
-        ['board.field.dist', SCENARIO_RULESET.board.field.dist, distSnapshot],
-        ['board.field.blockedMask', SCENARIO_RULESET.board.field.blockedMask, blockedMaskSnapshot],
+        ['board.fields[0].dist', SCENARIO_RULESET.board.fields[0]!.dist, distSnapshot],
+        [
+          'board.fields[0].blockedMask',
+          SCENARIO_RULESET.board.fields[0]!.blockedMask,
+          blockedMaskSnapshot,
+        ],
         ['board.grid.baseMask', SCENARIO_RULESET.board.grid.baseMask, baseMaskSnapshot],
       ];
       for (const [name, actual, expected] of checks) {

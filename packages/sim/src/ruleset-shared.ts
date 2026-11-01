@@ -224,9 +224,11 @@ export const MAX_DOT_DURATION_CADENCE_RATIO = 8;
 /**
  * The validator's budget of tower commands (`placeTower` + `sellTower`) across a whole
  * match — a CPU budget: every `placeTower` that reaches the maze-invariant check runs a
- * full-board search, and a rejected placement is a free no-op, so the economy cannot
- * rate-limit repeats. 2,000 since sv17 (1,000 before), which a sell-and-rebuild build
- * needs: at I = 1,423, 40 kept `basic`s and 481 flips are 1,002 commands.
+ * full-board search per distinct destination on the board (M3, ADR 0015 — at most
+ * `maxDestinationsPerBoard`, 4, capability.ts), and a rejected placement is a free no-op,
+ * so the economy cannot rate-limit repeats. 2,000 since sv17 (1,000 before), which a
+ * sell-and-rebuild build needs: at I = 1,423, 40 kept `basic`s and 481 flips are 1,002
+ * commands.
  */
 export const MAX_TOTAL_TOWER_COMMANDS = 2_000;
 

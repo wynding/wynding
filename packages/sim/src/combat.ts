@@ -2,7 +2,8 @@
 // impact fire, sticky "first" targeting, per-kill bounty, and per-impact direct/
 // slow resolution. Pure, deterministic, integer-only.
 //
-// A tower ACQUIRES the in-range creep nearest the exit (min route-distance, ties to
+// A tower ACQUIRES the in-range creep nearest its own exit (min route-distance to the
+// creep's OWN destination — M3, ADR 0015 — one shared unit across routes; ties to
 // the lower id) and holds it while it stays present, alive, and in range. Each fire
 // SNAPSHOTS its catalog effects (fresh plain objects — impacts serialize into the
 // world-hash, so a shared reference across fires would let one impact's runtime
@@ -53,13 +54,16 @@
 // HAZARD, for the next story that touches either budget: a burst consumption changes
 // the tower mask with NO tower command spent, which `MAX_TOTAL_TOWER_COMMANDS` (the
 // replay validator's pathfinding-CPU budget, `ruleset-shared.ts`) did not previously have
-// to account for. `effectiveField` recomputes a full-board BFS whenever the mask differs,
-// so N `placeTower` commands for `mine` can now force up to 2N recomputes — N at
-// placement, N at detonation. Still bounded (≤1 per tick against `MAX_MATCH_TICKS`, and
+// to account for. `effectiveFields` recomputes a full-board BFS PER DISTINCT DESTINATION
+// (M3, ADR 0015 — ≤ `maxDestinationsPerBoard`, capability.ts) whenever the mask
+// differs, so N `placeTower` commands for `mine` can now force up to 2N recompute
+// rounds — N at placement, N at detonation. Still bounded (≤1 per tick against `MAX_MATCH_TICKS`, and
 // the server compiles its own board rather than the request's), so it is a budget
 // accounting note rather than a live concern. Counted at sv17's widening (M3 story 2): one
-// recompute per command and one per detonated placement, at most
-// `MAX_TOTAL_TOWER_COMMANDS + MAX_TOWER_PLACEMENTS` = 3,000 a match, against 72,000 ticks.
+// recompute round per command and one per detonated placement, at most
+// `MAX_TOTAL_TOWER_COMMANDS + MAX_TOWER_PLACEMENTS` = 3,000 rounds a match, against 72,000
+// ticks — each round one field per distinct destination since M3 story 3 (the combined
+// worst case, placement checks included, is at `MAX_TOTAL_TOWER_COMMANDS`).
 // On any budget-conforming board the in-flight slack stays far under the
 // `MAX_TOWERS` (1000) cap vs the physical tower capacity, so the cap never bites
 // genuine play; a caller that drives the queue to the cap by abusive sell/rebuild
@@ -383,9 +387,10 @@ export interface CombatCreeps {
   slowMulFp: number[]; // 0 = no active slow
   slowUntilTick: number[]; // 0 = no active slow (paired with slowMulFp)
   stunUntilTick: number[]; // 0 = not stunned (M2-S6, no paired magnitude column)
+  destination: number[]; // index into the board's per-destination fields (M3, ADR 0015)
 }
 
-/** The empty 14-column creep SoA — the single factory, reused by the sim barrel. */
+/** The empty 15-column creep SoA — the single factory, reused by the sim barrel. */
 export const emptyCreeps = (): CombatCreeps => ({
   id: [],
   hp: [],
@@ -401,6 +406,7 @@ export const emptyCreeps = (): CombatCreeps => ({
   slowMulFp: [],
   slowUntilTick: [],
   stunUntilTick: [],
+  destination: [],
 });
 
 /** True iff `e` is a valid `EffectPrimitive`: `direct` — a positive safe-integer
@@ -735,6 +741,9 @@ interface LiveCreep {
    *  the tower loop filters acquisition (both the sticky-hold check and the fresh
    *  acquire candidate) by comparing this against each tower's own mask. */
   readonly domain: 'ground' | 'air';
+  /** The creep's OWN destination field (M3, ADR 0015) — `dist` was measured against
+   *  it, and a blast fired at this creep leads it along it. */
+  readonly field: DistanceField;
 }
 
 /**
@@ -747,8 +756,10 @@ interface LiveCreep {
 const DIST_SCALE = 1 << 16;
 
 /**
- * The creep's **weighted remaining route-distance to the exit** (PRD 0001, "Targeting
- * is sticky"), scaled by {@link DIST_SCALE}: the flow-field distance from its next
+ * The creep's **weighted remaining route-distance to its own exit** (PRD 0001,
+ * "Targeting is sticky"; M3: measured in the field of the creep's OWN destination, ADR
+ * 0015 — every destination's field shares the one octile unit, so towers compare creeps
+ * on different routes directly), scaled by {@link DIST_SCALE}: the flow-field distance from its next
  * waypoint (`head`) PLUS the cost-weighted fraction of the current edge it has yet to
  * travel (`edgeCost · remaining / edgeLen`). This is what makes "first" the creep most
  * about to leak — two creeps sharing a cell at different `progress` order by who is
@@ -769,8 +780,8 @@ const DIST_SCALE = 1 << 16;
  * never-throw contract as the rest of combat.
  *
  * `domain` (M2-S7 P3) branches the whole metric. GROUND is every rule above,
- * unchanged. AIR is the straight-line remaining distance to the EXIT CENTRE from
- * the creep's own derived point, `isqrt(dx² + dy²)`, converted into the same
+ * unchanged. AIR is the straight-line remaining distance to its OWN EXIT'S CENTRE
+ * (`field.exit` — the creep's own destination field) from the creep's own derived point, `isqrt(dx² + dy²)`, converted into the same
  * shared unit as the ground metric by the pinned formula `⌊airDistanceFp ×
  * ORTHO_COST × DIST_SCALE / FP_ONE⌋` — air never consults the distance field, so
  * it has no stranded/`null` case.
@@ -1254,7 +1265,9 @@ export function applyImpactToCreep(
  *   - `move`  → the projected point, re-derived via {@link deriveValidCreepPosition}
  *     (the single seam movement/targeting/placement all share).
  *   - `leak`  → the exit centre — m2.md's "clamped to the exit" falls straight out
- *     of `advanceCreep`'s own `leak` branch; no separate clamp to write.
+ *     of `advanceCreep`'s own `leak` branch; no separate clamp to write. `field` is the
+ *     target's OWN destination field (M3), so the clamp lands on the creep's own exit,
+ *     never another pair's.
  *   - `drop`  → the target's CURRENT point (`currentPoint`, already derived by the
  *     caller) — a TOTALITY RAIL. Precisely (QC round 3, reconciling this with
  *     `blastMembers`' own note, which said the opposite): `live` proves each row
@@ -1485,7 +1498,7 @@ export function runCombat(
   dots: readonly unknown[],
   tick: number,
   bounty: number,
-  field: DistanceField,
+  fields: readonly DistanceField[],
   grid: Grid,
   towerById: Readonly<Partial<Record<string, CompiledTower>>>,
   creepById: Readonly<Partial<Record<string, CompiledCreep>>>,
@@ -1796,11 +1809,19 @@ export function runCombat(
     survivors.slowMulFp.push(safeSlowColumn(creeps.slowMulFp[i]));
     survivors.slowUntilTick.push(safeSlowColumn(creeps.slowUntilTick[i]));
     survivors.stunUntilTick.push(safeSlowColumn(creeps.stunUntilTick[i]));
+    survivors.destination.push(
+      Number.isSafeInteger(creeps.destination[i]) ? (creeps.destination[i] as number) : 0,
+    );
   }
 
-  // (4) Precompute the targetable live creeps once (position-valid + reachable).
+  // (4) Precompute the targetable live creeps once (position-valid + reachable), each
+  //     measured against its OWN destination's field (M3, ADR 0015). A destination index
+  //     naming no field is a forged row (`coerceSoa` drops it before `step` gets here) —
+  //     never a valid "first" target, exactly like a stranded one.
   const live: LiveCreep[] = [];
   for (let i = 0; i < survivors.id.length; i++) {
+    const field = fields[survivors.destination[i] as number];
+    if (field === undefined) continue;
     const geom = deriveValidCreepPosition(
       survivors.fromX[i],
       survivors.fromY[i],
@@ -1829,6 +1850,7 @@ export function runCombat(
       y: geom.point.y,
       dist,
       domain,
+      field,
     });
   }
 
@@ -1929,7 +1951,7 @@ export function runCombat(
       }
     }
     // Hold the locked creep while it is present and in range; otherwise acquire the
-    // in-range creep nearest the exit (ties → lower id), or none. `targetLive` is the
+    // in-range creep nearest its own exit (ties → lower id), or none. `targetLive` is the
     // SAME row this decision was made from — `heldLive` for a hold, `best` for a fresh
     // acquire — never re-derived, so a blast fire below reuses exactly what targeting saw.
     const targetLive = held !== 0 && heldInRange ? heldLive : best;
@@ -1994,7 +2016,7 @@ export function runCombat(
         attack.mode === 'burst'
           ? { x: towerX, y: towerY }
           : predictBlastPoint(
-              field,
+              targetLive.field,
               grid,
               survivors,
               targetLive.index,

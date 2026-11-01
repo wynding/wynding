@@ -48,7 +48,7 @@ const RULESET = testRuleset({
   entrance: { col: 0, row: 6 },
   exit: { col: 13, row: 6 },
 });
-const FIELD = RULESET.board.field;
+const FIELD = RULESET.board.fields[0]!;
 const GRID = RULESET.board.grid;
 
 // Tuning now lives in the ruleset; mirror the compiled M1 tower stats as locals for
@@ -123,6 +123,7 @@ function restingCreeps(
     slowMulFp: rows.map(() => 0),
     slowUntilTick: rows.map(() => 0),
     stunUntilTick: rows.map(() => 0),
+    destination: rows.map(() => 0),
   };
 }
 
@@ -147,6 +148,7 @@ function creepAtPoint(id: number, px: number, py: number, hp: number): CombatCre
     slowMulFp: [0],
     slowUntilTick: [0],
     stunUntilTick: [0],
+    destination: [0],
   };
 }
 
@@ -229,6 +231,7 @@ describe('runCombat — fire, schedule, resolve, kill, bounty', () => {
       slowMulFp: [0],
       slowUntilTick: [0],
       stunUntilTick: [0],
+      destination: [0],
     };
     const t4 = runCombatT(
       withoutTarget,
@@ -370,6 +373,7 @@ describe('runCombat — landed-impact StepEvents (#31)', () => {
       slowMulFp: [0],
       slowUntilTick: [0],
       stunUntilTick: [0],
+      destination: [0],
     };
     const impact: Impact = {
       kind: 'targeted',
@@ -724,6 +728,7 @@ describe('runCombat — point-level "first" (PRD: the creep most about to leak)'
     slowMulFp: rows.map(() => 0),
     slowUntilTick: rows.map(() => 0),
     stunUntilTick: rows.map(() => 0),
+    destination: rows.map(() => 0),
   });
 
   it('targets the creep further along a shared cell over a lower-id trailing creep', () => {
@@ -948,7 +953,7 @@ describe('runCombat — armor (M2-S5a)', () => {
       [],
       0,
       0,
-      FIELD,
+      [FIELD],
       GRID,
       TOWER_BY_ID,
       ARMOR_RULESET.creepById,
@@ -982,7 +987,7 @@ describe('runCombat — armor (M2-S5a)', () => {
       [],
       0,
       0,
-      FIELD,
+      [FIELD],
       GRID,
       TOWER_BY_ID,
       ARMOR_RULESET.creepById,
@@ -1012,7 +1017,7 @@ describe('runCombat — armor (M2-S5a)', () => {
       [],
       0,
       0,
-      FIELD,
+      [FIELD],
       GRID,
       TOWER_BY_ID,
       RULESET.creepById,
@@ -1049,7 +1054,7 @@ describe('runCombat — armor (M2-S5a)', () => {
       [],
       0,
       0,
-      FIELD,
+      [FIELD],
       GRID,
       TOWER_BY_ID,
       ARMOR_RULESET.creepById,
@@ -1081,7 +1086,7 @@ describe('runCombat — armor (M2-S5a)', () => {
         [],
         0,
         0,
-        FIELD,
+        [FIELD],
         GRID,
         TOWER_BY_ID,
         RULESET.creepById,
@@ -1976,7 +1981,7 @@ describe('runCombat — DoT tick step (M2-S5a P3)', () => {
       [record],
       0,
       0,
-      FIELD,
+      [FIELD],
       GRID,
       TOWER_BY_ID,
       ARMOR_RULESET.creepById,
@@ -2175,6 +2180,7 @@ describe('runCombat — DoT tick step (M2-S5a P3)', () => {
       slowMulFp: Array.from({ length: ROWS }, () => 0),
       slowUntilTick: Array.from({ length: ROWS }, () => 0),
       stunUntilTick: Array.from({ length: ROWS }, () => 0),
+      destination: Array.from({ length: ROWS }, () => 0),
     };
     s.tick = 2000;
     const preStepTick = s.tick; // step() advances s.tick — runCombat itself sees the PRE-increment value

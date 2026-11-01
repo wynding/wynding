@@ -158,8 +158,8 @@ describe('capabilityProfile', () => {
       maxSupportDamageMulFp: 1024,
       allowedBurstForms: ['aoe'],
       maxBurstTravelTicks: 8,
-      maxEntrancesPerBoard: 1,
-      maxExitsPerBoard: 1,
+      maxDestinationExits: 1,
+      maxDestinationsPerBoard: 4,
       requiredHpPercent: 100,
     });
     // Every prior version is deleted with each bump (G11, capability.ts's header).
@@ -223,18 +223,45 @@ describe('capability gate — accept at boundary, reject beyond, per dimension',
     });
   });
 
-  it('format 3 at sv16: one entrance, one exit, hpPercent 100 — a second opening or another percent is rejected', () => {
+  it('requiredHpPercent: 100 accepted, 101 rejected', () => {
     compiles(() => undefined);
-    rejects((b) => {
-      b.boards[0]!.entrances = [
-        ...b.boards[0]!.entrances,
-        { id: 'in2', cell: { col: 0, row: 3 }, destination: ['out'] },
-      ];
-    }, '2 entrances, exceeds 1');
-    rejects((b) => {
-      b.boards[0]!.exits = [...b.boards[0]!.exits, { id: 'out2', cell: { col: 8, row: 3 } }];
-    }, '2 exits, exceeds 1');
     rejects((b) => (b.boards[0]!.waves[0]!.hpPercent = 101), 'hpPercent 101 must be 100');
+  });
+
+  it('maxDestinationExits (M3, ADR 0015): a one-exit destination compiles, a two-exit one is rejected', () => {
+    // A second pair on the 9×5 board: entrance (0,3) → exit (8,3).
+    compiles((b) => {
+      b.boards[0]!.exits.push({ id: 'out2', cell: { col: 8, row: 3 } });
+      b.boards[0]!.entrances.push({ id: 'in2', cell: { col: 0, row: 3 }, destination: ['out2'] });
+    });
+    rejects((b) => {
+      b.boards[0]!.exits.push({ id: 'out2', cell: { col: 8, row: 3 } });
+      b.boards[0]!.entrances[0]!.destination = ['out', 'out2'];
+    }, "entrance 'in' destination has 2 exits, exceeds 1");
+  });
+
+  it('maxDestinationsPerBoard (M3): 4 distinct destinations compile, 5 are rejected — while entrance count itself is not capped', () => {
+    // A 12×12 board, entrances down the west border and exits down the east, entrance i
+    // bound for exit i (or, for the uncapped-entrances case, every entrance bound for one).
+    const pairs =
+      (n: number, sameExit = false) =>
+      (b: MutableRuleset) => {
+        b.boards[0]!.widthTiles = 12;
+        b.boards[0]!.heightTiles = 12;
+        b.boards[0]!.exits = Array.from({ length: n }, (_, i) => ({
+          id: `out${i}`,
+          cell: { col: 11, row: 1 + 2 * i },
+        }));
+        b.boards[0]!.entrances = Array.from({ length: n }, (_, i) => ({
+          id: `in${i}`,
+          cell: { col: 0, row: 1 + 2 * i },
+          destination: [sameExit ? 'out0' : `out${i}`],
+        }));
+        b.boards[0]!.waves[0]!.entries[0]!.entrance = 'in0';
+      };
+    compiles(pairs(4));
+    rejects(pairs(5), 'has 5 distinct destinations, exceeds 4');
+    compiles(pairs(5, true)); // five entrances, ONE destination — entrances are not the cost
   });
 
   it('maxOffsetTicks defers to the schema ceiling — a nonzero stream offset compiles', () => {
@@ -593,6 +620,52 @@ describe('board gates — air-domain size ceiling vs. axis-alignment, deliberate
   it('catalog has air, board schedule does NOT fly, non-axis-aligned geometry — accepted', () => {
     const b = bundleWithSpec(NON_AXIS, { withAirCreep: true, flies: false });
     expect(() => compileRuleset(b as Ruleset, 'test')).not.toThrow();
+  });
+
+  // M3 / ADR 0015: the air rule is PER ENTRANCE. On a board with an in-line pair and an
+  // out-of-line pair, air is legal from the in-line entrance and illegal from the other —
+  // and a multi-exit destination can never carry air, whatever its alignment.
+  function twoPairBoard(flyFrom: 'line' | 'skew' | 'none'): MutableRuleset {
+    const b = bundleWithSpec(
+      { widthTiles: 9, heightTiles: 9, entrance: { col: 0, row: 4 }, exit: { col: 8, row: 4 } },
+      { withAirCreep: true, flies: false },
+    );
+    b.boards[0]!.entrances = [
+      { id: 'line', cell: { col: 0, row: 4 }, destination: ['east'] },
+      { id: 'skew', cell: { col: 3, row: 0 }, destination: ['south'] },
+    ];
+    b.boards[0]!.exits = [
+      { id: 'east', cell: { col: 8, row: 4 } },
+      { id: 'south', cell: { col: 6, row: 8 } },
+    ];
+    const entry = b.boards[0]!.waves[0]!.entries[0]!;
+    entry.entrance = flyFrom === 'skew' ? 'skew' : 'line';
+    if (flyFrom !== 'none') entry.creepId = 'flyer';
+    return b;
+  }
+
+  it('air from an entrance whose one-exit destination is in line with it compiles, even beside an out-of-line pair', () => {
+    expect(() => compileRuleset(twoPairBoard('line') as Ruleset, 'test')).not.toThrow();
+    expect(() => compileRuleset(twoPairBoard('none') as Ruleset, 'test')).not.toThrow();
+  });
+
+  it('air from an entrance whose destination is out of line is rejected, naming the entrance', () => {
+    const b = twoPairBoard('skew');
+    expect(() => compileRuleset(b as Ruleset, 'test')).toThrow(
+      "entrance 'skew' (3,0) -> exit (6,8) is not axis-aligned",
+    );
+  });
+
+  it('air from an entrance with a multi-exit destination is rejected by the air rule itself', () => {
+    const b = twoPairBoard('line');
+    b.boards[0]!.entrances[0]!.destination = ['east', 'south'];
+    expect(() => compileRuleset(b as Ruleset, 'test')).toThrow(
+      "entrance 'line' flies an air creep but its destination has 2 exits",
+    );
+    // The same destination with no flyer scheduled there falls to the destination gate.
+    const ground = twoPairBoard('none');
+    ground.boards[0]!.entrances[0]!.destination = ['east', 'south'];
+    expect(() => compileRuleset(ground as Ruleset, 'test')).toThrow('destination has 2 exits');
   });
 
   it('catalog has air, board schedule does NOT fly, oversized side — rejected', () => {

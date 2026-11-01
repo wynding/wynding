@@ -112,7 +112,9 @@ function routeOver(ps: readonly { anchor: Cell; towerId: string }[]): readonly C
     towerId: ps.map((p) => p.towerId),
   };
   const mask = materializeTowerMask(grid, towers, compiled.towerById);
-  return shortestPath(grid, computeDistanceField(grid, mask), grid.entrance) ?? [];
+  // The catalog board is one entrance → exit pair (format 3: `west` → `east`).
+  const field = computeDistanceField(grid, grid.exits[0]!, mask);
+  return shortestPath(grid, field, grid.entrances[0]!) ?? [];
 }
 const routeKey = (p: readonly Cell[]): string => p.map((c) => `${c.col},${c.row}`).join('|');
 const BASE_KEY = routeKey(route);

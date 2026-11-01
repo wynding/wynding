@@ -7,12 +7,14 @@ import { buildGrid, GridError, type GridSpec } from './board';
 import { computeDistanceField, isReachable, shortestPath, type DistanceField } from './pathfinding';
 
 // The same 5×5 fixture as board.test: openings at (0,2) and (4,2), 3×3 interior.
+const ENTRANCE: Cell = { col: 0, row: 2 };
+const EXIT: Cell = { col: 4, row: 2 };
 function fixtureSpec(): GridSpec {
   return {
     widthTiles: 5,
     heightTiles: 5,
-    entrance: { col: 0, row: 2 },
-    exit: { col: 4, row: 2 },
+    entrances: [ENTRANCE],
+    exits: [EXIT],
   };
 }
 
@@ -44,7 +46,7 @@ function assertLegalPath(path: readonly Cell[], field: DistanceField): void {
 
 describe('computeDistanceField — exit-sourced octile distances', () => {
   const grid = buildGrid(fixtureSpec());
-  const field = computeDistanceField(grid);
+  const field = computeDistanceField(grid, EXIT);
 
   it('is zero at the exit and increases monotonically along the straight run', () => {
     expect(field.dist[idx(4, 2, 5)]).toBe(0); // exit
@@ -60,8 +62,8 @@ describe('computeDistanceField — exit-sourced octile distances', () => {
   });
 
   it('is byte-identical across two runs (determinism)', () => {
-    const a = computeDistanceField(grid);
-    const b = computeDistanceField(grid);
+    const a = computeDistanceField(grid, EXIT);
+    const b = computeDistanceField(grid, EXIT);
     expect(Array.from(a.dist)).toEqual(Array.from(b.dist));
     expect(Array.from(a.blockedMask)).toEqual(Array.from(b.blockedMask));
   });
@@ -69,7 +71,7 @@ describe('computeDistanceField — exit-sourced octile distances', () => {
 
 describe('isReachable', () => {
   const grid = buildGrid(fixtureSpec());
-  const field = computeDistanceField(grid);
+  const field = computeDistanceField(grid, EXIT);
 
   it('is true for a cell with a route and false for blocked terrain', () => {
     expect(isReachable(field, { col: 0, row: 2 })).toBe(true); // entrance
@@ -84,10 +86,10 @@ describe('isReachable', () => {
 
 describe('shortestPath', () => {
   const grid = buildGrid(fixtureSpec());
-  const field = computeDistanceField(grid);
+  const field = computeDistanceField(grid, EXIT);
 
   it('returns the straight entrance→exit line on the open board', () => {
-    const path = shortestPath(grid, field);
+    const path = shortestPath(grid, field, ENTRANCE);
     expect(path).toEqual([
       { col: 0, row: 2 },
       { col: 1, row: 2 },
@@ -100,9 +102,9 @@ describe('shortestPath', () => {
   it('reroutes around an injected block, still a legal no-corner-cut path', () => {
     const extra = new Uint8Array(25);
     extra[idx(2, 2, 5)] = 1; // wall the centre of the straight run
-    const blockedField = computeDistanceField(grid, extra);
+    const blockedField = computeDistanceField(grid, EXIT, extra);
 
-    const path = shortestPath(grid, blockedField);
+    const path = shortestPath(grid, blockedField, ENTRANCE);
     expect(path).not.toBeNull();
     const p = path!;
     expect(p[0]).toEqual({ col: 0, row: 2 }); // starts at entrance
@@ -119,17 +121,29 @@ describe('shortestPath', () => {
     extra[idx(2, 1, 5)] = 1;
     extra[idx(2, 2, 5)] = 1;
     extra[idx(2, 3, 5)] = 1;
-    const walled = computeDistanceField(grid, extra);
+    const walled = computeDistanceField(grid, EXIT, extra);
     expect(isReachable(walled, { col: 0, row: 2 })).toBe(false);
-    expect(shortestPath(grid, walled)).toBeNull();
+    expect(shortestPath(grid, walled, ENTRANCE)).toBeNull();
   });
 
   it('returns null for a field whose dimensions or exit do not match the grid', () => {
-    const wider = buildGrid({ ...fixtureSpec(), widthTiles: 6, exit: { col: 5, row: 2 } });
-    expect(shortestPath(wider, field)).toBeNull(); // dims differ
+    const wider = buildGrid({ ...fixtureSpec(), widthTiles: 6, exits: [{ col: 5, row: 2 }] });
+    expect(shortestPath(wider, field, ENTRANCE)).toBeNull(); // dims differ
 
-    const movedExit = buildGrid({ ...fixtureSpec(), exit: { col: 2, row: 4 } });
-    expect(shortestPath(movedExit, field)).toBeNull(); // same dims, different exit
+    const movedExit = buildGrid({ ...fixtureSpec(), exits: [{ col: 2, row: 4 }] });
+    expect(shortestPath(movedExit, field, ENTRANCE)).toBeNull(); // same dims, different exit
+  });
+
+  it("accepts a field seeded from ANY of the grid's exits (several exits, ADR 0015)", () => {
+    const twoExits = buildGrid({ ...fixtureSpec(), exits: [{ col: 2, row: 4 }, EXIT] });
+    const south = computeDistanceField(twoExits, { col: 2, row: 4 });
+    const east = computeDistanceField(twoExits, EXIT);
+    expect(shortestPath(twoExits, east, ENTRANCE)!.at(-1)).toEqual(EXIT);
+    expect(shortestPath(twoExits, south, ENTRANCE)!.at(-1)).toEqual({ col: 2, row: 4 });
+    // To a creep bound for one exit, the other is an ordinary walkable cell: it holds a
+    // real distance in that field, never the 0 that marks a destination.
+    expect(east.dist[idx(2, 4, 5)]).toBeGreaterThan(0);
+    expect(south.dist[idx(4, 2, 5)]).toBeGreaterThan(0);
   });
 
   it('returns null rather than looping when a matching-shaped field has no descent', () => {
@@ -155,18 +169,24 @@ describe('computeDistanceField — validation and defensive copy', () => {
   const grid = buildGrid(fixtureSpec());
 
   it('rejects an extraBlocked mask of the wrong length', () => {
-    expect(() => computeDistanceField(grid, new Uint8Array(3))).toThrow(GridError);
+    expect(() => computeDistanceField(grid, EXIT, new Uint8Array(3))).toThrow(GridError);
+  });
+
+  it("rejects a source cell that is not one of the grid's exits", () => {
+    expect(() => computeDistanceField(grid, ENTRANCE)).toThrow(/not one of the grid's exits/);
+    expect(() => computeDistanceField(grid, { col: 2, row: 2 })).toThrow(GridError);
+    expect(() => computeDistanceField(grid, null as unknown as Cell)).toThrow(GridError);
   });
 
   it('rejects a mask that blocks the exit', () => {
     const extra = new Uint8Array(25);
     extra[idx(4, 2, 5)] = 1; // block the exit itself
-    expect(() => computeDistanceField(grid, extra)).toThrow(/blocked/);
+    expect(() => computeDistanceField(grid, EXIT, extra)).toThrow(/blocked/);
   });
 
   it('snapshots the effective mask — mutating the caller mask later cannot change the field', () => {
     const extra = new Uint8Array(25); // all open
-    const field = computeDistanceField(grid, extra);
+    const field = computeDistanceField(grid, EXIT, extra);
     expect(field.dist[idx(0, 2, 5)]).toBe(40);
 
     extra[idx(2, 2, 5)] = 1; // mutate AFTER computing

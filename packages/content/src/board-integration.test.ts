@@ -16,23 +16,28 @@ import {
   compileRuleset,
   createInitialState,
   GridError,
+  type BoardSpec,
 } from '@wynding/sim';
 import { getBundledRuleset, defaultBoardId } from './registry';
 
 const ruleset = getBundledRuleset();
 const boardId = defaultBoardId(ruleset);
-// field-01 is one entrance → exit pair in format 3 (`west` → `east`).
+// field-01 is one entrance → exit pair in format 3 (`west` → `east`), as the sim's
+// `BoardSpec` sees it: cells by index, the destination as exit indices.
 const shippedPair = ruleset.boards[0]!;
-const shippedBoard = {
+const shippedBoard: BoardSpec = {
   widthTiles: shippedPair.widthTiles,
   heightTiles: shippedPair.heightTiles,
-  entrance: shippedPair.entrances[0]!.cell,
-  exit: shippedPair.exits[0]!.cell,
+  entrances: shippedPair.entrances.map((e) => e.cell),
+  exits: shippedPair.exits.map((x) => x.cell),
+  destinations: [[0]],
 };
+const ENTRANCE = shippedPair.entrances[0]!.cell;
+const EXIT = shippedPair.exits[0]!.cell;
 
 describe('field-01 (the real M1 board) builds a solvable grid', () => {
   const grid = buildGrid(shippedBoard);
-  const field = computeDistanceField(grid);
+  const field = computeDistanceField(grid, EXIT);
 
   it('builds a valid 28×24 grid with the two openings on row 11', () => {
     expect(grid.width).toBe(28);
@@ -48,7 +53,7 @@ describe('field-01 (the real M1 board) builds a solvable grid', () => {
   });
 
   it('routes the entrance→exit shortest path straight along row 11', () => {
-    const path = shortestPath(grid, field);
+    const path = shortestPath(grid, field, ENTRANCE);
     expect(path).not.toBeNull();
     const p = path!;
     expect(p).toHaveLength(28); // cols 0..27 inclusive
@@ -68,7 +73,9 @@ describe('field-01 compiles for the sim as the single source of truth', () => {
     expect(() => loadBoard(shippedBoard)).not.toThrow();
     const board = loadBoard(shippedBoard);
     expect(board.grid.width).toBe(28);
-    expect(board.field.dist[11 * 28 + 0]).toBe(270); // entrance is 27 orthogonal steps out
+    expect(board.fields).toHaveLength(1); // one destination
+    expect(board.entranceDestination).toEqual([0]);
+    expect(board.fields[0]!.dist[11 * 28 + 0]).toBe(270); // entrance is 27 orthogonal steps out
   });
 
   it('compiles the ruleset and seeds the sim economy FROM the content (Story 5)', () => {
