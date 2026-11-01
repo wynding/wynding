@@ -110,19 +110,29 @@ export interface ScriptRunResult {
   readonly stalled: boolean;
 }
 
-/** Whether a tower already stands on any cell of the 2×2 footprint anchored at
- *  `(col, row)` — two footprints overlap when their anchors are within one cell. */
-function footprintTaken(state: SimState, col: number, row: number): boolean {
+/** Whether the 2×2 footprint anchored at `(col, row)` is held only by burst towers that
+ *  will clear it — two footprints overlap when their anchors are within one cell. A
+ *  footprint held by any tower that stays (anything but a burst tower) is not worth
+ *  waiting for: the placement is sent, the sim rejects it, and the run reads as stalled. */
+function heldByBurstTowers(
+  state: SimState,
+  ruleset: CompiledRuleset,
+  col: number,
+  row: number,
+): boolean {
   const towers = state.towers;
+  let held = false;
   for (let i = 0; i < towers.id.length; i++) {
-    if (Math.abs(towers.col[i]! - col) <= 1 && Math.abs(towers.row[i]! - row) <= 1) return true;
+    if (Math.abs(towers.col[i]! - col) > 1 || Math.abs(towers.row[i]! - row) > 1) continue;
+    if (ruleset.towerById[towers.towerId[i]!]?.attack?.mode !== 'burst') return false;
+    held = true;
   }
-  return false;
+  return held;
 }
 
 /** The input for a placement step this tick, or `null` while it waits — for its tick, for
- *  a tower still standing on its footprint to go (a mine re-armed before the last one has
- *  fired), or for bounty. Waiting sends nothing, so it neither fills the input log nor
+ *  a burst tower still standing on its footprint to fire (a mine re-armed before the last
+ *  one has), or for bounty. Waiting sends nothing, so it neither fills the input log nor
  *  reads as a rejection. Throws on a catalog-unknown tower id before anything else, so a
  *  fixture bug fails on the first tick rather than as a placement that silently never
  *  happens. */
@@ -136,7 +146,7 @@ function placementInput(
     throw new Error(`unknown towerId '${next.towerId}' in a build script`);
   }
   if (next.notBeforeTick !== undefined && state.tick < next.notBeforeTick) return null;
-  if (footprintTaken(state, next.col, next.row)) return null;
+  if (heldByBurstTowers(state, ruleset, next.col, next.row)) return null;
   if (state.bounty < cost) return null;
   return { kind: 'placeTower', anchor: { col: next.col, row: next.row }, towerId: next.towerId };
 }

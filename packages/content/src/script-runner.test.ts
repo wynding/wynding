@@ -201,6 +201,28 @@ describe('runBuildScript timed steps (M3 story 1)', { timeout: 120_000 }, () => 
       expect(r.stalled).toBe(false);
     });
 
+    it('a placement onto a tower that stays is sent and rejected — a stall, not a wait', () => {
+      // (3,2) overlaps the basic at (2,2), which never leaves: waiting for it would hide an
+      // authoring error as a queued step, so the input goes out and the sim refuses it.
+      const sent: number[] = [];
+      const r = runBuildScript(
+        ruleset,
+        SEED,
+        [
+          { col: 2, row: 2, towerId: 'basic' },
+          { col: 3, row: 2, towerId: 'basic' },
+        ],
+        {
+          afterStep: (s, _r, inputs) => {
+            if (inputs.length > 0 && s.towers.id.length === 1) sent.push(s.tick - 1);
+          },
+        },
+      );
+      expect(r.placedCount).toBe(1);
+      expect(r.stalled).toBe(true);
+      expect(sent.length).toBeGreaterThan(1);
+    });
+
     it('a mine that fires on the tick it lands is credited once, not placed again', () => {
       // Dropped at (16,12) on tick 645, a creep is already inside its trigger range, so it
       // lands and detonates within one step: the tower count never moves.
