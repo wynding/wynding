@@ -499,7 +499,7 @@ describe('compileRuleset — success', () => {
     expect(compiled.waves).toHaveLength(1);
     expect(compiled.waves[0]!.spawns).toHaveLength(4);
     expect(compiled.waves[0]!.spawns.map((s) => s.offsetTicks)).toEqual([0, 5, 10, 15]);
-    expect(compiled.waves[0]!.entriesSummary).toEqual([{ creepId: 'normal', count: 4 }]);
+    expect(compiled.waves[0]!.entriesSummary).toEqual([{ creepId: 'normal', entrance: 'in', destination: ['out'], count: 4 }]);
     expect(compiled.towers).toHaveLength(1);
     expect(compiled.towerById['basic']!.cost).toBe(5);
     expect(compiled.digest).toMatch(/^[0-9a-f]{64}$/);
@@ -547,6 +547,6 @@ describe('compileRuleset — success', () => {
     });
     const compiled = compileRuleset(mutable as unknown as Ruleset, 'test');
     expect(compiled.waves[0]!.spawns.map((s) => s.offsetTicks)).toEqual([0, 5, 35, 100]);
-    expect(compiled.waves[0]!.entriesSummary).toEqual([{ creepId: 'normal', count: 4 }]);
+    expect(compiled.waves[0]!.entriesSummary).toEqual([{ creepId: 'normal', entrance: 'in', destination: ['out'], count: 4 }]);
   });
 });

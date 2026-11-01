@@ -120,7 +120,7 @@ const syntheticBundle: Ruleset = {
           index: 1,
           countdownTicks: 50,
           clearBonus: 4,
-          hpPercent: 100,
+          hpPercent: 150, // M3: the preview carries each wave's own hpPercent
           entries: [
             { creepId: 'normal', entrance: 'west', count: 1, spacingTicks: 10, offsetTicks: 0 },
           ],
@@ -627,10 +627,13 @@ describe('hud wave preview (M2-S2, PLAN.md P3 step 16)', () => {
       kind: 'upcoming',
       waveNumber: 1,
       waveCount: ruleset.waves.length,
+      hpPercent: 100,
       entries: [
         {
           creepId: 'normal',
           count: 10,
+          entrance: 'west',
+          destination: ['east'],
           domain: 'ground',
           armor: 0,
           leakCost: 1,
@@ -709,10 +712,13 @@ describe('hud wave preview — SYNTHETIC sv6-legal bundle (M2-S2, PLAN.md P3 ste
       kind: 'upcoming',
       waveNumber: 1,
       waveCount: 2,
+      hpPercent: 100,
       entries: [
         {
           creepId: 'armored',
           count: 1,
+          entrance: 'west',
+          destination: ['east'],
           domain: 'ground',
           armor: 0,
           leakCost: 1,
@@ -722,6 +728,8 @@ describe('hud wave preview — SYNTHETIC sv6-legal bundle (M2-S2, PLAN.md P3 ste
         {
           creepId: 'normal',
           count: 3,
+          entrance: 'west',
+          destination: ['east'],
           domain: 'ground',
           armor: 0,
           leakCost: 1,
@@ -757,10 +765,13 @@ describe('hud wave preview — SYNTHETIC sv6-legal bundle (M2-S2, PLAN.md P3 ste
       kind: 'upcoming',
       waveNumber: 2,
       waveCount: 2,
+      hpPercent: 150, // the wave's own value (M3), not a constant 100
       entries: [
         {
           creepId: 'normal',
           count: 1,
+          entrance: 'west',
+          destination: ['east'],
           domain: 'ground',
           armor: 0,
           leakCost: 1,

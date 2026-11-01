@@ -201,11 +201,13 @@ function previewEntries(
   wave: CompiledRuleset['waves'][number],
   ruleset: CompiledRuleset,
 ): PreviewEntryVM[] {
-  return wave.entriesSummary.map(({ creepId, count }) => {
+  return wave.entriesSummary.map(({ creepId, count, entrance, destination }) => {
     const def = ruleset.creepById[creepId];
     return {
       creepId,
       count,
+      entrance,
+      destination,
       domain: def?.domain ?? 'ground',
       armor: def?.armor ?? 0,
       // `?? 1` is unreachable from a genuinely compiled ruleset (mirrors
@@ -245,6 +247,7 @@ function derivePreview(
     kind: 'upcoming',
     waveNumber: cursor + 1,
     waveCount,
+    hpPercent: wave.hpPercent,
     entries: previewEntries(wave, ruleset),
   };
 }

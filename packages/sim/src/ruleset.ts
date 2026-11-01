@@ -83,11 +83,12 @@ export interface ScheduledSpawn {
  *  compile time, so the sim only ever drains a cursor over pinned data, never
  *  runtime-interleaves streams itself (G7).
  *
- *  `entriesSummary` aggregates `spawns` back down to one row per creep id, in
- *  first-ARRIVAL order over the sorted spawn timeline (an offset can make a later
- *  table row arrive first) — the authoritative source for the wave preview (a
- *  duplicate-creepId entry, or several entries sharing a creepId, still shows one
- *  summed count).
+ *  `entriesSummary` aggregates `spawns` back down to one {@link PreviewStream} per
+ *  (creep id, entrance) — M3: the preview's streams are per (creep, route), and an
+ *  entrance fixes its route — in first-ARRIVAL order over the sorted spawn timeline (an
+ *  offset can make a later table row arrive first). It is the authoritative source for
+ *  the wave preview: several entries sharing a creep id AND an entrance still show one
+ *  summed count; the same creep at two entrances shows two streams.
  *
  *  `hpPercent` is the wave's creep hit points as a percent of the catalog's (M3 creep HP
  *  growth) — every creep the wave spawns starts at `spawnHp(catalog hp, hpPercent)`
@@ -97,7 +98,21 @@ export interface CompiledWave {
   readonly clearBonus: number;
   readonly hpPercent: number;
   readonly spawns: readonly ScheduledSpawn[];
-  readonly entriesSummary: readonly { readonly creepId: string; readonly count: number }[];
+  readonly entriesSummary: readonly PreviewStream[];
+}
+
+/** One wave-preview stream (M3): every spawn of one creep id from one entrance in a
+ *  wave, summed. Ids, not indices — this is presentation-facing data, and the ids are
+ *  what a preview names; the sim's own spawn schedule (`ScheduledSpawn`) keys on the
+ *  entrance's index instead. */
+export interface PreviewStream {
+  readonly creepId: string;
+  /** The entrance the stream spawns at, by its board id. */
+  readonly entrance: string;
+  /** That entrance's destination — its exit ids, in the board's exit order (ADR 0015). */
+  readonly destination: readonly string[];
+  /** How many creeps the stream spawns this wave. */
+  readonly count: number;
 }
 
 /** Sim-owned compile-time projection of `BalanceConstants` — the v1 field set,
@@ -1045,7 +1060,10 @@ export function compileRuleset(bundle: Ruleset, boardId: string): CompiledRulese
       readonly entryRow: number;
     }
     const rawSpawns: RawSpawn[] = [];
+    // Spawn count per preview stream (M3): keyed `${entrance index}|${creepId}` — the
+    // integer prefix keeps the split unambiguous whatever characters a creep id holds.
     const summaryCount = new Map<string, number>();
+    const streamKey = (entrance: number, creepId: string): string => `${entrance}|${creepId}`;
     wave.entries.forEach((entry, entryRow) => {
       if (creepById[entry.creepId] === undefined) {
         throw new RulesetError(`wave references unknown creep id '${entry.creepId}'`);
@@ -1066,7 +1084,8 @@ export function compileRuleset(bundle: Ruleset, boardId: string): CompiledRulese
           throw new RulesetError('wave schedule exceeds the scheduled-spawn cap');
         }
       }
-      summaryCount.set(entry.creepId, (summaryCount.get(entry.creepId) ?? 0) + entry.count);
+      const key = streamKey(entrance, entry.creepId);
+      summaryCount.set(key, (summaryCount.get(key) ?? 0) + entry.count);
     });
     // Stable sort by (offsetTicks, entryRow): `Array.prototype.sort` is spec-stable,
     // but the explicit entryRow tie-break also totally orders same-offset spawns
@@ -1105,18 +1124,22 @@ export function compileRuleset(bundle: Ruleset, boardId: string): CompiledRulese
     // authored entry order: with per-entry offsets the first creeps a player sees can
     // come from a later table row, and the wave-preview contract (m2.md §Waves) wants
     // the composition in schedule order as it will actually arrive (Codex PR #68).
-    const summaryOrder: string[] = [];
+    // One stream per (creep, entrance) — M3: an entrance fixes its destination, so the
+    // entrance alone names the stream's route.
+    const entriesSummary: PreviewStream[] = [];
     const summarySeen = new Set<string>();
     for (const s of rawSpawns) {
-      if (!summarySeen.has(s.creepId)) {
-        summarySeen.add(s.creepId);
-        summaryOrder.push(s.creepId);
-      }
+      const key = streamKey(s.entrance, s.creepId);
+      if (summarySeen.has(key)) continue;
+      summarySeen.add(key);
+      const entrance = board.entrances[s.entrance]!;
+      entriesSummary.push({
+        creepId: s.creepId,
+        entrance: entrance.id,
+        destination: entrance.destination,
+        count: summaryCount.get(key)!,
+      });
     }
-    const entriesSummary = summaryOrder.map((creepId) => ({
-      creepId,
-      count: summaryCount.get(creepId)!,
-    }));
     waves.push({
       countdownTicks: wave.countdownTicks,
       clearBonus: wave.clearBonus,

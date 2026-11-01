@@ -17,7 +17,9 @@
 //     distance (ground: their own field; air: straight line to their own exit), and a
 //     cadenced AoE's lead clamps at the target's own exit;
 //   - a flyer heads for its own exit, not another pair's;
-//   - a forged destination index is dropped like any other unattributable row.
+//   - a forged destination index is dropped like any other unattributable row;
+//   - the wave preview's streams aggregate per (creep, entrance), and the compiled wave
+//     carries its `hpPercent`.
 
 import { describe, it, expect } from 'vitest';
 import type { CreepDef, Ruleset, TowerDef } from '@wynding/types';
@@ -567,5 +569,31 @@ describe('destination column totality (coerceSoa)', () => {
     step(long, RULESET, []);
     expect(long.creeps.id).toEqual([64]);
     expect(long.creeps.destination).toEqual([1]);
+  });
+});
+
+describe('wave-preview streams aggregate per (creep, route)', () => {
+  it('sums entries sharing a creep AND an entrance, splits the same creep across entrances, in first-arrival order', () => {
+    const compiled = compileRuleset(
+      crossingBundle([
+        { creepId: 'normal', entrance: 'west', count: 2, spacingTicks: 10, offsetTicks: 20 },
+        { creepId: 'normal', entrance: 'north', count: 3, spacingTicks: 10 }, // arrives first
+        { creepId: 'normal', entrance: 'west', count: 4, spacingTicks: 10, offsetTicks: 40 },
+        { creepId: 'flyer', entrance: 'west', count: 1, spacingTicks: 10, offsetTicks: 25 },
+      ]),
+      'crossing',
+    );
+    expect(compiled.waves[0]!.entriesSummary).toEqual([
+      { creepId: 'normal', entrance: 'north', destination: ['south'], count: 3 },
+      { creepId: 'normal', entrance: 'west', destination: ['east'], count: 6 },
+      { creepId: 'flyer', entrance: 'west', destination: ['east'], count: 1 },
+    ]);
+  });
+
+  it('exposes the wave’s hpPercent on the compiled wave', () => {
+    const bundle = crossingBundle(BOTH_STREAMS);
+    (bundle.boards[0]!.waves[0]! as { hpPercent: number }).hpPercent = 170;
+    expect(compileRuleset(bundle, 'crossing').waves[0]!.hpPercent).toBe(170);
+    expect(RULESET.waves[0]!.hpPercent).toBe(100);
   });
 });

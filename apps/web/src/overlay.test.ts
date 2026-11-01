@@ -298,10 +298,13 @@ describe('overlay — the wave preview surface (M2-S2, PLAN.md P3 steps 16-17/19
           kind: 'upcoming',
           waveNumber: 2,
           waveCount: 3,
+          hpPercent: 100,
           entries: [
             {
               creepId: 'normal',
               count: 10,
+              entrance: 'west',
+              destination: ['east'],
               domain: 'ground',
               armor: 0,
               leakCost: 1,
@@ -339,10 +342,13 @@ describe('overlay — the wave preview surface (M2-S2, PLAN.md P3 steps 16-17/19
           kind: 'upcoming',
           waveNumber: 8,
           waveCount: 8,
+          hpPercent: 100,
           entries: [
             {
               creepId: 'boss',
               count: 1,
+              entrance: 'west',
+              destination: ['east'],
               domain: 'ground',
               armor: 8,
               leakCost: 3,
@@ -377,7 +383,7 @@ describe('overlay — the wave preview surface (M2-S2, PLAN.md P3 steps 16-17/19
   const glanceOf = (entry: PreviewEntryVM): GlanceParts => {
     const { overlay, shell } = setup();
     overlay.update({
-      hud: hud({ preview: { kind: 'upcoming', waveNumber: 1, waveCount: 2, entries: [entry] } }),
+      hud: hud({ preview: { kind: 'upcoming', waveNumber: 1, waveCount: 2, hpPercent: 100, entries: [entry] } }),
       paused: false,
       speed: 1,
       ui: uiState(),
@@ -393,6 +399,8 @@ describe('overlay — the wave preview surface (M2-S2, PLAN.md P3 steps 16-17/19
   const baseline: PreviewEntryVM = {
     creepId: 'normal',
     count: 10,
+    entrance: 'west',
+    destination: ['east'],
     domain: 'ground',
     armor: 0,
     leakCost: 1,
@@ -428,6 +436,8 @@ describe('overlay — the wave preview surface (M2-S2, PLAN.md P3 steps 16-17/19
       glanceOf({
         creepId: 'boss',
         count: 1,
+        entrance: 'west',
+        destination: ['east'],
         domain: 'air',
         armor: 8,
         leakCost: 3,
@@ -452,6 +462,7 @@ describe('overlay — the wave preview surface (M2-S2, PLAN.md P3 steps 16-17/19
           kind: 'upcoming',
           waveNumber: 1,
           waveCount: 2,
+          hpPercent: 100,
           entries: [{ ...baseline, domain: 'air', armor: 4 }],
         },
       }),
@@ -490,10 +501,13 @@ describe('overlay — the wave preview surface (M2-S2, PLAN.md P3 steps 16-17/19
           kind: 'upcoming',
           waveNumber: 5,
           waveCount: 5,
+          hpPercent: 100,
           entries: [
             {
               creepId: 'resolute',
               count: 6,
+              entrance: 'west',
+              destination: ['east'],
               domain: 'ground',
               armor: 0,
               leakCost: 1,
@@ -526,10 +540,13 @@ describe('overlay — the wave preview surface (M2-S2, PLAN.md P3 steps 16-17/19
           kind: 'upcoming' as const,
           waveNumber: 2,
           waveCount: 3,
+          hpPercent: 100,
           entries: [
             {
               creepId: 'normal',
               count: 10,
+              entrance: 'west',
+              destination: ['east'],
               domain: 'ground',
               armor: 0,
               leakCost: 1,
@@ -586,6 +603,7 @@ describe('overlay — the wave preview surface (M2-S2, PLAN.md P3 steps 16-17/19
           kind: 'upcoming',
           waveNumber: 1,
           waveCount: 1,
+          hpPercent: 100,
           // A creepId sv6's catalog CAN carry (it's schema-valid) but this build's overlay
           // hasn't been taught a localized name for — the exact "future content, current
           // client" gap the fallback exists for.
@@ -593,6 +611,8 @@ describe('overlay — the wave preview surface (M2-S2, PLAN.md P3 steps 16-17/19
             {
               creepId: 'future-kind',
               count: 4,
+              entrance: 'west',
+              destination: ['east'],
               domain: 'ground',
               armor: 2,
               leakCost: 1,
@@ -631,10 +651,13 @@ describe('overlay — the wave preview surface (M2-S2, PLAN.md P3 steps 16-17/19
           kind: 'upcoming',
           waveNumber: 1,
           waveCount: 1,
+          hpPercent: 100,
           entries: [
             {
               creepId: 'constructor',
               count: 4,
+              entrance: 'west',
+              destination: ['east'],
               domain: 'ground',
               armor: 2,
               leakCost: 1,
@@ -666,10 +689,13 @@ describe('overlay — the wave preview surface (M2-S2, PLAN.md P3 steps 16-17/19
       kind: 'upcoming' as const,
       waveNumber: 1,
       waveCount: 2,
+      hpPercent: 100,
       entries: [
         {
           creepId: 'normal',
           count: 1,
+          entrance: 'west',
+          destination: ['east'],
           domain: 'ground' as const,
           armor: 0,
           leakCost: 1,
@@ -679,6 +705,8 @@ describe('overlay — the wave preview surface (M2-S2, PLAN.md P3 steps 16-17/19
         {
           creepId: 'normal',
           count: 2,
+          entrance: 'west',
+          destination: ['east'],
           domain: 'ground' as const,
           armor: 0,
           leakCost: 1,
@@ -698,7 +726,13 @@ describe('overlay — the wave preview surface (M2-S2, PLAN.md P3 steps 16-17/19
 
     overlay.update({
       hud: hud({
-        preview: { kind: 'upcoming', waveNumber: 2, waveCount: 2, entries: [two.entries[0]!] },
+        preview: {
+          kind: 'upcoming',
+          waveNumber: 2,
+          waveCount: 2,
+          hpPercent: 100,
+          entries: [two.entries[0]!],
+        },
       }),
       paused: false,
       speed: 1,
@@ -2234,10 +2268,13 @@ describe('overlay — a steady-state refresh performs zero child-node replacemen
           kind: 'upcoming',
           waveNumber: 2,
           waveCount: 3,
+          hpPercent: 100,
           entries: [
             {
               creepId: 'normal',
               count: 10,
+              entrance: 'west',
+              destination: ['east'],
               domain: 'ground',
               armor: 0,
               leakCost: 1,
@@ -2285,10 +2322,13 @@ describe('overlay — a steady-state refresh performs zero child-node replacemen
           kind: 'upcoming',
           waveNumber: 5,
           waveCount: 9,
+          hpPercent: 100,
           entries: [
             {
               creepId: 'normal',
               count: 8,
+              entrance: 'west',
+              destination: ['east'],
               domain: 'ground',
               armor: 0,
               leakCost: 1,
@@ -2298,6 +2338,8 @@ describe('overlay — a steady-state refresh performs zero child-node replacemen
             {
               creepId: 'fast',
               count: 6,
+              entrance: 'west',
+              destination: ['east'],
               domain: 'air',
               armor: 2,
               leakCost: 1,
@@ -3939,6 +3981,8 @@ describe('overlay — the wave strip (#181 L1)', () => {
   const entry = (over: Partial<PreviewEntryVM> = {}): PreviewEntryVM => ({
     creepId: 'normal',
     count: 10,
+    entrance: 'west',
+    destination: ['east'],
     domain: 'ground',
     armor: 0,
     leakCost: 1,
@@ -3952,7 +3996,7 @@ describe('overlay — the wave strip (#181 L1)', () => {
     waveNumber = 1,
   ): void => {
     overlay.update({
-      hud: hud({ preview: { kind: 'upcoming', waveNumber, waveCount: 9, entries } }),
+      hud: hud({ preview: { kind: 'upcoming', waveNumber, waveCount: 9, hpPercent: 100, entries } }),
       paused: false,
       speed: 1,
       ui: uiState(),

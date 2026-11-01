@@ -535,9 +535,9 @@ describe('bound gate — the terminal-tick budget', () => {
     };
     const ruleset = compileRuleset(bundle, 'test');
     expect(ruleset.waves[0]!.entriesSummary).toEqual([
-      { creepId: 'swift', count: 3 },
-      { creepId: 'normal', count: 2 },
-      { creepId: 'tank', count: 4 },
+      { creepId: 'swift', entrance: 'in', destination: ['out'], count: 3 },
+      { creepId: 'normal', entrance: 'in', destination: ['out'], count: 2 },
+      { creepId: 'tank', entrance: 'in', destination: ['out'], count: 4 },
     ]);
   });
 });

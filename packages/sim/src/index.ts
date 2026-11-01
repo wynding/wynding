@@ -1462,6 +1462,7 @@ export {
   type CompiledEffect,
   type CompiledCreep,
   type CompiledWave,
+  type PreviewStream,
   type ScheduledSpawn,
 } from './ruleset';
 // The v2 structural validator + JSON parser (M2-S1) — `@wynding/content`'s registry
