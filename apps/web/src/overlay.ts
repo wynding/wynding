@@ -23,6 +23,7 @@ import {
   type CreepStatusCounts,
   type Palette,
   type TowerRole,
+  type Heading,
 } from '@wynding/render';
 import {
   MS_PER_TICK,
@@ -44,6 +45,8 @@ import { createResultsPanel, type StoppedRun } from './results-panel';
 import type { InstallHandle, InstallState } from './install';
 import type { ArmedTower, UiState, PlacementOutcome, RunStats } from './controller';
 import type { SurveySlots } from './survey-form';
+import { describeRoutes, HEADING_ARROW } from './routes';
+import type { RulesetBoard } from '@wynding/content';
 
 /** A player intent emitted by the overlay for the app to route to the controller. */
 export type UiAction =
@@ -394,6 +397,7 @@ export function createOverlay(
   keymap: Keymap,
   shell: ShellHandle,
   ruleset: CompiledRuleset,
+  board: RulesetBoard,
   abortGesture: () => void,
   install: InstallHandle,
 ): Overlay {
@@ -2121,6 +2125,58 @@ export function createOverlay(
     slow: () => t('hud.preview.immunity.slow'),
     stun: () => t('hud.preview.immunity.stun'),
   };
+  // Each stream's route (M3 story 4), named by the walls it runs between — "north to south" —
+  // and pointed by the heading the board draws on its entrance and exit (`routes.ts`). Read
+  // from the board this overlay was made for, once.
+  const routes = describeRoutes(board);
+  const SIDE_NAME: Readonly<Record<Heading, () => string>> = {
+    north: () => t('hud.preview.side.north'),
+    east: () => t('hud.preview.side.east'),
+    south: () => t('hud.preview.side.south'),
+    west: () => t('hud.preview.side.west'),
+  };
+
+  /** A stream's route in words: its entrance's wall, then its exit's ("north to south"). A
+   *  destination of several exits names each, joined like the immunities list — no M3 board
+   *  has one (ADR 0015). An entrance this overlay's board does not have — only a test or a
+   *  mismatched build could make one — is named by its ids rather than dropped, the
+   *  `creep.unknown.name` posture. */
+  function routeText(entry: PreviewEntryVM): string {
+    const route = routes.get(entry.entrance);
+    if (route === undefined) {
+      return t('hud.preview.route', { from: entry.entrance, to: entry.destination.join(', ') });
+    }
+    return t('hud.preview.route', {
+      from: SIDE_NAME[route.from](),
+      to: route.to.map((side) => SIDE_NAME[side]()).join(', '),
+    });
+  }
+
+  /** The stream's arrow: the heading its creeps enter by, as the board draws it on their
+   *  entrance and exit. Empty for an entrance the board does not have. */
+  function routeArrow(entry: PreviewEntryVM): string {
+    const route = routes.get(entry.entrance);
+    return route === undefined ? '' : HEADING_ARROW[route.heading];
+  }
+
+  /** The wave's creep hit points, said once per wave when they are not the catalog's (M3 creep
+   *  HP growth): the full sentence and the glance, or null at 100. Two literal keys per sign,
+   *  for `i18n-check.mjs`'s extractor (see `previewEntryFull`). */
+  function hpClause(hpPercent: number): { readonly full: string; readonly glance: string } | null {
+    if (hpPercent === 100) return null;
+    if (hpPercent > 100) {
+      const percent = hpPercent - 100;
+      return {
+        full: t('hud.preview.hp.more', { percent }),
+        glance: t('hud.preview.hp.more.glance', { percent }),
+      };
+    }
+    const percent = 100 - hpPercent;
+    return {
+      full: t('hud.preview.hp.fewer', { percent }),
+      glance: t('hud.preview.hp.fewer.glance', { percent }),
+    };
+  }
 
   /** THE ACCESSIBLE FORM — every stat slot always named: "{count} × {name} — {domain},
    *  armor {n}, leak cost {n}, {immunities}", never colour/icon-only.
@@ -2163,6 +2219,7 @@ export function createOverlay(
     const params = {
       count: entry.count,
       name: creepName(entry.creepId),
+      route: routeText(entry),
       domain,
       armor: armorClause,
       leakCost: t('hud.preview.leakCost', { leakCost: entry.leakCost }),
@@ -2248,6 +2305,22 @@ export function createOverlay(
     count.className = 'wy-preview-count';
     count.textContent = parts.count;
     glance.append(creepIcon(doc, entry, palette), count);
+    // The route (M3 story 4): its arrow always, its words where the layout has room for them —
+    // Compact's column drops them (`ui.css`), leaving the arrow, with the words in the row's
+    // full sentence (m3.md's fallback, m2.md's ruling-3-narrowed pattern).
+    const route = doc.createElement('span');
+    route.className = 'wy-preview-route';
+    if (parts.arrow !== '') {
+      const arrow = doc.createElement('span');
+      arrow.className = 'wy-preview-arrow';
+      arrow.textContent = parts.arrow;
+      route.append(arrow);
+    }
+    const routeName = doc.createElement('span');
+    routeName.className = 'wy-preview-route-name';
+    routeName.textContent = parts.route;
+    route.append(routeName);
+    glance.append(route);
     if (single) {
       const detail = doc.createElement('span');
       detail.className = 'wy-preview-detail';
@@ -2275,9 +2348,17 @@ export function createOverlay(
   function glanceParts(
     entry: PreviewEntryVM,
     single: boolean,
-  ): { readonly count: string; readonly name: string; readonly clause: string } {
+  ): {
+    readonly count: string;
+    readonly arrow: string;
+    readonly route: string;
+    readonly name: string;
+    readonly clause: string;
+  } {
     return {
       count: countText(entry.count),
+      arrow: routeArrow(entry),
+      route: routeText(entry),
       name: single ? creepName(entry.creepId) : '',
       clause: single ? previewEntryNotes(entry).join(' · ') : '',
     };
@@ -2306,8 +2387,8 @@ export function createOverlay(
   /** The text `buildEntryGlance` writes, in document order — the locale sentinel's half of the
    *  row comparison (the icon carries no text). */
   function previewEntryGlanceText(entry: PreviewEntryVM, single: boolean): string {
-    const { count, name, clause } = glanceParts(entry, single);
-    return count + name + clause;
+    const { count, arrow, route, name, clause } = glanceParts(entry, single);
+    return count + arrow + route + name + clause;
   }
 
   /** The scroll form's cue (`ui.css`): each edge with entries past it fades, because the
@@ -2390,6 +2471,15 @@ export function createOverlay(
   // `lastPanelKey`): a screen-reader virtual cursor or braille display parked on a preview
   // row must not have its node torn down and rebuilt underneath it every tick.
   let lastPreviewKey = '';
+  /** The wave's hit-point clause, once, under the title (M3): hidden at the catalog's 100. Both
+   *  forms, as a row has them — the full sentence for assistive tech, the aria-hidden glance
+   *  for the eye (`ui.css`). Written only on a rebuild, which the preview key's `hpPercent`
+   *  already triggers. */
+  function renderHp(clause: { readonly full: string; readonly glance: string } | null): void {
+    previewEl.hp.hidden = clause === null;
+    previewEl.hpFull.textContent = clause?.full ?? '';
+    previewEl.hpGlance.textContent = clause?.glance ?? '';
+  }
   function renderPreview(preview: HudPreview | null): void {
     if (preview === null) {
       previewEl.root.hidden = true;
@@ -2400,9 +2490,9 @@ export function createOverlay(
     const key =
       preview.kind === 'lastWave'
         ? 'last'
-        : // The wave's hpPercent and each stream's route are in the key now (M3), though
-          // nothing here renders them yet: a wave that differs only there must still
-          // rebuild the day story 4 draws them, not keep the previous wave's rows.
+        : // The wave's hpPercent and each stream's route are in the key (M3): both are drawn
+          // (the hit-point clause, each row's route), so a wave that differs only there must
+          // rebuild rather than keep the previous wave's.
           `${preview.waveNumber}/${preview.waveCount}:${preview.hpPercent}%:${preview.entries
             .map(
               (e) =>
@@ -2449,6 +2539,7 @@ export function createOverlay(
     previewEl.root.scrollLeft = 0;
     if (preview.kind === 'lastWave') {
       previewEl.title.textContent = t('hud.preview.lastWave');
+      renderHp(null);
       clearChildren(previewEl.list);
       syncStripScroll();
       return;
@@ -2457,6 +2548,7 @@ export function createOverlay(
       waveNumber: preview.waveNumber,
       waveCount: preview.waveCount,
     });
+    renderHp(hpClause(preview.hpPercent));
     clearChildren(previewEl.list);
     warnUnmappedCreeps(preview.entries); // dev diagnostic — rebuild path only
     for (const entry of preview.entries) {

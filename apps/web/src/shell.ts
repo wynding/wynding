@@ -86,6 +86,11 @@ export interface ShellHud {
 export interface ShellPreview {
   readonly root: HTMLElement;
   readonly title: HTMLElement;
+  /** The wave's hit-point clause (M3), hidden while a wave's creeps have the catalog's: its
+   *  full sentence (`hpFull`, for assistive tech) and its aria-hidden glance (`hpGlance`). */
+  readonly hp: HTMLElement;
+  readonly hpFull: HTMLElement;
+  readonly hpGlance: HTMLElement;
   readonly list: HTMLUListElement;
 }
 
@@ -492,13 +497,25 @@ export function createShell(
   preview.hidden = true;
   const previewTitle = doc.createElement('p');
   previewTitle.className = 'wy-wave-preview-title';
+  // The wave's hit-point clause (M3 creep HP growth), between the title and the rows: a full
+  // sentence for assistive tech and an aria-hidden glance, as each row has. Hidden at the
+  // catalog's 100 — every wave until M3's later blocks.
+  const previewHp = doc.createElement('p');
+  previewHp.className = 'wy-wave-preview-hp';
+  previewHp.hidden = true;
+  const previewHpFull = doc.createElement('span');
+  previewHpFull.className = 'wy-preview-full';
+  const previewHpGlance = doc.createElement('span');
+  previewHpGlance.className = 'wy-preview-hp-glance';
+  previewHpGlance.setAttribute('aria-hidden', 'true');
+  previewHp.append(previewHpFull, previewHpGlance);
   const previewList = doc.createElement('ul');
   previewList.className = 'wy-wave-preview-list';
   // Explicit, not implied: WebKit drops a list's semantics once it is styled `list-style: none`
   // and laid out as a flex row — exactly the strip's form — so VoiceOver would read the
   // entries as loose text. The role restores "list, N items".
   previewList.setAttribute('role', 'list');
-  preview.append(previewTitle, previewList);
+  preview.append(previewTitle, previewHp, previewList);
 
   // --- The pollable board summary (#79). A haircut taken on evidence rather than
   // preference: the owner playtest established that nothing in the design requires a
@@ -728,7 +745,14 @@ export function createShell(
     hudBox,
     hud: { lives, bounty, score, wave, stars },
     statusSummary,
-    preview: { root: preview, title: previewTitle, list: previewList },
+    preview: {
+      root: preview,
+      title: previewTitle,
+      hp: previewHp,
+      hpFull: previewHpFull,
+      hpGlance: previewHpGlance,
+      list: previewList,
+    },
     dock: {
       root: dock,
       pause: pauseBtn,

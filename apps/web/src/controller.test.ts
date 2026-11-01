@@ -1219,7 +1219,7 @@ describe('controller — kills and leaks for the board’s combat feedback (#181
     // The shipped crossing board with its first wave split across both routes, so an
     // undefended run leaks at both exits before its lives run out.
     const bundle = structuredClone(getBundledRuleset()) as Ruleset;
-    const board = bundle.boards[0] as { waves: { entries: unknown[] }[] };
+    const board = bundle.boards[0] as unknown as { waves: { entries: unknown[] }[] };
     board.waves[0]!.entries = [
       { creepId: 'normal', entrance: 'west', count: 2, spacingTicks: 20 },
       { creepId: 'normal', entrance: 'north', count: 2, spacingTicks: 20 },

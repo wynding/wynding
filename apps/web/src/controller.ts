@@ -49,7 +49,12 @@ import {
 } from '@wynding/render';
 import { markFlyerSparks, noteTowerless, stepOutcome } from './combat-events';
 import { currentRulesetHash, MAX_INPUTS_PER_TICK, type Replay } from '@wynding/replay';
-import { getBundledRuleset, defaultBoardId, type Ruleset } from '@wynding/content';
+import {
+  getBundledRuleset,
+  defaultBoardId,
+  type Ruleset,
+  type RulesetBoard,
+} from '@wynding/content';
 import type { Verifier } from './verifier';
 
 export type Speed = 1 | 2;
@@ -210,6 +215,10 @@ export interface CaptureSnapshot {
 
 export interface Controller {
   readonly ruleset: CompiledRuleset;
+  /** The authored board this run plays (M3): its openings' ids, cells and destinations — what
+   *  the wave strip names each stream's route from (`routes.ts`). The compiled ruleset keeps
+   *  openings by index only. */
+  readonly board: RulesetBoard;
   /** Feed wall-clock ms since the last frame; scales by speed unless paused. Steps nothing
    *  while the run is held, paused, resolved or stopped (`stop()`). */
   advance(wallDtMs: number): void;
@@ -597,6 +606,8 @@ export function createController(
   const bundle = content?.bundle ?? getBundledRuleset();
   const boardId = content?.boardId ?? defaultBoardId(bundle);
   const ruleset = compileRuleset(bundle, boardId);
+  // `compileRuleset` has just resolved this id, so the board is there.
+  const authoredBoard = bundle.boards.find((b) => b.id === boardId)!;
   const grid = ruleset.board.grid;
   const cols = grid.width;
   const rows = grid.height;
@@ -1412,6 +1423,7 @@ export function createController(
 
   return {
     ruleset,
+    board: authoredBoard,
     advance(wallDtMs: number): void {
       // `started` is checked FIRST and independently of `paused`/`frozen` (PLAN.md P4):
       // a held run (fresh or Play-again'd, not yet `start()`ed) never steps no matter what

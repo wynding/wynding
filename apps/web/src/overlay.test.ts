@@ -7,7 +7,7 @@ import {
   type PreviewEntryVM,
 } from '@wynding/render';
 import { compileRuleset, MS_PER_TICK } from '@wynding/sim';
-import { getBundledRuleset, defaultBoardId } from '@wynding/content';
+import { getBundledRuleset, defaultBoardId, type RulesetBoard } from '@wynding/content';
 import { createOverlay, type UiAction, type HudView } from './overlay';
 import type { ModalOverlay } from './modal';
 import { createShell, dockButtonParts } from './shell';
@@ -29,6 +29,8 @@ import {
 
 const bundle = getBundledRuleset();
 const ruleset = compileRuleset(bundle, defaultBoardId(bundle));
+/** The shipped board, authored — the overlay names each stream's route from it (M3). */
+const BOARD = bundle.boards[0]!;
 const CARD_DESCRIPTORS = ruleset.towers.map((t) => ({ towerId: t.id }));
 
 // A fixed 280×240 board rect → 28×24 cells at 10 px each (mirrors input.test.ts) so the
@@ -109,6 +111,8 @@ interface SetupOptions {
   readonly install?: InstallHandle;
   /** A ruleset other than the shipped one — e.g. a clone with a balance value changed. */
   readonly ruleset?: ReturnType<typeof compileRuleset>;
+  /** The authored board the overlay names routes from — the shipped one unless given. */
+  readonly board?: RulesetBoard;
 }
 
 function setup(
@@ -130,6 +134,7 @@ function setup(
     keymap,
     shell,
     options.ruleset ?? ruleset,
+    options.board ?? BOARD,
     abortGesture,
     install,
   );
@@ -324,7 +329,7 @@ describe('overlay — the wave preview surface (M2-S2, PLAN.md P3 steps 16-17/19
     const items = [...shell.preview.list.querySelectorAll('li')];
     expect(items).toHaveLength(1);
     expect(items[0]!.querySelector('.wy-preview-full')!.textContent).toBe(
-      '10 × Creep — ground, armor 0, leak cost 1, no immunities',
+      '10 × Creep — west to east, ground, armor 0, leak cost 1, no immunities',
     );
   });
 
@@ -365,7 +370,7 @@ describe('overlay — the wave preview surface (M2-S2, PLAN.md P3 steps 16-17/19
     });
     const text = shell.preview.list.querySelector('.wy-preview-full')!.textContent;
     expect(text).toBe(
-      '1 × Boss — boss, ground, armor 8 (subtracted from each direct hit; damage over time ignores it), leak cost 3, stun',
+      '1 × Boss — boss, west to east, ground, armor 8 (subtracted from each direct hit; damage over time ignores it), leak cost 3, stun',
     );
   });
 
@@ -487,9 +492,10 @@ describe('overlay — the wave preview surface (M2-S2, PLAN.md P3 steps 16-17/19
     // The full form keeps every slot the glance drops — the guarantee that makes the diet
     // a presentation change rather than an information loss.
     const sentence =
-      '10 × Creep — air, armor 4 (subtracted from each direct hit; damage over time ignores it), leak cost 1, no immunities';
+      '10 × Creep — west to east, air, armor 4 (subtracted from each direct hit; damage over time ignores it), leak cost 1, no immunities';
     expect(full.textContent).toBe(sentence);
-    expect(glance.textContent).toBe('×\u200b10Creepair · armor −4 direct'); // icon, count, name, clause
+    // icon, count, the route (its arrow and its words), name, clause
+    expect(glance.textContent).toBe('×\u200b10→west to eastCreepair · armor −4 direct');
     // #181: the same sentence is the visible row's tooltip — on the aria-hidden glance, never
     // the row, where a `title` would become an accessible name or description and have
     // assistive tech read the sentence a second time.
@@ -531,7 +537,7 @@ describe('overlay — the wave preview surface (M2-S2, PLAN.md P3 steps 16-17/19
       refund: 0,
     });
     const text = shell.preview.list.querySelector('.wy-preview-full')!.textContent;
-    expect(text).toBe('6 × Resolute Creep — ground, armor 0, leak cost 1, slow');
+    expect(text).toBe('6 × Resolute Creep — west to east, ground, armor 0, leak cost 1, slow');
   });
 
   it('an unchanged preview never rebuilds its rows — node identity survives repeated updates (the SR-stability memo)', () => {
@@ -674,7 +680,7 @@ describe('overlay — the wave preview surface (M2-S2, PLAN.md P3 steps 16-17/19
     });
     const text = shell.preview.list.querySelector('.wy-preview-full')!.textContent;
     expect(text).toBe(
-      '4 × Unknown creep (future-kind) — ground, armor 2 (subtracted from each direct hit; damage over time ignores it), leak cost 1, no immunities',
+      '4 × Unknown creep (future-kind) — west to east, ground, armor 2 (subtracted from each direct hit; damage over time ignores it), leak cost 1, no immunities',
     );
     // The dev-only warn is asserted conditionally — Vitest defaults DEV to true, but a
     // production-mode run must not fail on a behaviour (the warn) that build mode elides.
@@ -719,7 +725,7 @@ describe('overlay — the wave preview surface (M2-S2, PLAN.md P3 steps 16-17/19
     });
     const text = shell.preview.list.querySelector('.wy-preview-full')!.textContent;
     expect(text).toBe(
-      '4 × Unknown creep (constructor) — ground, armor 2 (subtracted from each direct hit; damage over time ignores it), leak cost 1, no immunities',
+      '4 × Unknown creep (constructor) — west to east, ground, armor 2 (subtracted from each direct hit; damage over time ignores it), leak cost 1, no immunities',
     );
     expect(text).not.toContain('[object');
     if (import.meta.env.DEV) {
@@ -1185,6 +1191,7 @@ describe('overlay — Card/Panel/live region (PLAN.md P2)', () => {
       createKeymap(),
       shell,
       ruleset,
+      BOARD,
       () => {},
       defaultInstall(),
     );
@@ -1215,6 +1222,7 @@ describe('overlay — Card/Panel/live region (PLAN.md P2)', () => {
       createKeymap(),
       oneCardShell,
       ruleset,
+      BOARD,
       () => {},
       defaultInstall(),
     );
@@ -2931,6 +2939,7 @@ describe('overlay — settings dialog (modal)', () => {
       createKeymap(),
       shell,
       ruleset,
+      BOARD,
       () => input.abort(),
       defaultInstall(),
     );
@@ -2982,6 +2991,7 @@ describe('overlay — settings dialog (modal)', () => {
       createKeymap(),
       shell,
       ruleset,
+      BOARD,
       () => input.abort(),
       defaultInstall(),
     );
@@ -4063,9 +4073,13 @@ describe('overlay — the wave strip (#181 L1)', () => {
       expect([...glance.children].map((c) => c.getAttribute('class'))).toEqual([
         'wy-creep-icon',
         'wy-preview-count',
+        'wy-preview-route',
       ]);
     }
-    expect(glances.map((g) => g.textContent)).toEqual(['×\u200b8', '×\u200b6']);
+    expect(glances.map((g) => g.textContent)).toEqual([
+      '×\u200b8→west to east',
+      '×\u200b6→west to east',
+    ]);
     // The deviation is still in each row's full sentence — the strip drops nothing for AT.
     expect(shell.preview.list.querySelectorAll('.wy-preview-full')[1]!.textContent).toContain(
       'armor 2',
@@ -4091,12 +4105,16 @@ describe('overlay — the wave strip (#181 L1)', () => {
     // `previewEntryGlanceText` and `buildEntryGlance` share `glanceParts`; if they drift, the
     // memo guard sees a mismatch on every HUD refresh and rebuilds the list.
     const shapes: ReadonlyArray<readonly [string, readonly PreviewEntryVM[], string]> = [
-      ['a single entry with notes', [entry({ armor: 2 })], '×\u200b10Creeparmor −2 direct'],
-      ['a single entry without notes', [entry()], '×\u200b10Creep'],
+      [
+        'a single entry with notes',
+        [entry({ armor: 2 })],
+        '×\u200b10→west to eastCreeparmor −2 direct',
+      ],
+      ['a single entry without notes', [entry()], '×\u200b10→west to eastCreep'],
       [
         'a multi-entry wave',
         [entry({ count: 8 }), entry({ creepId: 'fast', count: 6 })],
-        '×\u200b8',
+        '×\u200b8→west to east',
       ],
     ];
     for (const [label, entries, glanceText] of shapes) {
@@ -4466,6 +4484,155 @@ describe('overlay — the wave strip (#181 L1)', () => {
         window.ResizeObserver = original;
       }
     });
+  });
+});
+
+// M3 story 4: the crossing board's two routes, the wave's hit points and the wave counter, as
+// the strip shows them — the row sentences, the glances, the hit-point clause, and that each
+// of them rebuilds when the wave changes only there (the preview key).
+describe('overlay — routes, hit points and the wave counter on the crossing board (M3 story 4)', () => {
+  const entry = (over: Partial<PreviewEntryVM> = {}): PreviewEntryVM => ({
+    creepId: 'normal',
+    count: 10,
+    entrance: 'west',
+    destination: ['east'],
+    domain: 'ground',
+    armor: 0,
+    leakCost: 1,
+    immunities: [],
+    boss: false,
+    ...over,
+  });
+  const north = (over: Partial<PreviewEntryVM> = {}): PreviewEntryVM =>
+    entry({ entrance: 'north', destination: ['south'], ...over });
+  const show = (
+    overlay: ReturnType<typeof setup>['overlay'],
+    entries: readonly PreviewEntryVM[],
+    { waveNumber = 5, waveCount = 10, hpPercent = 100 } = {},
+  ): void => {
+    overlay.update({
+      hud: hud({ preview: { kind: 'upcoming', waveNumber, waveCount, hpPercent, entries } }),
+      paused: false,
+      speed: 1,
+      ui: uiState(),
+      refund: 0,
+    });
+  };
+  const rows = (shell: ReturnType<typeof setup>['shell']): HTMLElement[] => [
+    ...shell.preview.list.querySelectorAll<HTMLElement>('li'),
+  ];
+  const fullOf = (li: HTMLElement): string => li.querySelector('.wy-preview-full')!.textContent!;
+
+  it('names each stream’s route in its full sentence — "west to east", "north to south" — always, as another accessible clause', () => {
+    const { overlay, shell } = setup();
+    show(overlay, [entry({ count: 12 }), north({ creepId: 'swarm', count: 6 })]);
+    expect(rows(shell).map(fullOf)).toEqual([
+      '12 × Creep — west to east, ground, armor 0, leak cost 1, no immunities',
+      '6 × Swarm Creep — north to south, ground, armor 0, leak cost 1, no immunities',
+    ]);
+  });
+
+  it('a boss row names its route after its role', () => {
+    const { overlay, shell } = setup();
+    show(overlay, [
+      entry({ creepId: 'boss', count: 1, boss: true, armor: 8, leakCost: 3, immunities: ['stun'] }),
+    ]);
+    expect(fullOf(rows(shell)[0]!)).toMatch(/^1 × Boss — boss, west to east, ground, /);
+  });
+
+  it('shows each stream’s route in its glance: the arrow the board draws on its entrance and exit, then the walls in words', () => {
+    const { overlay, shell } = setup();
+    show(overlay, [entry({ count: 12 }), north({ creepId: 'swarm', count: 6 })]);
+    const routes = rows(shell).map((li) => li.querySelector('.wy-preview-route')!);
+    expect(routes.map((r) => r.querySelector('.wy-preview-arrow')!.textContent)).toEqual([
+      '→',
+      '↓',
+    ]);
+    expect(routes.map((r) => r.querySelector('.wy-preview-route-name')!.textContent)).toEqual([
+      'west to east',
+      'north to south',
+    ]);
+    // Presentation only: the glance is aria-hidden, the route already in each full sentence.
+    for (const r of routes) expect(r.closest('[aria-hidden="true"]')).not.toBeNull();
+  });
+
+  it('aggregates per (creep, route): the same creep from two entrances is two rows, two routes', () => {
+    const { overlay, shell } = setup();
+    show(overlay, [entry({ count: 4 }), north({ count: 6 })]);
+    expect(rows(shell).map(fullOf)).toEqual([
+      '4 × Creep — west to east, ground, armor 0, leak cost 1, no immunities',
+      '6 × Creep — north to south, ground, armor 0, leak cost 1, no immunities',
+    ]);
+  });
+
+  it('names an entrance the board does not have by its ids, with no arrow, rather than dropping the route', () => {
+    const { overlay, shell } = setup();
+    show(overlay, [entry({ entrance: 'gate', destination: ['door'] })]);
+    const li = rows(shell)[0]!;
+    expect(fullOf(li)).toBe(
+      '10 × Creep — gate to door, ground, armor 0, leak cost 1, no immunities',
+    );
+    expect(li.querySelector('.wy-preview-arrow')).toBeNull();
+  });
+
+  it('rebuilds the rows when a wave differs from the last only in a stream’s route (the preview key)', () => {
+    const { overlay, shell } = setup();
+    show(overlay, [entry()]);
+    const before = rows(shell)[0]!;
+    show(overlay, [north()]); // same wave number, creep, count and stats — another route
+    const after = rows(shell)[0]!;
+    expect(after).not.toBe(before);
+    expect(fullOf(after)).toContain('north to south');
+  });
+
+  it('says the wave’s hit points once when they are not the catalog’s: "+70% hit points", full and glance', () => {
+    const { overlay, shell } = setup();
+    show(overlay, [entry(), north()], { hpPercent: 170 });
+    const hp = shell.preview.hp;
+    expect(hp.hidden).toBe(false);
+    expect(shell.preview.hpFull.textContent).toBe('Every creep in this wave has +70% hit points');
+    expect(shell.preview.hpGlance.textContent).toBe('+70% hit points');
+    expect(shell.preview.hpGlance.getAttribute('aria-hidden')).toBe('true');
+    expect(shell.preview.hpFull.getAttribute('aria-hidden')).toBeNull();
+    // Once per wave: one clause, under the title, and no row repeats it.
+    expect(shell.preview.root.querySelectorAll('.wy-wave-preview-hp')).toHaveLength(1);
+    expect(hp.previousElementSibling).toBe(shell.preview.title);
+    for (const li of rows(shell)) expect(li.textContent).not.toContain('hit points');
+  });
+
+  it('says a wave below the catalog’s hit points too, and nothing at exactly 100', () => {
+    const { overlay, shell } = setup();
+    show(overlay, [entry()], { hpPercent: 80 });
+    expect(shell.preview.hpFull.textContent).toBe('Every creep in this wave has −20% hit points');
+    expect(shell.preview.hpGlance.textContent).toBe('−20% hit points');
+    show(overlay, [entry()], { hpPercent: 100 }); // only the hit points moved: the key rebuilds
+    expect(shell.preview.hp.hidden).toBe(true);
+    expect(shell.preview.hpFull.textContent).toBe('');
+  });
+
+  it('hides the hit-point clause once the last wave has launched', () => {
+    const { overlay, shell } = setup();
+    show(overlay, [entry()], { hpPercent: 150 });
+    expect(shell.preview.hp.hidden).toBe(false);
+    overlay.update({
+      hud: hud({ preview: { kind: 'lastWave' } }),
+      paused: false,
+      speed: 1,
+      ui: uiState(),
+      refund: 0,
+    });
+    expect(shell.preview.hp.hidden).toBe(true);
+  });
+
+  it('counts the run’s waves in the strip’s title — "Wave n of N", N the ruleset’s own wave count', () => {
+    const { overlay, shell } = setup();
+    show(overlay, [entry()], { waveNumber: 3, waveCount: 30 });
+    expect(shell.preview.title.textContent).toBe('Wave 3 of 30');
+    // And from a real run's HUD: the shipped crossing board's placeholder schedule has ten.
+    const c = createController(1);
+    overlay.update({ hud: c.hud(), paused: false, speed: 1, ui: uiState(), refund: 0 });
+    expect(shell.preview.title.textContent).toBe(`Wave 1 of ${c.ruleset.waves.length}`);
+    expect(c.ruleset.waves).toHaveLength(10);
   });
 });
 

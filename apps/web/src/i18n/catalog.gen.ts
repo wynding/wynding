@@ -58,15 +58,24 @@ export const EN = {
   "hud.preview.count": "×{count}",
   "hud.preview.domain.air": "air",
   "hud.preview.domain.ground": "ground",
-  "hud.preview.entry": "{count} × {name} — {domain}, {armor}, {leakCost}, {immunities}",
-  "hud.preview.entry.boss": "{count} × {name} — boss, {domain}, {armor}, {leakCost}, {immunities}",
+  "hud.preview.entry": "{count} × {name} — {route}, {domain}, {armor}, {leakCost}, {immunities}",
+  "hud.preview.entry.boss": "{count} × {name} — boss, {route}, {domain}, {armor}, {leakCost}, {immunities}",
   "hud.preview.glance.immune": "immune to {immunities}",
+  "hud.preview.hp.fewer": "Every creep in this wave has −{percent}% hit points",
+  "hud.preview.hp.fewer.glance": "−{percent}% hit points",
+  "hud.preview.hp.more": "Every creep in this wave has +{percent}% hit points",
+  "hud.preview.hp.more.glance": "+{percent}% hit points",
   "hud.preview.immunities.none": "no immunities",
   "hud.preview.immunity.slow": "slow",
   "hud.preview.immunity.stun": "stun",
   "hud.preview.lastWave": "Final wave launched — no more waves to call",
   "hud.preview.leakCost": "leak cost {leakCost}",
   "hud.preview.role.boss": "boss",
+  "hud.preview.route": "{from} to {to}",
+  "hud.preview.side.east": "east",
+  "hud.preview.side.north": "north",
+  "hud.preview.side.south": "south",
+  "hud.preview.side.west": "west",
   "hud.preview.title": "Wave {waveNumber} of {waveCount}",
   "hud.score": "Score: {count}",
   "hud.score.glance.label": "Score",
@@ -304,15 +313,24 @@ export interface MessageParams {
   "hud.preview.count": { "count": string | number };
   "hud.preview.domain.air": Record<never, never>;
   "hud.preview.domain.ground": Record<never, never>;
-  "hud.preview.entry": { "count": string | number; "name": string | number; "domain": string | number; "armor": string | number; "leakCost": string | number; "immunities": string | number };
-  "hud.preview.entry.boss": { "count": string | number; "name": string | number; "domain": string | number; "armor": string | number; "leakCost": string | number; "immunities": string | number };
+  "hud.preview.entry": { "count": string | number; "name": string | number; "route": string | number; "domain": string | number; "armor": string | number; "leakCost": string | number; "immunities": string | number };
+  "hud.preview.entry.boss": { "count": string | number; "name": string | number; "route": string | number; "domain": string | number; "armor": string | number; "leakCost": string | number; "immunities": string | number };
   "hud.preview.glance.immune": { "immunities": string | number };
+  "hud.preview.hp.fewer": { "percent": string | number };
+  "hud.preview.hp.fewer.glance": { "percent": string | number };
+  "hud.preview.hp.more": { "percent": string | number };
+  "hud.preview.hp.more.glance": { "percent": string | number };
   "hud.preview.immunities.none": Record<never, never>;
   "hud.preview.immunity.slow": Record<never, never>;
   "hud.preview.immunity.stun": Record<never, never>;
   "hud.preview.lastWave": Record<never, never>;
   "hud.preview.leakCost": { "leakCost": string | number };
   "hud.preview.role.boss": Record<never, never>;
+  "hud.preview.route": { "from": string | number; "to": string | number };
+  "hud.preview.side.east": Record<never, never>;
+  "hud.preview.side.north": Record<never, never>;
+  "hud.preview.side.south": Record<never, never>;
+  "hud.preview.side.west": Record<never, never>;
   "hud.preview.title": { "waveNumber": string | number; "waveCount": string | number };
   "hud.score": { "count": string | number };
   "hud.score.glance.label": Record<never, never>;

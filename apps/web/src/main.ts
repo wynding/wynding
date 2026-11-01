@@ -395,6 +395,7 @@ export function createApp(doc: Document, root: HTMLElement, deps: AppDeps): AppH
     keymap,
     shell,
     controller.ruleset,
+    controller.board,
     // Cancel any in-flight placement gesture when settings opens, exactly as the rotate
     // prompt does. The input manager is created below (it needs `shell.cards`), so this
     // is a deferred forward reference — the same wiring as the hoisted `onAction` above; the

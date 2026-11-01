@@ -1285,6 +1285,31 @@ a.wy-home:focus-visible {
   font-weight: 700;
 }
 
+/* A stream's route (M3 story 4): its arrow — the heading the board draws on that entrance and
+   its exit — then the walls it runs between, in words. Compact's column drops the words (below)
+   and keeps the arrow; the row's full sentence names the route either way. */
+.wy-preview-route {
+  display: flex;
+  flex: none;
+  align-items: center;
+  gap: 0.25em;
+}
+
+.wy-preview-route-name {
+  color: var(--wy-fg-dim);
+  white-space: nowrap;
+}
+
+/* The wave's hit-point clause (M3 creep HP growth), once, between the title and the rows; hidden
+   while a wave's creeps have the catalog's hit points. Its full sentence is positioned against
+   it, as a row's is against the row (`.wy-preview-entry`). */
+.wy-wave-preview-hp {
+  position: relative;
+  flex: none;
+  margin: 0;
+  font-weight: 700;
+}
+
 /* The name and deviating clause beside a SINGLE-entry wave, shown only where they fit — by
    WRAPPING away, not by a breakpoint: the box is one line tall and clips whatever wraps, and
    the empty `::before` keeps that line occupied so an item too wide for what is left wraps
@@ -3309,6 +3334,11 @@ a.wy-home:focus-visible {
   }
 
   .wy-preview-detail {
+    display: none;
+  }
+
+  /* The column has no room for a route in words: the arrow stays (M3 story 4). */
+  .wy-preview-route-name {
     display: none;
   }
 
