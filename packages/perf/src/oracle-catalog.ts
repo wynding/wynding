@@ -228,7 +228,7 @@ function routeFromLiveTowers(
 ): readonly { col: number; row: number }[] {
   const grid = compiled.board.grid;
   const mask = materializeTowerMask(grid, state.towers, compiled.towerById);
-  // The catalog board is one entrance → exit pair (format 3: `west` → `east`).
+  // The catalog board is one entrance → exit pair (`west` → `east`).
   const field = computeDistanceField(grid, grid.exits[0]!, mask);
   return shortestPath(grid, field, grid.entrances[0]!) ?? [];
 }

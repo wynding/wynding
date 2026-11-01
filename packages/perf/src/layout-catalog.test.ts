@@ -112,7 +112,7 @@ function routeOver(ps: readonly { anchor: Cell; towerId: string }[]): readonly C
     towerId: ps.map((p) => p.towerId),
   };
   const mask = materializeTowerMask(grid, towers, compiled.towerById);
-  // The catalog board is one entrance → exit pair (format 3: `west` → `east`).
+  // The catalog board is one entrance → exit pair (`west` → `east`).
   const field = computeDistanceField(grid, grid.exits[0]!, mask);
   return shortestPath(grid, field, grid.entrances[0]!) ?? [];
 }

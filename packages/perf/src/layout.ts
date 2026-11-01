@@ -140,7 +140,7 @@ export function stressRouteLength(compiled: CompiledRuleset): number {
     towerId: anchors.map((_, i) => towerIdAt(i)),
   };
   const mask = materializeTowerMask(grid, towers, compiled.towerById);
-  // The stress board is one entrance → exit pair (format 3: `west` → `east`).
+  // The stress board is one entrance → exit pair (`west` → `east`).
   const field = computeDistanceField(grid, grid.exits[0]!, mask);
   const path = shortestPath(grid, field, grid.entrances[0]!);
   return path === null ? 0 : path.length;
@@ -505,7 +505,7 @@ export function catalogRoutePath(
     towerId: placements.map((p) => p.towerId),
   };
   const mask = materializeTowerMask(grid, towers, compiled.towerById);
-  // The catalog board is one entrance → exit pair (format 3: `west` → `east`).
+  // The catalog board is one entrance → exit pair (`west` → `east`).
   const field = computeDistanceField(grid, grid.exits[0]!, mask);
   const path = shortestPath(grid, field, grid.entrances[0]!);
   return path === null ? [] : path;
