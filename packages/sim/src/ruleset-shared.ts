@@ -149,6 +149,20 @@ export function canonicalDestination(
   return [...new Set(destination)].sort((a, b) => rank(a) - rank(b));
 }
 
+/**
+ * A creep's hit points at spawn under its wave's `hpPercent` (M3 creep HP growth):
+ * `max(1, ⌊catalogHp × hpPercent / 100⌋)`. THE single formula — the spawn site
+ * (`index.ts`) and the render view model's health-bar denominator both call it, so the
+ * bar a player sees is measured against exactly the hit points the creep spawned with.
+ * Integer math: the schema caps both operands at 1,000,000, so the product is at most
+ * 10¹² — a safe integer — and its floor division by 100 is exact. The `max(1, …)` floor
+ * keeps a tiny catalog value under a small percentage a live creep, never a 0-hp one.
+ * `hpPercent` 100 returns `catalogHp` unchanged.
+ */
+export function spawnHp(catalogHp: number, hpPercent: number): number {
+  return Math.max(1, Math.floor((catalogHp * hpPercent) / 100));
+}
+
 /** Integer ceiling division — `⌈a/b⌉` via `Math.floor((a+b-1)/b)`, never float
  *  division (the determinism contract). Used once, below, but named for its own
  *  proof obligation (Codex R2-4's formula cites it explicitly). */

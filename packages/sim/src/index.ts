@@ -37,7 +37,7 @@ import {
   refundFor,
 } from './tower';
 import { assertRuleset, type CompiledRuleset, type CompiledCreep } from './ruleset';
-import { SIM_VERSION, effectiveSpeedFp } from './ruleset-shared';
+import { SIM_VERSION, effectiveSpeedFp, spawnHp } from './ruleset-shared';
 
 /** Simulation cadence: 20 Hz. Must match the render loop's tick duration. */
 export const MS_PER_TICK = 50;
@@ -47,6 +47,9 @@ export const MS_PER_TICK = 50;
  *  (`import { SIM_VERSION } from '@wynding/sim'`) is unchanged. See that module for
  *  the bump history. */
 export { SIM_VERSION };
+/** A creep's hit points at spawn under its wave's `hpPercent` — the one formula the
+ *  spawn site and the render view model's health bar share (ruleset-shared.ts). */
+export { spawnHp };
 
 /** The game lifecycle phase: `'running'` covers the whole multi-wave run (waiting
  *  on the first countdown through the last wave's clear) — the pre-S2 `'pre-wave'`/
@@ -963,7 +966,7 @@ export function step(
   for (let k = 0; k < waveCount; k++) {
     const launchTick = state.waveLaunchTick[k]!; // coerceSoa sized this array to waveCount
     if (launchTick === null) continue;
-    const spawns = waves[k]!.spawns;
+    const { spawns, hpPercent } = waves[k]!;
     for (;;) {
       const cursor = state.waveSpawnCursor[k]!;
       const entry = cursor < spawns.length ? spawns[cursor] : undefined;
@@ -980,7 +983,7 @@ export function step(
         // loop termination and never retries the same cursor.
         if (newCreepId !== null) {
           state.creeps.id.push(newCreepId);
-          state.creeps.hp.push(def.hp);
+          state.creeps.hp.push(spawnHp(def.hp, hpPercent)); // its wave's HP growth (M3)
           state.creeps.bounty.push(def.bounty);
           state.creeps.speed.push(def.speedFp);
           state.creeps.fromX.push(cellCenterX(entrance.col)); // rest on the entrance centre

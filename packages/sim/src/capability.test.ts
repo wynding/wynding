@@ -160,7 +160,6 @@ describe('capabilityProfile', () => {
       maxBurstTravelTicks: 8,
       maxDestinationExits: 1,
       maxDestinationsPerBoard: 4,
-      requiredHpPercent: 100,
     });
     // Every prior version is deleted with each bump (G11, capability.ts's header).
     // sv16 is the same case sv15 was: its CONTENTS are what the assertion above just
@@ -223,9 +222,10 @@ describe('capability gate — accept at boundary, reject beyond, per dimension',
     });
   });
 
-  it('requiredHpPercent: 100 accepted, 101 rejected', () => {
-    compiles(() => undefined);
-    rejects((b) => (b.boards[0]!.waves[0]!.hpPercent = 101), 'hpPercent 101 must be 100');
+  it('hpPercent is not a capability axis: this build simulates creep HP growth, so every schema-legal value compiles', () => {
+    compiles((b) => (b.boards[0]!.waves[0]!.hpPercent = 1));
+    compiles((b) => (b.boards[0]!.waves[0]!.hpPercent = 270));
+    compiles((b) => (b.boards[0]!.waves[0]!.hpPercent = 1_000_000)); // the schema's own ceiling
   });
 
   it('maxDestinationExits (M3, ADR 0015): a one-exit destination compiles, a two-exit one is rejected', () => {

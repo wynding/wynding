@@ -11,6 +11,7 @@ import {
   auraMulFor,
   SUPPORT_MUL_IDENTITY,
   MS_PER_TICK,
+  spawnHp,
   type SimState,
   type PreviewState,
   type CompiledRuleset,
@@ -93,13 +94,19 @@ export function deriveViewModel(state: SimState, ruleset: CompiledRuleset): Rend
     const hp = state.creeps.hp[i];
     const creepId = state.creeps.creepId[i] as string;
     // TRUE per-creep denominator (M2-S3 retires the single-kind `maxCreepHp` assumption):
-    // the creep's OWN catalog max HP, `creepById[creepId].hp`. `coerceSoa` already drops
-    // any row whose `creepId` doesn't resolve in the catalog, so an unresolvable id here
-    // can only occur via a total-guard gap the sim itself didn't anticipate — this falls
-    // back to `max(1, hp)` (never 0, so the fraction stays defined) rather than throwing.
+    // the hit points the creep SPAWNED with — its OWN catalog max HP grown by its wave's
+    // `hpPercent` (M3), through the sim's own `spawnHp`, so a grown creep's bar starts
+    // full and falls in proportion. `coerceSoa` already drops any row whose `creepId` or
+    // `wave` doesn't resolve, so an unresolvable one here can only occur via a total-guard
+    // gap the sim itself didn't anticipate — an unknown wave reads as 100%, and an
+    // unknown id falls back to `max(1, hp)` (never 0, so the fraction stays defined)
+    // rather than throwing.
     const def = ruleset.creepById[creepId];
+    const hpPercent = ruleset.waves[state.creeps.wave[i] as number]?.hpPercent ?? 100;
     const denom =
-      def !== undefined ? def.hp : Math.max(1, Number.isSafeInteger(hp) ? (hp as number) : 1);
+      def !== undefined
+        ? spawnHp(def.hp, hpPercent)
+        : Math.max(1, Number.isSafeInteger(hp) ? (hp as number) : 1);
     const hpFrac = Number.isSafeInteger(hp) ? clamp01((hp as number) / denom) : 0;
     // Same inclusive-expiry rule the sim's own movement derivation uses
     // (`index.ts`: `stunUntilTick !== 0 && stunUntilTick >= state.tick`) — a stun

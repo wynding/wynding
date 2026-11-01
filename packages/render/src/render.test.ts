@@ -294,6 +294,24 @@ describe('view-model + hud derivation', () => {
     expect(two.creeps[1]?.hpFrac).toBeCloseTo(5 / 20);
   });
 
+  it('measures a grown creep’s hpFrac against the hit points it SPAWNED with (M3 HP growth)', () => {
+    // The shipped bundle with its first wave at 175%: a `normal` (catalog 20) spawns at
+    // ⌊20 × 175 / 100⌋ = 35. Against the catalog's 20 the bar would read full until the
+    // creep had lost 15 hit points, and 17 left would read 85%; against its own 35 it
+    // reads 17/35.
+    const grownBundle = structuredClone(bundle) as Ruleset;
+    (grownBundle.boards[0]!.waves[0]! as { hpPercent: number }).hpPercent = 175;
+    const grown = compileRuleset(grownBundle, defaultBoardId(grownBundle));
+    let s = createInitialState(1, grown);
+    s = step(s, grown, [{ kind: 'callWaveEarly' }]);
+    expect(s.creeps.creepId[0]).toBe('normal');
+    expect(s.creeps.wave[0]).toBe(0);
+    expect(s.creeps.hp[0]).toBe(35);
+    expect(deriveViewModel(s, grown).creeps[0]?.hpFrac).toBe(1);
+    s.creeps.hp[0] = 17;
+    expect(deriveViewModel(s, grown).creeps[0]?.hpFrac).toBeCloseTo(17 / 35);
+  });
+
   it('projects `slowed` from a live slowMulFp column value', () => {
     let s = createInitialState(1, ruleset);
     s = step(s, ruleset, [{ kind: 'callWaveEarly' }]);

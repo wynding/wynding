@@ -170,11 +170,6 @@ export interface CapabilityProfile {
    *  schema's 16 entrances, so it carries a live rejection witness. Board-scoped,
    *  checked in `checkCapabilityBoard`. */
   readonly maxDestinationsPerBoard: number;
-  /** The one `hpPercent` every wave must carry (format 3) — 100 at sv16, where spawn
-   *  reads the catalog's hit points unscaled. The `requiredLeakCost` precedent: a value
-   *  the schema already admits but this build does not yet simulate is pinned, not
-   *  ignored. Board-scoped, checked per wave in `checkCapabilityBoard`. */
-  readonly requiredHpPercent: number;
 }
 
 /** `SIM_VERSION` 17 (imported from `./ruleset-shared`, the dependency-free leaf):
@@ -230,7 +225,6 @@ const PROFILES: Readonly<Record<number, CapabilityProfile>> = {
     maxBurstTravelTicks: 8,
     maxDestinationExits: 1,
     maxDestinationsPerBoard: 4,
-    requiredHpPercent: 100,
   },
 };
 

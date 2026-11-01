@@ -87,10 +87,15 @@ export interface ScheduledSpawn {
  *  first-ARRIVAL order over the sorted spawn timeline (an offset can make a later
  *  table row arrive first) — the authoritative source for the wave preview (a
  *  duplicate-creepId entry, or several entries sharing a creepId, still shows one
- *  summed count). */
+ *  summed count).
+ *
+ *  `hpPercent` is the wave's creep hit points as a percent of the catalog's (M3 creep HP
+ *  growth) — every creep the wave spawns starts at `spawnHp(catalog hp, hpPercent)`
+ *  (`ruleset-shared.ts`), and the wave preview reads it from here. */
 export interface CompiledWave {
   readonly countdownTicks: number;
   readonly clearBonus: number;
+  readonly hpPercent: number;
   readonly spawns: readonly ScheduledSpawn[];
   readonly entriesSummary: readonly { readonly creepId: string; readonly count: number }[];
 }
@@ -695,11 +700,6 @@ function checkCapabilityBoard(
     );
   }
   for (const wave of board.waves) {
-    if (wave.hpPercent !== profile.requiredHpPercent) {
-      throw new RulesetError(
-        `board '${board.id}' wave ${wave.index} hpPercent ${wave.hpPercent} must be ${profile.requiredHpPercent} at simVersion ${v}`,
-      );
-    }
     if (wave.entries.length > profile.maxEntriesPerWave) {
       throw new RulesetError(
         `board '${board.id}' wave ${wave.index} has ${wave.entries.length} entries, exceeds ${profile.maxEntriesPerWave} at simVersion ${v}`,
@@ -1120,6 +1120,7 @@ export function compileRuleset(bundle: Ruleset, boardId: string): CompiledRulese
     waves.push({
       countdownTicks: wave.countdownTicks,
       clearBonus: wave.clearBonus,
+      hpPercent: wave.hpPercent,
       spawns,
       entriesSummary,
     });
