@@ -28,7 +28,7 @@
 // (one letter per cell) and is out of this format's scope until a build needs it. A
 // `burst` tower (`mine`) is the exception to "not standing": it removes itself when it
 // detonates, which the order can't see, so placing one again RE-ARMS it — the runner
-// retries the placement each tick until the spent mine's cells are clear — and for the
+// holds the placement, sending nothing, until the spent mine's cells are clear — and for the
 // same reason it can't be sold: by the time the sell falls due it may be gone.
 //
 // `compileReferenceBuild` turns the strings into the runner's plan (`script-runner.ts`),

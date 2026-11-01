@@ -110,9 +110,22 @@ export interface ScriptRunResult {
   readonly stalled: boolean;
 }
 
-/** The input for a placement step this tick, or `null` while it waits for its tick or
- *  for bounty. Throws on a catalog-unknown tower id before anything else, so a fixture
- *  bug fails on the first tick rather than as a placement that silently never happens. */
+/** Whether a tower already stands on any cell of the 2×2 footprint anchored at
+ *  `(col, row)` — two footprints overlap when their anchors are within one cell. */
+function footprintTaken(state: SimState, col: number, row: number): boolean {
+  const towers = state.towers;
+  for (let i = 0; i < towers.id.length; i++) {
+    if (Math.abs(towers.col[i]! - col) <= 1 && Math.abs(towers.row[i]! - row) <= 1) return true;
+  }
+  return false;
+}
+
+/** The input for a placement step this tick, or `null` while it waits — for its tick, for
+ *  a tower still standing on its footprint to go (a mine re-armed before the last one has
+ *  fired), or for bounty. Waiting sends nothing, so it neither fills the input log nor
+ *  reads as a rejection. Throws on a catalog-unknown tower id before anything else, so a
+ *  fixture bug fails on the first tick rather than as a placement that silently never
+ *  happens. */
 function placementInput(
   state: SimState,
   ruleset: CompiledRuleset,
@@ -123,6 +136,7 @@ function placementInput(
     throw new Error(`unknown towerId '${next.towerId}' in a build script`);
   }
   if (next.notBeforeTick !== undefined && state.tick < next.notBeforeTick) return null;
+  if (footprintTaken(state, next.col, next.row)) return null;
   if (state.bounty < cost) return null;
   return { kind: 'placeTower', anchor: { col: next.col, row: next.row }, towerId: next.towerId };
 }
@@ -146,11 +160,11 @@ function emptyEvents(): StepEvents {
 /**
  * Runs `plan` against `ruleset` from a fresh `createInitialState(seed, ruleset)`: while
  * the sim is `'running'` (capped at `MAX_MATCH_TICKS`), attempt `plan[cursor]` — a
- * placement the first tick `state.bounty` covers its cost, a sell the first tick it is
- * due, neither before its `notBeforeTick` — and advance `cursor` once the sim accepts it
- * (a placement it rejects — e.g. an occupied anchor — never advances it, and is retried
- * the next tick). This is the entire shared core (#94) — every other measurement is a
- * caller's own `observer`.
+ * placement the first tick its footprint is clear of towers and `state.bounty` covers its
+ * cost, a sell the first tick it is due, neither before its `notBeforeTick` — and advance
+ * `cursor` once the sim accepts it (a placement it rejects — e.g. one that would seal the
+ * path — never advances it, and is sent again the next tick). This is the entire shared
+ * core (#94) — every other measurement is a caller's own `observer`.
  */
 export function runBuildScript(
   ruleset: CompiledRuleset,

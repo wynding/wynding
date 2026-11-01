@@ -185,11 +185,20 @@ describe('runBuildScript timed steps (M3 story 1)', () => {
       expect(r.state.towers.col).toEqual([2, 6]);
     });
 
-    it('a second mine on the same anchor is retried until the first has cleared it', () => {
-      const r = run([MINE, MINE, { col: 2, row: 2, towerId: 'basic' }]);
-      expect(r.mineGone[0]).toBe(DETONATION);
-      expect(r.placedAt).toEqual([0, DETONATION + 1, DETONATION + 2]);
+    it('a second mine on the same anchor waits, sending nothing, until the first has cleared it', () => {
+      const sentAt: number[] = [];
+      const r = runBuildScript(ruleset, SEED, [MINE, MINE, { col: 2, row: 2, towerId: 'basic' }], {
+        afterStep: (s, _r, inputs) => {
+          for (const i of inputs) {
+            if (i.kind === 'placeTower' && i.towerId === 'mine') sentAt.push(s.tick - 1);
+          }
+        },
+      });
+      // One input for the mine, one for its re-arm — the tick after the first one fired —
+      // and none while the spent mine still stood on the anchor.
+      expect(sentAt).toEqual([0, DETONATION + 1]);
       expect(r.placedCount).toBe(3);
+      expect(r.stalled).toBe(false);
     });
 
     it('a mine that fires on the tick it lands is credited once, not placed again', () => {

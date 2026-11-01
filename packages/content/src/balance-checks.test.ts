@@ -121,7 +121,7 @@ describe('every step ran', () => {
     ]);
   });
 
-  it('end to end — a loser dying with a step queued passes; one dying behind a rejected step fails', () => {
+  it('end to end — a loser dying with steps queued passes; one dying behind a rejected step fails', () => {
     const run = (order: string, towers: readonly (readonly [number, number, string])[]) =>
       runReferenceBuild(
         ruleset,
@@ -135,12 +135,18 @@ describe('every step ran', () => {
     const queued = run('b2,2@40000', [[2, 2, 'b']]);
     expect([queued.state.phase, queued.stepsDone, queued.stalled]).toEqual(['lost', 0, false]);
     expect(checkAllStepsRan('queued', queued)).toEqual([]);
-    // A mine far off the path never fires, so re-arming it finds its anchor taken: rejected,
-    // and retried every tick until the run is lost.
-    const blocked = run('m2,2 m2,2', [[2, 2, 'm']]);
-    expect([blocked.state.phase, blocked.stepsDone, blocked.stalled]).toEqual(['lost', 1, true]);
+    // A mine far off the path never fires, so its re-arm waits for the anchor to clear —
+    // queued, sending nothing, not a stall.
+    const rearm = run('m2,2 m2,2', [[2, 2, 'm']]);
+    expect([rearm.state.phase, rearm.stepsDone, rearm.stalled]).toEqual(['lost', 1, false]);
+    expect(checkAllStepsRan('rearm', rearm)).toEqual([]);
+    // A wall of basics down columns 12–13: the eleventh would close the last gap and seal
+    // the path, so the sim rejects it every tick until the run is lost.
+    const wall = Array.from({ length: 11 }, (_, i) => [12, 1 + 2 * i, 'b'] as const);
+    const blocked = run(wall.map(([col, row]) => `b${col},${row}`).join(' '), wall);
+    expect([blocked.state.phase, blocked.stepsDone, blocked.stalled]).toEqual(['lost', 10, true]);
     expect(checkAllStepsRan('blocked', blocked)).toEqual([
-      'blocked: step 2 was rejected by the sim and never ran',
+      'blocked: step 11 was rejected by the sim and never ran',
     ]);
   });
 });
