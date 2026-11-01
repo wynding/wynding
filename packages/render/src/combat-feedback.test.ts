@@ -273,7 +273,7 @@ describe('createFeedbackTracker — kills and leaks', () => {
     expect(fb.kills()).toEqual([]);
   });
 
-  it('pulses the exit on a leak, for the pulse’s span — and a leak inside its gap does not begin another', () => {
+  it('pulses the exit on a leak, for the pulse’s span — and a leak inside its gap waits for the gap to end', () => {
     const fb = createFeedbackTracker();
     fb.update(frame({ nowMs: 0 }));
     expect(fb.pulseSinceMs(0)).toBeNull();
@@ -283,10 +283,14 @@ describe('createFeedbackTracker — kills and leaks', () => {
     expect(fb.pulseSinceMs(0)).toBe(300);
     fb.update(frame({ nowMs: 100 + LEAK_PULSE_MS }));
     expect(fb.pulseSinceMs(0)).toBeNull(); // played out
-    fb.update(frame({ nowMs: 100 + LEAK_PULSE_GAP_MS - 1, leaks: [0] }));
+    fb.update(frame({ nowMs: 100 + LEAK_PULSE_GAP_MS - 1 }));
     expect(fb.pulseSinceMs(0)).toBeNull(); // still inside the gap: nothing
-    fb.update(frame({ nowMs: 100 + LEAK_PULSE_GAP_MS, leaks: [0] }));
-    expect(fb.pulseSinceMs(0)).toBe(0); // a second on: another
+    // A second on, the leak that came inside the gap gets its pulse, with no new leak needed.
+    fb.update(frame({ nowMs: 100 + LEAK_PULSE_GAP_MS }));
+    expect(fb.pulseSinceMs(0)).toBe(0);
+    // And nothing is left waiting: no leak since, no pulse after this one.
+    fb.update(frame({ nowMs: 100 + 3 * LEAK_PULSE_GAP_MS }));
+    expect(fb.pulseSinceMs(0)).toBeNull();
   });
 
   it('pulses the exit a leak left by, under one gap for the whole board (M3: one exit per pair)', () => {
@@ -294,14 +298,40 @@ describe('createFeedbackTracker — kills and leaks', () => {
     fb.update(frame({ nowMs: 100, leaks: [1] }));
     expect(fb.pulseSinceMs(1)).toBe(0);
     expect(fb.pulseSinceMs(0)).toBeNull(); // the other exit saw no leak
-    // Inside the gap exit 1's pulse began, a leak at exit 0 begins nothing: the gap is shared.
+    // Inside the gap exit 1's pulse began, a leak at exit 0 begins nothing yet: the gap is shared.
     fb.update(frame({ nowMs: 300, leaks: [0, 1] }));
     expect(fb.pulseSinceMs(0)).toBeNull();
     expect(fb.pulseSinceMs(1)).toBe(200);
-    // Past it, the first leak in the step's order takes the next pulse, and only it.
-    fb.update(frame({ nowMs: 100 + LEAK_PULSE_GAP_MS, leaks: [0, 1] }));
+    // Past it, both waiting: exit 0 has never pulsed, so it goes, and only it.
+    fb.update(frame({ nowMs: 100 + LEAK_PULSE_GAP_MS }));
     expect(fb.pulseSinceMs(0)).toBe(0);
     expect(fb.pulseSinceMs(1)).toBeNull();
+    // A gap later, exit 1's turn — though exit 0 leaks again first.
+    fb.update(frame({ nowMs: 100 + 1.5 * LEAK_PULSE_GAP_MS, leaks: [0] }));
+    fb.update(frame({ nowMs: 100 + 2 * LEAK_PULSE_GAP_MS, leaks: [0] }));
+    expect(fb.pulseSinceMs(1)).toBe(0);
+    expect(fb.pulseSinceMs(0)).toBeNull();
+  });
+
+  it('a busy exit cannot starve another: exit 0 leaks every frame, exit 1 once, and exit 1 still pulses within the next gap', () => {
+    const fb = createFeedbackTracker();
+    const pulsedOne: number[] = [];
+    const starts: number[] = [];
+    for (let i = 0; i <= 600; i++) {
+      const nowMs = (i * 1000) / 60;
+      // Exit 1's one leak lands a quarter-second into a gap exit 0's pulse opened.
+      fb.update(frame({ nowMs, leaks: i === 75 ? [0, 1] : [0] }));
+      for (const exit of [0, 1]) if (fb.pulseSinceMs(exit) === 0) starts.push(nowMs);
+      if (fb.pulseSinceMs(1) === 0) pulsedOne.push(nowMs);
+    }
+    // Were each gap taken by the first exit to leak after it, exit 0 would take every pulse.
+    expect(pulsedOne).toHaveLength(1);
+    expect(pulsedOne[0]! - 1250).toBeGreaterThan(0);
+    expect(pulsedOne[0]! - 1250).toBeLessThanOrEqual(LEAK_PULSE_GAP_MS);
+    // Fair, and still one pulse a gap: never more than three flashes in any second.
+    for (let i = 1; i < starts.length; i++) {
+      expect(starts[i]! - starts[i - 1]!).toBeGreaterThanOrEqual(LEAK_PULSE_GAP_MS);
+    }
   });
 
   it('reset forgets everything: no flash, no kill, no pulse', () => {

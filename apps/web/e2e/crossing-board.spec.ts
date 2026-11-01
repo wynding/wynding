@@ -327,12 +327,32 @@ for (const [zoom, hp, glance, sentence] of [
     if (zoom === 100) {
       const audit = await new AxeBuilder({ page }).include('#app').analyze();
       expect(audit.violations, JSON.stringify(audit.violations, null, 2)).toEqual([]);
+      // A browser's minimum font size enlarges the type but not the strip's rem-tall box: the
+      // stack's line heights are rems too (`ui.css`), so the head stays inside the box however
+      // large the type is forced — here both lines at 18px, over a 16px minimum.
+      await page.addStyleTag({
+        content: '.wy-wave-preview-head > * { font-size: 18px !important; }',
+      });
+      const forced = await page.evaluate(() => {
+        const strip = document.querySelector<HTMLElement>('.wy-wave-preview')!;
+        const s = strip.getBoundingClientRect();
+        const h = document.querySelector('.wy-wave-preview-head')!.getBoundingClientRect();
+        const top = s.top + strip.clientTop;
+        return {
+          font: getComputedStyle(document.querySelector('.wy-wave-preview-hp')!).fontSize,
+          top: h.top - top,
+          bottom: top + strip.clientHeight - h.bottom,
+        };
+      });
+      expect(forced.font, 'the premise: the clause’s type is forced up').toBe('18px');
+      expect(forced.top, 'the head’s top inside the strip').toBeGreaterThanOrEqual(-0.5);
+      expect(forced.bottom, 'the head’s bottom inside the strip').toBeGreaterThanOrEqual(-0.5);
     }
   });
 }
 
 for (const zoom of [100, 200] as const) {
-  test(`Compact at ${String(zoom)}% text: the hit-point clause wraps inside the column, and the column rests on whole items`, async ({
+  test(`Compact at ${String(zoom)}% text: the hit-point clause wraps inside the column, every line of it reachable whole`, async ({
     page,
   }) => {
     await page.setViewportSize(PHONE);
@@ -342,28 +362,16 @@ for (const zoom of [100, 200] as const) {
     );
     const column = await page.evaluate(() => {
       const hud = document.querySelector<HTMLElement>('.wy-hud')!;
-      hud.scrollTop = 0; // at rest
+      hud.scrollTop = 0;
       const h = hud.getBoundingClientRect();
       const top = h.top + hud.clientTop;
       const bottom = h.bottom - parseFloat(getComputedStyle(hud).borderBottomWidth);
-      // The column's items as `hud-cut.ts` counts them, the clause among them.
-      const items = [
-        ...hud.querySelectorAll<HTMLElement>(
-          ':scope > .wy-chip, :scope > .wy-wave-preview .wy-wave-preview-title, ' +
-            ':scope > .wy-wave-preview .wy-wave-preview-hp, ' +
-            ':scope > .wy-wave-preview .wy-preview-entry',
-        ),
-      ]
-        .map((el) => el.getBoundingClientRect())
-        .filter((r) => r.height > 0);
-      const shownWhole = items.filter((r) => r.top >= top - 0.5 && r.bottom <= bottom + 0.5);
-      const straddling = items.filter((r) => r.top < bottom - 0.5 && r.bottom > bottom + 0.5);
-      // Then the clause itself: every line of it within the column's width, and — the column
-      // scrolls, and at 200% the clause is taller than what a 320px phone leaves it at rest —
-      // each line, scrolled to, shown whole.
-      const hp = hud.querySelector<HTMLElement>('.wy-wave-preview-hp')!;
       const left = h.left + hud.clientLeft;
       const right = left + hud.clientWidth;
+      // Every line of the clause within the column's width, and — the column scrolls, and at
+      // 200% the clause is taller than what a 320px phone leaves it at rest — each line,
+      // scrolled to, shown whole.
+      const hp = hud.querySelector<HTMLElement>('.wy-wave-preview-hp')!;
       const glanceLines = (): DOMRect[] => {
         const range = document.createRange();
         range.selectNodeContents(hp.querySelector('.wy-preview-hp-glance')!);
@@ -373,16 +381,13 @@ for (const zoom of [100, 200] as const) {
       const sideways = lines.filter((r) => r.left < left - 0.5 || r.right > right + 0.5).length;
       let unseen = 0;
       for (let i = 0; i < lines.length; i++) {
-        const before = glanceLines()[i]!;
-        hud.scrollTop += before.top - top; // this line to the top of the visible box
+        hud.scrollTop += glanceLines()[i]!.top - top; // this line to the top of the visible box
         const r = glanceLines()[i]!;
         if (r.top < top - 0.5 || r.bottom > bottom + 0.5) unseen++;
       }
       hud.scrollTop = 0;
       return {
         sideways: hud.scrollWidth - hud.clientWidth,
-        shownWhole: shownWhole.length,
-        straddling: straddling.length,
         lines: lines.length,
         linesPastColumn: sideways,
         linesUnseen: unseen,
@@ -392,8 +397,64 @@ for (const zoom of [100, 200] as const) {
     expect(column.lines, 'the clause is painted').toBeGreaterThan(0);
     expect(column.linesPastColumn, 'every line of the clause within the column').toBe(0);
     expect(column.linesUnseen, 'every line of the clause can be scrolled to whole').toBe(0);
-    if (column.shownWhole > 0) {
-      expect(column.straddling, "no item cut by the column's edge at rest").toBe(0);
-    }
   });
 }
+
+test('Compact: the column rests on its last whole item, the hit-point clause one of them — after it where it fits, never through it', async ({
+  page,
+}) => {
+  test.setTimeout(120_000);
+  // The cut (`hud-cut.ts`) counts the clause as one of the column's items. At 200% text no
+  // Compact window leaves the chips room to reach it at rest, so this runs at 100%, over window
+  // heights whose room — measured with the cut lifted — ends in turn inside the clause and inside
+  // the row after it. At each, the column must rest on the bottom of the last item that fits
+  // whole: before the clause where the room ends inside it, and AFTER it where the room ends in
+  // the next row — the case a cut that did not count the clause would get wrong, hiding it.
+  const seen: string[] = [];
+  let endsInClause = 0;
+  let restsOnClause = 0;
+  for (let height = 320; height <= 500; height += 10) {
+    await page.setViewportSize({ width: 740, height });
+    await openWaves(page, 'hp=80&wave=9', 100);
+    const at = await page.evaluate(() => {
+      const hud = document.querySelector<HTMLElement>('.wy-hud')!;
+      hud.scrollTop = 0; // at rest
+      const cs = getComputedStyle(hud);
+      const bottomEdge = (): number =>
+        hud.getBoundingClientRect().bottom - parseFloat(cs.borderBottomWidth);
+      const cut = hud.style.getPropertyValue('--wy-hud-cut');
+      const visibleBottom = bottomEdge();
+      // The room without the cut: lifted and put back in one task, so no observer sees it.
+      hud.style.removeProperty('--wy-hud-cut');
+      const roomBottom = bottomEdge();
+      if (cut !== '') hud.style.setProperty('--wy-hud-cut', cut);
+      const bottoms = [
+        ...hud.querySelectorAll<HTMLElement>(
+          ':scope > .wy-chip, :scope > .wy-wave-preview .wy-wave-preview-title, ' +
+            ':scope > .wy-wave-preview .wy-wave-preview-hp, ' +
+            ':scope > .wy-wave-preview .wy-preview-entry',
+        ),
+      ]
+        .map((el) => el.getBoundingClientRect())
+        .filter((r) => r.height > 0)
+        .map((r) => r.bottom);
+      const hp = hud.querySelector('.wy-wave-preview-hp')!.getBoundingClientRect();
+      return { roomBottom, visibleBottom, bottoms, top: hp.top, bottom: hp.bottom };
+    });
+    seen.push(
+      `${String(height)}: room to ${at.roomBottom.toFixed(1)}, rests at ${at.visibleBottom.toFixed(1)}, clause ${at.top.toFixed(1)}–${at.bottom.toFixed(1)}`,
+    );
+    const fit = at.bottoms.filter((b) => b <= at.roomBottom + 0.5);
+    if (fit.length === 0 || fit.length === at.bottoms.length) continue; // no cut to check
+    const expected = Math.max(...fit);
+    expect(at.visibleBottom, `740×${String(height)}: rests on its last whole item`).toBeCloseTo(
+      expected,
+      0,
+    );
+    if (at.top < at.roomBottom - 0.5 && at.bottom > at.roomBottom + 0.5) endsInClause++;
+    if (Math.abs(expected - at.bottom) < 0.5) restsOnClause++;
+  }
+  const log = seen.join('\n');
+  expect(endsInClause, `no window's room ended inside the clause:\n${log}`).toBeGreaterThan(0);
+  expect(restsOnClause, `no window rested on the clause's bottom:\n${log}`).toBeGreaterThan(0);
+});

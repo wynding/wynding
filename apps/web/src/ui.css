@@ -766,22 +766,30 @@ a.wy-home:focus-visible {
   /* THE HEAD STACKS THE WAVE'S HIT-POINT CLAUSE UNDER THE TITLE (M3), inside the strip's one
      fixed line. Beside the title, "+70% hit points" took ~110px of a line the rows need: at
      1280×720 a four-stream wave lost its last two rows to the scroll form for it. Stacked, the
-     clause costs the line only what it is wider than the title, and nothing is clipped: both
-     lines are set tight (1.15) and the clause smaller (0.8em) only while it shows, so title and
-     clause take ~30px of the strip's 34px content box at every text size (it scales with rem).
-     A title alone keeps the line height and place it always had. */
+     clause costs the line only what it is wider than the title, and nothing is clipped: while
+     the clause shows, the two lines are set tight and the clause smaller (0.8em), so they take
+     ~30px of the strip's 34px content box at every text size.
+
+     THE LINE HEIGHTS ARE IN REM, as the strip's height is, so the stack can never outgrow the
+     box: a browser's minimum font size enlarges the type but not a rem, and the two line boxes
+     stay 1.15× the type they were set for (the strip's 0.9rem; 0.8 of it for the clause).
+     Under a minimum font size above ~13px the clause's glyphs fill its line box to the edges,
+     tight but inside the strip. A title alone keeps the line height and place it always had. */
   .wy-shell .wy-wave-preview-head {
     flex: none;
     display: flex;
     flex-direction: column;
   }
 
-  .wy-shell .wy-wave-preview-head:has(> .wy-wave-preview-hp:not([hidden])) > * {
-    line-height: 1.15;
+  .wy-shell
+    .wy-wave-preview-head:has(> .wy-wave-preview-hp:not([hidden]))
+    > .wy-wave-preview-title {
+    line-height: calc(1.15 * 0.9rem);
   }
 
-  .wy-shell .wy-wave-preview-hp {
+  .wy-shell .wy-wave-preview-head > .wy-wave-preview-hp {
     font-size: 0.8em;
+    line-height: calc(1.15 * 0.72rem);
   }
 
   /* The list's box IS its line (`flex: none`): a multi-entry line longer than the strip
