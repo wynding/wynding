@@ -26,6 +26,7 @@ import {
   TEST_AOE_TOWER,
   TEST_SWARM_CREEP,
   runCombatT,
+  withoutDestination,
 } from './test-support';
 import { advanceCreep, cellCenterX, cellCenterY, deriveValidCreepPosition } from './movement';
 import { effectiveSpeedFp } from './ruleset-shared';
@@ -921,6 +922,9 @@ describe('the done-criterion scenario (Codex R1-13): one blast tower SURVIVES a 
     expect(state.leakedCount).toBe(5);
     expect(state.lives).toBe(5);
     expect(state.cumulativeKillBounty).toBe(11);
+    // The pin from before M3 story 3's `destination` creep column, which the state minus
+    // that column must still hash to: the proof the column is all that moved the golden.
+    expect(hashSimState(withoutDestination(state))).toBe('34ee3f5f');
     // GOLDEN — a behavior change here requires re-pinning this alongside the three
     // measured values above. Re-pinned M2-S5a P2: `Impact.sourceId` enters the
     // world-hash; the three measured values above are UNCHANGED, so this is a

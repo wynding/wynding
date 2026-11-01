@@ -20,17 +20,11 @@
 // how `field-01` plays — a defect, not a re-pin.
 
 import { describe, it, expect } from 'vitest';
-import {
-  compileRuleset,
-  hashSimState,
-  deriveScore,
-  deriveStars,
-  type SimState,
-} from '@wynding/sim';
+import { compileRuleset, hashSimState, deriveScore, deriveStars } from '@wynding/sim';
 import { getBundledRuleset, defaultBoardId } from './registry';
 import { WINNER_A } from './showcase-builds';
 import { runBuildScript } from './script-runner';
-import { fnv1a } from './test-digest';
+import { fnv1a, withoutDestination } from './test-digest';
 
 /** `m2-golden.test.ts`'s seed — the same run. */
 const SCENARIO_SEED = 0x5eed;
@@ -46,16 +40,6 @@ const FORMAT2_REFERENCE = {
   tick: 4070,
   lives: 10,
 } as const;
-
-/** The state as format 2 knew it: every field, minus the creep columns story 3 added.
- *  Spreads keep key order, so the JSON — and the hash — match a format-2 state's
- *  byte for byte. */
-function format2Projection(state: SimState): unknown {
-  const { destination: _destination, ...format2Creeps } = state.creeps as SimState['creeps'] & {
-    destination?: unknown;
-  };
-  return { ...state, creeps: format2Creeps };
-}
 
 describe('M3 story 3 — format 3 parity: field-01 reproduces the format-2 run of the M2 golden replay', () => {
   it('the bundle under test IS format 3, one entrance → exit pair, every hpPercent 100', () => {
@@ -74,11 +58,11 @@ describe('M3 story 3 — format 3 parity: field-01 reproduces the format-2 run o
     const trace: string[] = [];
     const { state } = runBuildScript(ruleset, SCENARIO_SEED, WINNER_A, {
       afterStep: (s) => {
-        trace.push(hashSimState(format2Projection(s) as SimState));
+        trace.push(hashSimState(withoutDestination(s)));
       },
     });
     const traceHashDigest = fnv1a(trace.join(':'));
-    const finalStateHash = hashSimState(format2Projection(state) as SimState);
+    const finalStateHash = hashSimState(withoutDestination(state));
     console.log(
       `[format3-parity] traceHashDigest=${traceHashDigest} finalStateHash=${finalStateHash} ` +
         `phase=${state.phase} score=${deriveScore(state, ruleset)} stars=${deriveStars(state, ruleset)} ` +

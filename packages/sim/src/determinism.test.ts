@@ -91,6 +91,7 @@ import {
   TEST_SLOW_TOWER,
   TEST_FAST_CREEP,
   TEST_DOT_TOWER,
+  withoutDestination,
 } from './test-support';
 import { compileRuleset, type CompiledRuleset } from './ruleset';
 
@@ -206,14 +207,16 @@ function canonicalInputs(tick: number): SimInput[] {
 function runCanonical(
   seed = SCENARIO_SEED,
   ticks = SCENARIO_TICKS,
-): { state: SimState; trace: string[] } {
+): { state: SimState; trace: string[]; traceWithoutDestination: string[] } {
   let state = createInitialState(seed, SCENARIO_RULESET);
   const trace: string[] = [];
+  const traceWithoutDestination: string[] = [];
   for (let t = 0; t < ticks; t++) {
     state = step(state, SCENARIO_RULESET, canonicalInputs(t));
     trace.push(hashSimState(state));
+    traceWithoutDestination.push(hashSimState(withoutDestination(state)));
   }
-  return { state, trace };
+  return { state, trace, traceWithoutDestination };
 }
 
 // --- GOLDEN — a behavior change here requires a SIM_VERSION bump (CI-enforced) --
@@ -237,6 +240,13 @@ const GOLDEN = {
 } as const;
 // -------------------------------------------------------------------------------
 
+/** The golden as it stood before M3 story 3's `destination` creep column — the values
+ *  `withoutDestination(state)` must still hash to. Frozen: a record, never re-pinned. */
+const GOLDEN_BEFORE_DESTINATION = {
+  finalHash: 'd93528da',
+  traceDigest: '442f4adb',
+} as const;
+
 describe('determinism gate', () => {
   it('reproduces a byte-identical trace from the same (seed, inputs)', () => {
     const a = runCanonical();
@@ -249,6 +259,15 @@ describe('determinism gate', () => {
     const { state, trace } = runCanonical();
     expect(hashSimState(state)).toBe(GOLDEN.finalHash);
     expect(fnv1a(trace.join(':'))).toBe(GOLDEN.traceDigest);
+  });
+
+  it('still reproduces the golden from BEFORE the destination column, tick for tick, once that column is projected out (M3 story 3)', () => {
+    // The `destination` creep column (ADR 0015) re-pinned the golden above; this is the
+    // proof that it is the ONLY thing that moved it. The state minus that column hashes,
+    // on every tick, exactly as the whole state did before the column existed.
+    const { state, traceWithoutDestination } = runCanonical();
+    expect(hashSimState(withoutDestination(state))).toBe(GOLDEN_BEFORE_DESTINATION.finalHash);
+    expect(fnv1a(traceWithoutDestination.join(':'))).toBe(GOLDEN_BEFORE_DESTINATION.traceDigest);
   });
 
   it('witnesses creeps crossing and leaking to a LOSS (selling the basic+venom towers leaves the lane thin)', () => {

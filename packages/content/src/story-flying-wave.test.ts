@@ -42,6 +42,7 @@ import {
   type CompiledRuleset,
 } from '@wynding/sim';
 import { getBundledRuleset, defaultBoardId } from './registry';
+import { withoutDestination } from './test-digest';
 import {
   waveIndexForCreep,
   wallInputsFromTick,
@@ -241,6 +242,8 @@ describe('wave 5 (the appended `flying` wave) — S7 done-criteria, each measure
       expect(state.cumulativeKillBounty).toBe(102);
       expect(state.bounty).toBe(165);
       expect(hashSimState(state)).toBe('bd6516b9');
+      // The pre-`destination`-column pin, under the projection that removes it.
+      expect(hashSimState(withoutDestination(state))).toBe('bd6516b9');
       // Re-pinned #25 (SIM_VERSION 15 → 16, measured): score 102 → 0. The sv16 lost
       // branch forfeits the kill bounty too, so the 102 pinned above grades nothing.
       expect(deriveScore(state, ruleset)).toBe(0);
@@ -402,6 +405,8 @@ describe('wave 5 (the appended `flying` wave) — S7 done-criteria, each measure
       expect(state.cumulativeKillBounty).toBe(177);
       expect(state.bounty).toBe(218);
       expect(hashSimState(state)).toBe('4c8de2bc');
+      // The pre-`destination`-column pin, under the projection that removes it.
+      expect(hashSimState(withoutDestination(state))).toBe('4c8de2bc');
       expect(deriveScore(state, ruleset)).toBe(377);
       expect(deriveStars(state, ruleset)).toBe(1);
     },
@@ -533,6 +538,8 @@ describe('wave 5 (the appended `flying` wave) — S7 done-criteria, each measure
       expect(state.cumulativeKillBounty).toBe(106);
       expect(state.bounty).toBe(153);
       expect(hashSimState(state)).toBe('3471ba09');
+      // The pre-`destination`-column pin, under the projection that removes it.
+      expect(hashSimState(withoutDestination(state))).toBe('3471ba09');
       // Re-pinned #25 (SIM_VERSION 15 → 16, measured): score 106 → 0, the sv16 lost
       // branch. The 106 pinned above is what it forfeits.
       expect(deriveScore(state, ruleset)).toBe(0);

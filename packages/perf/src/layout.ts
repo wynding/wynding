@@ -17,14 +17,8 @@
 //      re-deriving "why col 25, row 36" from first principles is not possible — they are
 //      the output of a search, not a design. They buy the route from 307 → 329 cells.
 
-import {
-  materializeTowerMask,
-  computeDistanceField,
-  shortestPath,
-  DIAG_LEN,
-  type CompiledRuleset,
-  type TowerValidityView,
-} from '@wynding/sim';
+import { currentPath } from '@wynding/content';
+import { DIAG_LEN, type CompiledRuleset, type TowerValidityView } from '@wynding/sim';
 
 /** The eight vertical band columns (anchor col, i.e. the band's left edge). */
 export const BAND_COLS = [2, 5, 8, 11, 14, 17, 20, 23] as const;
@@ -105,9 +99,10 @@ export function towerIdAt(index: number): StressTowerId {
 }
 
 /**
- * The scripted stress maze's route length against `compiled`'s grid — entrance to
- * exit, built on the sim's OWN `materializeTowerMask` (`@wynding/sim`, `tower.ts`), the
- * exact function `step()` itself uses to derive the tower-blocked mask. QC: `run.ts`
+ * The scripted stress maze's route length against `compiled`'s grid — the board's first
+ * entrance to its OWN destination's exit (`@wynding/content`'s `currentPath`), built on
+ * the sim's OWN `materializeTowerMask` (`@wynding/sim`, `tower.ts`), the exact function
+ * `step()` itself uses to derive the tower-blocked mask. QC: `run.ts`
  * and `layout.test.ts`'s route-length check used to each hand-copy `tower.ts`'s
  * PRIVATE `FOOTPRINT_DELTAS` constant into a local mask-building loop — byte-identical
  * copies that could therefore only ever be wrong TOGETHER, which defeats the stated
@@ -124,7 +119,6 @@ export function towerIdAt(index: number): StressTowerId {
  * from the anchors and `towerIdAt`, with no live sim state involved.
  */
 export function stressRouteLength(compiled: CompiledRuleset): number {
-  const grid = compiled.board.grid;
   const anchors = stressAnchors();
   const towers: TowerValidityView = {
     id: anchors.map((_, i) => i + 1),
@@ -139,10 +133,7 @@ export function stressRouteLength(compiled: CompiledRuleset): number {
     }),
     towerId: anchors.map((_, i) => towerIdAt(i)),
   };
-  const mask = materializeTowerMask(grid, towers, compiled.towerById);
-  // The stress board is one entrance → exit pair (`west` → `east`).
-  const field = computeDistanceField(grid, grid.exits[0]!, mask);
-  const path = shortestPath(grid, field, grid.entrances[0]!);
+  const path = currentPath(compiled, { towers }, 0);
   return path === null ? 0 : path.length;
 }
 
@@ -489,7 +480,6 @@ export function catalogTowerIdAt(index: number): CatalogTowerId {
 export function catalogRoutePath(
   compiled: CompiledRuleset,
 ): readonly { col: number; row: number }[] {
-  const grid = compiled.board.grid;
   const placements = catalogPlacements();
   const towers: TowerValidityView = {
     id: placements.map((_, i) => i + 1),
@@ -504,11 +494,7 @@ export function catalogRoutePath(
     }),
     towerId: placements.map((p) => p.towerId),
   };
-  const mask = materializeTowerMask(grid, towers, compiled.towerById);
-  // The catalog board is one entrance → exit pair (`west` → `east`).
-  const field = computeDistanceField(grid, grid.exits[0]!, mask);
-  const path = shortestPath(grid, field, grid.entrances[0]!);
-  return path === null ? [] : path;
+  return currentPath(compiled, { towers }, 0) ?? [];
 }
 
 /** The catalog scene's route length — {@link catalogRoutePath}'s cell count. Identical to

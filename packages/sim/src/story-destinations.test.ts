@@ -19,10 +19,17 @@
 //   - a flyer heads for its own exit, not another pair's;
 //   - a forged destination index is dropped like any other unattributable row;
 //   - the wave preview's streams aggregate per (creep, entrance), and the compiled wave
-//     carries its `hpPercent`.
+//     carries its `hpPercent`;
+//   - `step` rebuilds EVERY destination's field on a maze change — a placement, a sell,
+//     a mine consuming itself — so each creep follows its own route, live;
+//   - on a THREE-entrance, two-destination board (two entrances share an exit, so an
+//     entrance's index is not its destination's), spawning, the invariant and the
+//     spawn lookup all go through the entrance's destination, never its index;
+//   - a real creep walled into a pocket is protected even while its entrance still
+//     reaches its exit, and a flyer crossing another pair's exit does not leak there.
 
 import { describe, it, expect } from 'vitest';
-import type { CreepDef, Ruleset, TowerDef } from '@wynding/types';
+import type { Cell, CreepDef, Ruleset, TowerDef } from '@wynding/types';
 import {
   createInitialState,
   step,
@@ -32,10 +39,19 @@ import {
   type SimState,
 } from './index';
 import { compileRuleset, type CompiledRuleset } from './ruleset';
-import { computeDistanceField, type DistanceField } from './pathfinding';
-import { materializeTowerMask, type TowerArrays } from './tower';
+import { computeDistanceField, isReachable, type DistanceField } from './pathfinding';
+import { canPlaceTower, materializeTowerMask, type TowerArrays } from './tower';
 import { runCombat, emptyCreeps, type CombatCreeps, type StepEvents } from './combat';
-import { TEST_TOWER, TEST_AOE_TOWER, TEST_RNG_SEED, pushCreep } from './test-support';
+import { deriveValidCreepPosition, firstDescentNeighbor } from './movement';
+import { entranceSpawn } from './context';
+import { GridError } from './board';
+import {
+  TEST_TOWER,
+  TEST_AOE_TOWER,
+  TEST_BURST_TOWER,
+  TEST_RNG_SEED,
+  pushCreep,
+} from './test-support';
 import { Rng } from '@wynding/engine';
 
 const cx = (col: number): number => col * 256 + 128;
@@ -70,7 +86,7 @@ type Entry = Ruleset['boards'][number]['waves'][number]['entries'][number];
  *  west creep carries destination 0, a north creep destination 1. */
 function crossingBundle(
   entries: readonly Entry[],
-  opts: { readonly creepHp?: number } = {},
+  opts: { readonly creepHp?: number; readonly towers?: readonly TowerDef[] } = {},
 ): Ruleset {
   const hp = opts.creepHp ?? NORMAL.hp;
   return {
@@ -81,7 +97,9 @@ function crossingBundle(
       { ...NORMAL, hp },
       { ...FLYER, hp },
     ],
-    towerCatalog: [TEST_TOWER, TEST_AOE_TOWER, BOTH_TOWER],
+    // Overridable: a catalog with a mine cannot also carry the aoe tower (one blast
+    // radius per catalog — the radius-uniform capability gate).
+    towerCatalog: [...(opts.towers ?? [TEST_TOWER, TEST_AOE_TOWER, BOTH_TOWER])],
     balance: {
       startingLives: 20,
       startingBounty: 200,
@@ -542,6 +560,18 @@ describe('"first" targeting and the AoE lead, measured against each creep’s OW
     expect(out.towers.targetId[0]).toBe(0);
     expect(out.impacts).toHaveLength(0);
   });
+
+  it('nor is a NON-INTEGER destination — it is carried as -1, never coerced onto field 0’s route', () => {
+    const towers = towerAt('basic', 6, 2);
+    for (const forged of [0.5, Number.NaN, undefined]) {
+      const c = creeps([{ id: 3, col: 8, row: 1, dest: 0 }]);
+      c.destination[0] = forged as number;
+      const out = fire(c, towers, fieldsUnder(towers));
+      expect(out.towers.targetId[0], String(forged)).toBe(0);
+      expect(out.impacts).toHaveLength(0);
+      expect(out.creeps.destination).toEqual([-1]); // names no field; coerceSoa drops it next
+    }
+  });
 });
 
 describe('destination column totality (coerceSoa)', () => {
@@ -595,5 +625,475 @@ describe('wave-preview streams aggregate per (creep, route)', () => {
     (bundle.boards[0]!.waves[0]! as { hpPercent: number }).hpPercent = 170;
     expect(compileRuleset(bundle, 'crossing').waves[0]!.hpPercent).toBe(170);
     expect(RULESET.waves[0]!.hpPercent).toBe(100);
+  });
+});
+
+// ── QC round 1: the gaps between "correct" and "proven" ──────────────────────────────
+
+/** A custom board on the crossing fixture's catalog/economy (the `PARALLEL` idiom). */
+function boardBundle(
+  board: Omit<Ruleset['boards'][number], 'waves'>,
+  entries: readonly Entry[],
+  opts: { readonly creepHp?: number } = {},
+): Ruleset {
+  return {
+    ...crossingBundle(entries, opts),
+    boards: [
+      {
+        ...board,
+        waves: [{ index: 0, countdownTicks: 10, clearBonus: 0, hpPercent: 100, entries }],
+      },
+    ],
+  };
+}
+
+const sameMask = (a: Uint8Array, b: Uint8Array): boolean => a.every((v, i) => v === b[i]);
+
+describe('step rebuilds EVERY destination’s field on a maze change — placement, sell, mine', () => {
+  interface FollowRun {
+    readonly state: SimState;
+    /** Ground creep-ticks checked against a live descent, per destination. */
+    readonly checked: readonly number[];
+    /** Per maze change: per destination, the checked creep-ticks whose next cell differs
+     *  from the one the field BEFORE that change would have given — the rebuild steered
+     *  them. Proves each scenario genuinely exercises each destination's rebuild. */
+    readonly steered: readonly (readonly number[])[];
+    readonly changeTicks: readonly number[];
+  }
+
+  /**
+   * Run `ruleset` under `script`, checking after EVERY tick, for every ground creep, that
+   * it followed its OWN destination's field as the maze stood this tick — the field
+   * `step`'s movement phase must read, built here independently from the towers once this
+   * tick's inputs apply (`previewInputs`, the input phase's own authority). Never inside a
+   * tower; never heading into one; and its next cell exactly the one movement's rule
+   * gives in that field (movement.ts, `advanceCreep`):
+   *   - its segment START moved this tick (a waypoint reached, a mid-edge turn, a fresh
+   *     spawn or a rest) ⇒ the head is the descent from the cell that start lies in;
+   *   - otherwise, if it began the tick on the from-side of its edge, movement re-derived
+   *     the descent from the cell it then occupied and kept the head ⇒ it is that descent;
+   *   - otherwise it was committed past the edge's boundary, and nothing was re-derived.
+   * A `step` that rebuilt only some destinations' fields would leave the others' creeps on
+   * a stale route, and this fails on the first tick they diverge.
+   */
+  function runFollowing(
+    ruleset: CompiledRuleset,
+    script: (s: SimState) => SimInput[],
+    ticks: number,
+  ): FollowRun {
+    const grid = ruleset.board.grid;
+    const at = (mask: Uint8Array, c: { col: number; row: number }): number =>
+      mask[c.row * grid.width + c.col]!;
+    const cellOfFp = (x: number, y: number) => ({
+      col: Math.floor(x / 256),
+      row: Math.floor(y / 256),
+    });
+    const s = createInitialState(TEST_RNG_SEED, ruleset);
+    const checked = ruleset.board.fields.map(() => 0);
+    const steered: number[][] = [];
+    const changeTicks: number[] = [];
+    let prev: { mask: Uint8Array; fields: DistanceField[] } | null = null;
+    let stale: DistanceField[] | null = null;
+    for (let t = 0; t < ticks && s.phase === 'running'; t++) {
+      const inputs = script(s);
+      const { preview } = previewInputs(s, ruleset, inputs);
+      const mask = materializeTowerMask(grid, preview.towers, ruleset.towerById);
+      const fields = ruleset.board.fields.map((f) => computeDistanceField(grid, f.exit, mask));
+      if (prev !== null && !sameMask(prev.mask, mask)) {
+        changeTicks.push(s.tick);
+        steered.push(fields.map(() => 0));
+        stale = prev.fields;
+      }
+      // Each creep's segment as this tick's movement will find it.
+      const before = new Map<
+        number,
+        { fromX: number; fromY: number; occ: Cell; head: Cell; atRest: boolean }
+      >();
+      for (let i = 0; i < s.creeps.id.length; i++) {
+        const c = s.creeps;
+        const geom = deriveValidCreepPosition(
+          c.fromX[i],
+          c.fromY[i],
+          c.headCol[i],
+          c.headRow[i],
+          c.progress[i],
+          grid,
+        );
+        if (geom === null) continue;
+        before.set(c.id[i]!, {
+          fromX: c.fromX[i]!,
+          fromY: c.fromY[i]!,
+          occ: geom.occupancyCell,
+          head: { col: c.headCol[i]!, row: c.headRow[i]! },
+          atRest: c.progress[i] === 0,
+        });
+      }
+      step(s, ruleset, inputs);
+      const c = s.creeps;
+      for (let i = 0; i < c.id.length; i++) {
+        if (c.creepId[i] !== 'normal') continue; // ground only
+        const d = c.destination[i]!;
+        const geom = deriveValidCreepPosition(
+          c.fromX[i],
+          c.fromY[i],
+          c.headCol[i],
+          c.headRow[i],
+          c.progress[i],
+          grid,
+        );
+        expect(geom, `creep ${c.id[i]} has a valid position`).not.toBeNull();
+        const head = { col: c.headCol[i]!, row: c.headRow[i]! };
+        const who = `creep ${c.id[i]} (destination ${d}) at tick ${s.tick}`;
+        expect(at(mask, geom!.occupancyCell), `${who} stands inside a tower`).toBe(0);
+        expect(at(mask, head), `${who} heads into a tower`).toBe(0);
+        if (c.progress[i] === 0) continue; // the rest sentinel: head is its own cell
+        const was = before.get(c.id[i]!);
+        const startMoved =
+          was === undefined || was.atRest || was.fromX !== c.fromX[i] || was.fromY !== c.fromY[i];
+        let from: Cell;
+        if (startMoved) from = cellOfFp(c.fromX[i]!, c.fromY[i]!);
+        else if (was.occ.col !== was.head.col || was.occ.row !== was.head.row) from = was.occ;
+        else continue; // committed past the boundary: not re-derived this tick
+        const next = firstDescentNeighbor(fields[d]!, from.col, from.row);
+        expect(
+          next && { col: next.col, row: next.row },
+          `${who}, descending from (${from.col},${from.row})`,
+        ).toEqual(head);
+        checked[d]!++;
+        if (stale !== null) {
+          const old = firstDescentNeighbor(stale[d]!, from.col, from.row);
+          if (old === null || old.col !== head.col || old.row !== head.row) {
+            steered[steered.length - 1]![d]!++;
+          }
+        }
+      }
+      prev = { mask, fields };
+    }
+    return { state: s, checked, steered, changeTicks };
+  }
+
+  // Long, tough streams on both routes, so creeps of each destination are always about
+  // when the maze changes (tough enough that no tower kills one first).
+  const STREAMS: readonly Entry[] = [
+    { creepId: 'normal', entrance: 'west', count: 8, spacingTicks: 15 },
+    { creepId: 'normal', entrance: 'north', count: 8, spacingTicks: 15, offsetTicks: 5 },
+  ];
+  const TOUGH = compileRuleset(crossingBundle(STREAMS, { creepHp: 1_000_000 }), 'crossing');
+  // One tower on each stream's line, clear of the crossing and of every creep at tick 20:
+  // (8,3) blocks row 4 at cols 8-9 (the west → east line); (5,6) blocks col 5 at rows 6-7
+  // (the north → south line). Neither seals anything.
+  const ON_BOTH_LINES = [place(8, 3), place(5, 6)];
+
+  it('a PLACEMENT re-routes both destinations’ creeps from the next movement step', () => {
+    const run = runFollowing(
+      TOUGH,
+      (s) => (s.tick === 0 ? [{ kind: 'callWaveEarly' }] : s.tick === 20 ? ON_BOTH_LINES : []),
+      3_000,
+    );
+    expect(run.changeTicks).toEqual([20]);
+    expect(run.state.towers.id).toHaveLength(2);
+    expect(run.checked.every((n) => n > 0)).toBe(true);
+    expect(run.steered[0]![EAST_FIELD]).toBeGreaterThan(0);
+    expect(run.steered[0]![SOUTH_FIELD]).toBeGreaterThan(0);
+  });
+
+  it('a SELL that reopens both lines re-routes both destinations back', () => {
+    const run = runFollowing(
+      TOUGH,
+      (s) => {
+        if (s.tick === 0) return [{ kind: 'callWaveEarly' }];
+        if (s.tick === 20) return ON_BOTH_LINES;
+        if (s.tick === 120) return s.towers.id.map((id) => ({ kind: 'sellTower', tower: id }));
+        return [];
+      },
+      3_000,
+    );
+    expect(run.changeTicks).toEqual([20, 120]);
+    expect(run.state.towers.id).toHaveLength(0);
+    expect(run.steered[1]![EAST_FIELD]).toBeGreaterThan(0);
+    expect(run.steered[1]![SOUTH_FIELD]).toBeGreaterThan(0);
+  });
+
+  it('a MINE consuming itself reopens its line, and that destination’s creeps re-route at once', () => {
+    // The mine sits on the north → south line; the north creeps detouring round it set it
+    // off (trigger 576 fp from its footprint's centre), and it is consumed — a maze change
+    // no command made.
+    const mined = compileRuleset(
+      crossingBundle(STREAMS, { creepHp: 1_000_000, towers: [TEST_TOWER, TEST_BURST_TOWER] }),
+      'crossing',
+    );
+    const run = runFollowing(
+      mined,
+      (s) =>
+        s.tick === 0 ? [{ kind: 'callWaveEarly' }] : s.tick === 20 ? [place(5, 6, 'mine')] : [],
+      3_000,
+    );
+    expect(run.changeTicks).toHaveLength(2); // the placement, then the detonation
+    expect(run.changeTicks[0]).toBe(20);
+    expect(run.state.towers.id).toHaveLength(0); // consumed
+    expect(run.steered[0]![SOUTH_FIELD]).toBeGreaterThan(0); // around the mine…
+    expect(run.steered[1]![SOUTH_FIELD]).toBeGreaterThan(0); // …and straight again after it
+  });
+});
+
+// Three entrances, two destinations: two entrances share an exit, so an entrance's index
+// is NOT its destination's. 12 × 10: `west-hi` (0,2) and `west-lo` (0,7) both → `east`
+// (11,2); `east-lo` (11,7) → `south` (5,9). Fields [east, south]; entrances → [0, 0, 1].
+const WEST_HI = { col: 0, row: 2 } as const;
+const WEST_LO = { col: 0, row: 7 } as const;
+const EAST_LO = { col: 11, row: 7 } as const;
+const EAST_HI = { col: 11, row: 2 } as const;
+function threeEntranceBundle(westLoTo: 'east' | 'south'): Ruleset {
+  return boardBundle(
+    {
+      id: 'three',
+      widthTiles: 12,
+      heightTiles: 10,
+      entrances: [
+        { id: 'west-hi', cell: WEST_HI, destination: ['east'] },
+        { id: 'west-lo', cell: WEST_LO, destination: [westLoTo] },
+        { id: 'east-lo', cell: EAST_LO, destination: ['south'] },
+      ],
+      exits: [
+        { id: 'east', cell: EAST_HI },
+        { id: 'south', cell: SOUTH },
+      ],
+    },
+    [
+      { creepId: 'normal', entrance: 'west-lo', count: 1, spacingTicks: 5 },
+      { creepId: 'normal', entrance: 'east-lo', count: 1, spacingTicks: 5 },
+      { creepId: 'normal', entrance: 'west-hi', count: 1, spacingTicks: 5 },
+    ],
+  );
+}
+const THREE = compileRuleset(threeEntranceBundle('east'), 'three');
+
+describe('three entrances, two destinations: an entrance’s index is not its destination’s', () => {
+  it('compiles to fields [east, south] and maps the entrances [0, 0, 1]', () => {
+    expect(THREE.board.fields.map((f) => f.exit)).toEqual([EAST_HI, SOUTH]);
+    expect(THREE.board.entranceDestination).toEqual([0, 0, 1]);
+  });
+
+  it('spawns each entry at its entrance with that entrance’s destination: entrance 1 → 0, entrance 2 → 1', () => {
+    const s = createInitialState(1, THREE);
+    step(s, THREE, [{ kind: 'callWaveEarly' }]); // all three at offset 0, in table order
+    expect(s.creeps.destination).toEqual([0, 1, 0]);
+    expect(s.creeps.fromX).toEqual([cx(WEST_LO.col), cx(EAST_LO.col), cx(WEST_HI.col)]);
+    expect(s.creeps.fromY).toEqual([cy(WEST_LO.row), cy(EAST_LO.row), cy(WEST_HI.row)]);
+  });
+
+  it('the spawn lookup resolves an entrance to its cell and destination, and throws on one the board lacks', () => {
+    expect(entranceSpawn(THREE.board, 1)).toEqual({ cell: WEST_LO, destination: 0 });
+    expect(entranceSpawn(THREE.board, 2)).toEqual({ cell: EAST_LO, destination: 1 });
+    expect(() => entranceSpawn(THREE.board, 3)).toThrow(GridError);
+    expect(() => entranceSpawn(THREE.board, 3)).toThrow(/names entrance 3, but the board has 3/);
+  });
+
+  /** Place `anchors` one per tick from a fresh state; return the state and the verdicts. */
+  function build(ruleset: CompiledRuleset, anchors: readonly [number, number][]): boolean[] {
+    const s = createInitialState(1, ruleset);
+    return anchors.map(([c, r]) => {
+      const before = s.towers.id.length;
+      step(s, ruleset, [place(c, r)]);
+      return s.towers.id.length > before;
+    });
+  }
+
+  // A wall across rows 4-5, cols 1-10: the fifth tower splits the board into a top half
+  // (west-hi, east) and a bottom half (west-lo, east-lo, south).
+  const SPLIT_ROWS: [number, number][] = [
+    [1, 4],
+    [3, 4],
+    [5, 4],
+    [7, 4],
+    [9, 4],
+  ];
+
+  it('rejects the split that cuts entrance 1 off from ITS destination (east), though it still reaches the other one (south)', () => {
+    expect(build(THREE, SPLIT_ROWS)).toEqual([true, true, true, true, false]);
+    // The same wall is legal once entrance 1's own destination is south: the check reads
+    // each entrance's destination, not the field at the entrance's index.
+    const westLoSouth = compileRuleset(threeEntranceBundle('south'), 'three');
+    expect(westLoSouth.board.entranceDestination).toEqual([0, 1, 1]);
+    expect(build(westLoSouth, SPLIT_ROWS)).toEqual([true, true, true, true, true]);
+  });
+
+  it('rejects the build that seals only entrance 2 (east-lo), while 0 and 1 keep their routes', () => {
+    // (9,5) blocks (10,6); (9,7) then blocks (10,7) and (10,8) — east-lo's last ways in.
+    expect(
+      build(THREE, [
+        [9, 5],
+        [9, 7],
+      ]),
+    ).toEqual([true, false]);
+  });
+});
+
+describe('one policy for a destination naming no field: skipped, then dropped', () => {
+  it('canPlaceTower: a forged destination constrains nothing, where a genuine one is protected', () => {
+    // The PARALLEL-style split, built directly: a wall across rows 3-4 of a 12 × 7 board
+    // with two parallel pairs, the last tower checked by `canPlaceTower` itself (not via
+    // `previewInputs`, whose `coerceSoa` would drop the forged row before it got there).
+    const parallel = compileRuleset(
+      boardBundle(
+        {
+          id: 'parallel',
+          widthTiles: 12,
+          heightTiles: 7,
+          entrances: [
+            { id: 'top', cell: { col: 0, row: 1 }, destination: ['top-out'] },
+            { id: 'bottom', cell: { col: 0, row: 5 }, destination: ['bottom-out'] },
+          ],
+          exits: [
+            { id: 'top-out', cell: { col: 11, row: 1 } },
+            { id: 'bottom-out', cell: { col: 11, row: 5 } },
+          ],
+        },
+        [{ creepId: 'normal', entrance: 'top', count: 1, spacingTicks: 5 }],
+      ),
+      'parallel',
+    );
+    const s = createInitialState(1, parallel);
+    for (const c of [1, 3, 5, 7]) step(s, parallel, [place(c, 3)]);
+    expect(s.towers.id).toHaveLength(4);
+    const mask = materializeTowerMask(parallel.board.grid, s.towers, parallel.towerById);
+    const verdict = (destination: number): boolean => {
+      const t = createInitialState(1, parallel);
+      pushCreep(t, { id: 90, hp: 100, col: 3, row: 5, destination }); // in the bottom half
+      return canPlaceTower(
+        parallel.board,
+        mask,
+        { col: 9, row: 3 },
+        t.creeps,
+        1_000,
+        5,
+        parallel.creepById,
+      );
+    };
+    expect(verdict(0)).toBe(false); // a top-pair creep in the bottom half: protected
+    expect(verdict(1)).toBe(true); // a bottom-pair creep: still reaches its exit
+    expect(verdict(7)).toBe(true); // names no field: skipped, like combat skips it
+  });
+});
+
+describe('a real creep, walled into a pocket while its entrance still reaches its exit', () => {
+  // Walls at tick 0 make a 2 × 2 room R (cols 5-6, rows 4-5) on the north → south line,
+  // open at the top and the bottom: left wall cols 3-4, right wall cols 7-8, rows 4-5. A
+  // north creep walks straight down into R. Each closer leaves the opening beside it its
+  // one orthogonal way in — (5,1) below the north entrance, (5,8) above the south exit —
+  // since no diagonal may cut a corner past the border.
+  const WALLS = [place(3, 4), place(7, 4)];
+  const TOP = place(5, 2); // rows 2-3: closes R's top
+  const BOTTOM = place(5, 6); // rows 6-7: closes R's bottom
+  const NORTH_ONLY = compileRuleset(
+    crossingBundle([{ creepId: 'normal', entrance: 'north', count: 1, spacingTicks: 5 }], {
+      creepHp: 1_000_000,
+    }),
+    'crossing',
+  );
+
+  /** A fresh run whose one north creep has walked into R (occupying row 4 or 5). */
+  function creepInRoom(): SimState {
+    const s = createInitialState(1, NORTH_ONLY);
+    step(s, NORTH_ONLY, [{ kind: 'callWaveEarly' }, ...WALLS]);
+    expect(s.towers.id).toHaveLength(2);
+    for (let t = 0; t < 200; t++) {
+      const geom = deriveValidCreepPosition(
+        s.creeps.fromX[0],
+        s.creeps.fromY[0],
+        s.creeps.headCol[0],
+        s.creeps.headRow[0],
+        s.creeps.progress[0],
+        NORTH_ONLY.board.grid,
+      )!;
+      if (geom.occupancyCell.col === 5 && geom.occupancyCell.row >= 4) return s;
+      step(s, NORTH_ONLY, []);
+    }
+    throw new Error('the north creep never walked into the room');
+  }
+
+  it('closing ONE side is legal — the creep can still leave by the other', () => {
+    expect(previewInputs(creepInRoom(), NORTH_ONLY, [TOP]).accepted).toEqual([true]);
+    expect(previewInputs(creepInRoom(), NORTH_ONLY, [BOTTOM]).accepted).toEqual([true]);
+  });
+
+  it('closing the second side is rejected: the creep would be stranded, though north still reaches south', () => {
+    const s = creepInRoom();
+    expect(previewInputs(s, NORTH_ONLY, [BOTTOM, TOP]).accepted).toEqual([true, false]);
+    // The premise, read off the real field: with both sides closed, the NORTH ENTRANCE
+    // still reaches south (round the walls) — only the creep cannot. So the rejection is
+    // the live-creep clause, not the entrance clause.
+    const { preview } = previewInputs(s, NORTH_ONLY, [BOTTOM]);
+    const grid = NORTH_ONLY.board.grid;
+    const mask = materializeTowerMask(grid, preview.towers, NORTH_ONLY.towerById);
+    for (const [dc, dr] of [
+      [0, 0],
+      [1, 0],
+      [0, 1],
+      [1, 1],
+    ] as const) {
+      mask[(2 + dr) * grid.width + (5 + dc)] = 1; // TOP's footprint
+    }
+    const south = computeDistanceField(grid, SOUTH, mask);
+    expect(isReachable(south, NORTH)).toBe(true);
+    expect(isReachable(south, { col: 5, row: 4 })).toBe(false);
+  });
+});
+
+describe('a flyer crossing another pair’s exit does not leak there', () => {
+  // 12 × 10, both openings of one pair on the TOP border: `tl` (2,0) → `tr` (9,0), so its
+  // flyers fly straight along row 0 — straight over (5,0), the `mid` exit of the other
+  // pair, `bottom` (5,9) → `mid`.
+  const MID = { col: 5, row: 0 } as const;
+  const TR = { col: 9, row: 0 } as const;
+  const BORDER = compileRuleset(
+    boardBundle(
+      {
+        id: 'border',
+        widthTiles: 12,
+        heightTiles: 10,
+        entrances: [
+          { id: 'tl', cell: { col: 2, row: 0 }, destination: ['tr'] },
+          { id: 'bottom', cell: { col: 5, row: 9 }, destination: ['mid'] },
+        ],
+        exits: [
+          { id: 'tr', cell: TR },
+          { id: 'mid', cell: MID },
+        ],
+      },
+      [{ creepId: 'flyer', entrance: 'tl', count: 1, spacingTicks: 5 }],
+    ),
+    'border',
+  );
+
+  it('flies over the foreign exit cell and leaks only at its own', () => {
+    const s = createInitialState(1, BORDER);
+    step(s, BORDER, [{ kind: 'callWaveEarly' }]);
+    let overMid = false;
+    for (let t = 0; t < 400 && s.creeps.id.length > 0; t++) {
+      const geom = deriveValidCreepPosition(
+        s.creeps.fromX[0],
+        s.creeps.fromY[0],
+        s.creeps.headCol[0],
+        s.creeps.headRow[0],
+        s.creeps.progress[0],
+        BORDER.board.grid,
+      )!;
+      if (geom.occupancyCell.col === MID.col && geom.occupancyCell.row === MID.row) overMid = true;
+      expect(geom.occupancyCell.row).toBe(0); // straight along the border row
+      step(s, BORDER, []);
+    }
+    expect(overMid).toBe(true); // it really crossed the other pair's exit…
+    const { leaks } = runToEnd(BORDER, s, 10); // (already gone: no further leaks)
+    expect(leaks).toEqual([]);
+    expect(s.leakedCount).toBe(1); // …and leaked exactly once,
+    expect(s.lives).toBe(19); // for its own leak cost — at `tr`, below
+  });
+
+  it('its one leak is at its own exit', () => {
+    const { leaks } = runToEnd(BORDER, createInitialState(1, BORDER), 400, (t) =>
+      t === 0 ? [{ kind: 'callWaveEarly' }] : [],
+    );
+    expect(leaks).toEqual([{ id: 1, destination: 0, lastHead: TR }]);
   });
 });

@@ -190,6 +190,28 @@ export function assertConsistent(board: BoardContext): void {
 }
 
 /**
+ * Where a creep scheduled at entrance index `entrance` spawns, and the destination it
+ * takes for life: the entrance's cell and the index of its destination's field. The
+ * spawn drain's one lookup (index.ts). `compileRuleset` resolves every wave entry's
+ * entrance id to an index of this board, and `assertConsistent` gives every entrance a
+ * destination, so an index naming no entrance is a corrupt compiled ruleset — an
+ * invariant breach that throws {@link GridError}, never a spawn quietly skipped.
+ */
+export function entranceSpawn(
+  board: BoardContext,
+  entrance: number,
+): { readonly cell: Cell; readonly destination: number } {
+  const cell = board.grid.entrances[entrance];
+  const destination = board.entranceDestination[entrance];
+  if (cell === undefined || destination === undefined) {
+    throw new GridError(
+      `compiled spawn names entrance ${entrance}, but the board has ${board.grid.entrances.length}`,
+    );
+  }
+  return { cell, destination };
+}
+
+/**
  * Build the static board for a match from a {@link BoardSpec}. This is the only
  * sanctioned {@link BoardContext} constructor: it builds the grid, groups the
  * entrances by DISTINCT destination (first-use order), derives each destination's

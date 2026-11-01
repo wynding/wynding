@@ -266,17 +266,16 @@ function creepOccupiedCell(
   return geom === null ? null : geom.occupancyCell;
 }
 
-/** The candidate fields a creep row's maze-invariant check must hold in: its OWN
- *  destination's field, or — for a forged destination index naming no field — EVERY
- *  field, the conservative direction (the `resolveCreepDomain` posture: an unresolved
- *  row still constrains, so no build can strand it whatever its true destination).
- *  Unreachable through `step`: `coerceSoa` drops such a row before the input phase. */
-function ownFields(
+/** The candidate field a creep row's maze-invariant check must hold in: its OWN
+ *  destination's — or `undefined` for a forged destination naming no field, which the
+ *  check then skips. That is the sim's one policy for such a row (combat.ts's step (4)
+ *  states it): it constrains nothing, because `coerceSoa` drops it before the input
+ *  phase, so through `step` this never sees one. */
+function ownField(
   candidates: readonly DistanceField[],
   destination: number | undefined,
-): readonly DistanceField[] {
-  const own = Number.isSafeInteger(destination) ? candidates[destination as number] : undefined;
-  return own === undefined ? candidates : [own];
+): DistanceField | undefined {
+  return Number.isSafeInteger(destination) ? candidates[destination as number] : undefined;
 }
 
 /**
@@ -303,10 +302,12 @@ function ownFields(
  *      reaches its OWN destination's exit, and every live GROUND creep still reaches
  *      its own destination from its occupied cell, so no build can seal either route
  *      or strand a creep. A flyer never constrains this — it does not path the maze,
- *      so nothing it stands over can strand it. CHECK ORDER (a story-3 choice the
- *      spec leaves open; the result is a boolean, so the order is unobservable beyond
- *      cost): every destination's candidate field is built first, in field order,
- *      then the entrances in board order, then the creeps in SoA row order.
+ *      so nothing it stands over can strand it, and neither does a row whose
+ *      destination names no field (the forged-row policy, {@link ownField}). CHECK
+ *      ORDER (a story-3 choice the spec leaves open; the result is a boolean, so the
+ *      order is unobservable beyond cost): every destination's candidate field is
+ *      built first, in field order, then the entrances in board order, then the creeps
+ *      in SoA row order.
  *
  * `creepById` resolves each row's domain via {@link resolveCreepDomain} — the same
  * totality rail combat and movement use: an unresolved `creepId` falls back to
@@ -367,10 +368,9 @@ export function canPlaceTower(
   for (let i = 0; i < creeps.id.length; i++) {
     if (resolveCreepDomain(creepById, creeps.creepId[i]) === 'air') continue;
     const occ = creepOccupiedCell(grid, creeps, i);
-    if (occ === null) continue;
-    for (const field of ownFields(candidates, creeps.destination[i])) {
-      if (!isReachable(field, occ)) return false;
-    }
+    const own = ownField(candidates, creeps.destination[i]);
+    if (occ === null || own === undefined) continue;
+    if (!isReachable(own, occ)) return false;
   }
   return true;
 }

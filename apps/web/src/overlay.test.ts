@@ -576,6 +576,43 @@ describe('overlay — the wave preview surface (M2-S2, PLAN.md P3 steps 16-17/19
     expect(shell.preview.list.firstElementChild).toBe(firstRow); // same NODE, not equal text
   });
 
+  it('rebuilds when a preview differs ONLY in a stream’s route or the wave’s hpPercent (M3: both are in the memo key)', () => {
+    // Nothing renders the route or the hit-point growth yet (story 4 does), so the visible
+    // rows read the same — which is exactly why the key must not lean on the text: the
+    // day they render, a wave differing only there would otherwise keep stale rows.
+    const { overlay, shell } = setup();
+    const entry: PreviewEntryVM = {
+      creepId: 'normal',
+      count: 10,
+      entrance: 'west',
+      destination: ['east'],
+      domain: 'ground',
+      armor: 0,
+      leakCost: 1,
+      immunities: [],
+      boss: false,
+    };
+    const viewOf = (
+      hpPercent: number,
+      e: PreviewEntryVM,
+    ): Parameters<typeof overlay.update>[0] => ({
+      hud: hud({
+        preview: { kind: 'upcoming', waveNumber: 2, waveCount: 3, hpPercent, entries: [e] },
+      }),
+      paused: false,
+      speed: 1,
+      ui: uiState(),
+      refund: 0,
+    });
+    overlay.update(viewOf(100, entry));
+    const first = shell.preview.list.firstElementChild;
+    overlay.update(viewOf(100, { ...entry, entrance: 'north', destination: ['south'] }));
+    const second = shell.preview.list.firstElementChild;
+    expect(second).not.toBe(first);
+    overlay.update(viewOf(170, { ...entry, entrance: 'north', destination: ['south'] }));
+    expect(shell.preview.list.firstElementChild).not.toBe(second);
+  });
+
   it('shows the last-wave marker (no entry list) once every wave has launched', () => {
     const { overlay, shell } = setup();
     overlay.update({

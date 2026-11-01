@@ -12,6 +12,21 @@ import { cellCenterX, cellCenterY } from './movement';
 import type { SimState } from './index';
 import { runCombat } from './combat';
 
+/**
+ * `state` as the sim knew it before M3 story 3's `destination` creep column (ADR 0015):
+ * every field, minus that column. It is appended LAST on the creep SoA, so spreading it
+ * out leaves exactly the earlier state's JSON — same keys, same order — and
+ * `hashSimState` of the result is byte-comparable with a hash pinned before the column
+ * existed. Every re-pin that column caused asserts its previous pin under this
+ * projection, which is what makes "only the new column moved the hash" a test rather
+ * than a comment. `@wynding/content`'s `test-digest.ts` carries the same projection for
+ * its suite (a package boundary; neither exports test support).
+ */
+export function withoutDestination(state: SimState): SimState {
+  const { destination: _destination, ...creeps } = state.creeps;
+  return { ...state, creeps: creeps as SimState['creeps'] };
+}
+
 /** A fixed seed for `runCombatT`'s default `Rng` (M2-S6) — any fixed uint32 works,
  *  since a stun-free run never draws from it; pinned rather than random so a test
  *  failure is reproducible. */

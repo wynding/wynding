@@ -1809,15 +1809,20 @@ export function runCombat(
     survivors.slowMulFp.push(safeSlowColumn(creeps.slowMulFp[i]));
     survivors.slowUntilTick.push(safeSlowColumn(creeps.slowUntilTick[i]));
     survivors.stunUntilTick.push(safeSlowColumn(creeps.stunUntilTick[i]));
+    // A non-integer destination is carried as -1, which names no field — never coerced
+    // to a real one (0 would make a forged row a live target on field 0's route).
     survivors.destination.push(
-      Number.isSafeInteger(creeps.destination[i]) ? (creeps.destination[i] as number) : 0,
+      Number.isSafeInteger(creeps.destination[i]) ? (creeps.destination[i] as number) : -1,
     );
   }
 
   // (4) Precompute the targetable live creeps once (position-valid + reachable), each
-  //     measured against its OWN destination's field (M3, ADR 0015). A destination index
-  //     naming no field is a forged row (`coerceSoa` drops it before `step` gets here) —
-  //     never a valid "first" target, exactly like a stranded one.
+  //     measured against its OWN destination's field (M3, ADR 0015). THE ONE POLICY for a
+  //     destination naming no field (a forged row — `coerceSoa` drops it before `step`
+  //     gets here): it is skipped — never a "first" target here, never a maze-invariant
+  //     constraint in `canPlaceTower` — and dropped at the next tick's `coerceSoa`.
+  //     (A blast landing on its point still damages it: `blastMembers` scans rows by
+  //     position, not this list, and the row is gone a tick later either way.)
   const live: LiveCreep[] = [];
   for (let i = 0; i < survivors.id.length; i++) {
     const field = fields[survivors.destination[i] as number];

@@ -17,14 +17,12 @@ import { describe, it, expect } from 'vitest';
 import {
   parseRulesetJson,
   compileRuleset,
-  materializeTowerMask,
-  computeDistanceField,
-  shortestPath,
   DIAG_LEN,
   MAX_MATCH_TICKS,
   type CompiledRuleset,
   type TowerValidityView,
 } from '@wynding/sim';
+import { currentPath } from '@wynding/content';
 import { CATALOG_RULESET_URL, CATALOG_BOARD_ID } from '@wynding/content/catalog';
 import {
   stressAnchors,
@@ -103,7 +101,6 @@ function engagesAPath(index: number): boolean {
 /** The route recomputed over an arbitrary placement set — the sim's own mask/field/path
  *  pipeline, exactly as `catalogRoutePath` builds it. */
 function routeOver(ps: readonly { anchor: Cell; towerId: string }[]): readonly Cell[] {
-  const grid = compiled.board.grid;
   const towers: TowerValidityView = {
     id: ps.map((_, i) => i + 1),
     col: ps.map((p) => p.anchor.col),
@@ -111,10 +108,7 @@ function routeOver(ps: readonly { anchor: Cell; towerId: string }[]): readonly C
     spend: ps.map((p) => compiled.towerById[p.towerId]!.cost),
     towerId: ps.map((p) => p.towerId),
   };
-  const mask = materializeTowerMask(grid, towers, compiled.towerById);
-  // The catalog board is one entrance → exit pair (`west` → `east`).
-  const field = computeDistanceField(grid, grid.exits[0]!, mask);
-  return shortestPath(grid, field, grid.entrances[0]!) ?? [];
+  return currentPath(compiled, { towers }, 0) ?? [];
 }
 const routeKey = (p: readonly Cell[]): string => p.map((c) => `${c.col},${c.row}`).join('|');
 const BASE_KEY = routeKey(route);

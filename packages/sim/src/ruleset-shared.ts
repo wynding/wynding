@@ -243,6 +243,14 @@ export const MAX_DOT_DURATION_CADENCE_RATIO = 8;
  * so the economy cannot rate-limit repeats. 2,000 since sv17 (1,000 before), which a
  * sell-and-rebuild build needs: at I = 1,423, 40 kept `basic`s and 481 flips are 1,002
  * commands.
+ *
+ * The combined field-building worst case, with D distinct destinations (M3 story 3): D
+ * fields per placement check, at most `MAX_TOWER_PLACEMENTS` of them; and D more per maze
+ * change in `step`, which rebuilds every destination's field once on any tick whose tower
+ * mask differs — an accepted place or sell (at most this budget) or a mine detonation (at
+ * most `MAX_TOWER_PLACEMENTS`). So a match builds at most (1,000 + 2,000 + 1,000)·D =
+ * 4,000·D full-board fields: 16,000 at D = 4, 4,000 on the shipped one-destination board,
+ * 8,000 on M3's two-destination crossing board.
  */
 export const MAX_TOTAL_TOWER_COMMANDS = 2_000;
 

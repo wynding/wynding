@@ -94,6 +94,16 @@ describe('replay validate() — envelope structural validation', () => {
     expect(r.reason).toContain('sim version mismatch');
   });
 
+  it('rejects a log from the PREVIOUS sim version by name — never resimulated on this build', () => {
+    // The loud half of the sim's policy for a state from before a SoA column existed (the
+    // M3 `destination` column; index.ts's `coerceSoa`): such a state is never resumed
+    // here. Its log is refused at this identity check, naming both versions, before any
+    // tick runs — the sim's own coercion (it would drop every creep) is never reached.
+    const r = validate(makeReplay({ simVersion: SIM_VERSION - 1 }), m1Ruleset);
+    expect(r.ok).toBe(false);
+    expect(r.reason).toBe(`sim version mismatch: replay=${SIM_VERSION - 1} runtime=${SIM_VERSION}`);
+  });
+
   it('rejects a rulesetHash that is not a 64-hex digest', () => {
     const r = validate(makeReplay({ rulesetHash: 'deadbeef' }), m1Ruleset);
     expect(r.ok).toBe(false);
