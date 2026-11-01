@@ -134,40 +134,46 @@ describe('the scripted defense plan is well formed — all 56 entries, without s
   });
 });
 
-describe('a played 30-wave run validates, and so does one that ends past 36,000 ticks', () => {
-  // Sized for a test suite: a sixteen-tower slice of the scripted defense, and a hands-off
-  // run for the long one. The whole 56-tower plan is what the Verify wall-time measurement
-  // replays; under coverage it costs this suite a minute.
-  it('a scripted defense of the whole arc re-simulates to the live terminal state', () => {
-    const run = playScript(thirtyWaveBundle(M2), 7, DEFENSE_PLAN.slice(0, 16));
-    expect(run.state.phase).toBe('won');
-    expect(run.state.waveCursor).toBe(30);
-    expect(run.placed).toBe(16);
-    const ticks = run.replay.tickInputs.length;
-    expect(ticks).toBe(run.state.tick);
+// These play and re-simulate a whole 30-wave arc — seconds locally, several times that under
+// coverage on CI — so the block gets a full-run budget rather than vitest's 5 s default.
+describe(
+  'a played 30-wave run validates, and so does one that ends past 36,000 ticks',
+  { timeout: 60_000 },
+  () => {
+    // Sized for a test suite: a sixteen-tower slice of the scripted defense, and a hands-off
+    // run for the long one. The whole 56-tower plan is what the Verify wall-time measurement
+    // replays; under coverage it costs this suite a minute.
+    it('a scripted defense of the whole arc re-simulates to the live terminal state', () => {
+      const run = playScript(thirtyWaveBundle(M2), 7, DEFENSE_PLAN.slice(0, 16));
+      expect(run.state.phase).toBe('won');
+      expect(run.state.waveCursor).toBe(30);
+      expect(run.placed).toBe(16);
+      const ticks = run.replay.tickInputs.length;
+      expect(ticks).toBe(run.state.tick);
 
-    const result = validate(run.replay, thirtyWaveBundle(M2));
-    expect(result.ok).toBe(true);
-    expect(result.finalHash).toBe(run.liveFinalHash);
-    expect(result.ticks).toBe(ticks);
-  }, 60_000);
+      const result = validate(run.replay, thirtyWaveBundle(M2));
+      expect(result.ok).toBe(true);
+      expect(result.finalHash).toBe(run.liveFinalHash);
+      expect(result.ticks).toBe(ticks);
+    }, 60_000);
 
-  it('a run whose finale waits 20,000 ticks longer ends past the sv16 cap and still validates', () => {
-    // Under sv16 this bundle failed to compile, and a log this long was rejected for its
-    // length before anything ran: both halves of the cap moved, or neither would pass.
-    const bundle = thirtyWaveBundle(M2, { finaleDelayTicks: 20_000 });
-    const run = playScript(bundle, 7, []);
-    expect(run.state.phase).toBe('won');
-    const ticks = run.replay.tickInputs.length;
-    expect(ticks).toBeGreaterThan(SV16_CAP);
-    expect(ticks).toBeLessThanOrEqual(MAX_MATCH_TICKS);
+    it('a run whose finale waits 20,000 ticks longer ends past the sv16 cap and still validates', () => {
+      // Under sv16 this bundle failed to compile, and a log this long was rejected for its
+      // length before anything ran: both halves of the cap moved, or neither would pass.
+      const bundle = thirtyWaveBundle(M2, { finaleDelayTicks: 20_000 });
+      const run = playScript(bundle, 7, []);
+      expect(run.state.phase).toBe('won');
+      const ticks = run.replay.tickInputs.length;
+      expect(ticks).toBeGreaterThan(SV16_CAP);
+      expect(ticks).toBeLessThanOrEqual(MAX_MATCH_TICKS);
 
-    const result = validate(run.replay, bundle);
-    expect(result.ok).toBe(true);
-    expect(result.finalHash).toBe(run.liveFinalHash);
-    expect(result.ticks).toBe(ticks);
-  }, 60_000);
-});
+      const result = validate(run.replay, bundle);
+      expect(result.ok).toBe(true);
+      expect(result.finalHash).toBe(run.liveFinalHash);
+      expect(result.ticks).toBe(ticks);
+    }, 60_000);
+  },
+);
 
 describe('the validator’s catch-up ceiling', () => {
   it('a log that never reaches a terminal state by MAX_MATCH_TICKS is a timeout, not a hang', () => {

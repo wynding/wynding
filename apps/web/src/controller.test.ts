@@ -722,36 +722,42 @@ describe('controller — replay recording, terminal truncation & verify', () => 
     expect(v.score).toBe(c.hud().score);
   });
 
-  it('verifyRun() reads the run when it is called, not when the verifier answers (M3 story 2)', async () => {
-    // The verifier runs in a worker and answers later. Play again can reset the controller in
-    // between; the answer must still be about the run that was verified. A WON run (the
-    // showcase build, on the seed it is tuned against), so its score and stars are nonzero and
-    // a read after the reset could not pass for one before it.
-    const c = createController(0x5eed);
-    expect(playScript(c, WINNER_A)).toBe(40);
-    expect(c.isTerminal()).toBe(true);
-    const liveScore = c.hud().score;
-    const liveStars = c.hud().stars;
-    expect(liveScore).toBeGreaterThan(0);
-    expect(liveStars).toBeGreaterThan(0);
-    let answer: (() => void) | undefined;
-    const held: Verifier = (replay, bundle) =>
-      new Promise((resolve) => {
-        answer = () => {
-          void inProcessVerifier(replay, bundle).then(resolve);
-        };
-      });
-    const pending = c.verifyRun(held);
-    c.startRun(99); // a fresh run: the live state is gone
-    expect(c.isTerminal()).toBe(false);
-    expect(c.hud().stars).not.toBe(liveStars);
-    answer!();
-    const v = await pending;
-    expect(v.ok).toBe(true);
-    expect(v.matchedLive).toBe(true);
-    expect(v.score).toBe(liveScore);
-    expect(v.stars).toBe(liveStars);
-  });
+  it(
+    'verifyRun() reads the run when it is called, not when the verifier answers (M3 story 2)',
+    // It plays the showcase build to its end and re-simulates it: 7.5 s under coverage on CI,
+    // past vitest's 5 s default, so it gets the file's full-run budget.
+    { timeout: 20_000 },
+    async () => {
+      // The verifier runs in a worker and answers later. Play again can reset the controller in
+      // between; the answer must still be about the run that was verified. A WON run (the
+      // showcase build, on the seed it is tuned against), so its score and stars are nonzero and
+      // a read after the reset could not pass for one before it.
+      const c = createController(0x5eed);
+      expect(playScript(c, WINNER_A)).toBe(40);
+      expect(c.isTerminal()).toBe(true);
+      const liveScore = c.hud().score;
+      const liveStars = c.hud().stars;
+      expect(liveScore).toBeGreaterThan(0);
+      expect(liveStars).toBeGreaterThan(0);
+      let answer: (() => void) | undefined;
+      const held: Verifier = (replay, bundle) =>
+        new Promise((resolve) => {
+          answer = () => {
+            void inProcessVerifier(replay, bundle).then(resolve);
+          };
+        });
+      const pending = c.verifyRun(held);
+      c.startRun(99); // a fresh run: the live state is gone
+      expect(c.isTerminal()).toBe(false);
+      expect(c.hud().stars).not.toBe(liveStars);
+      answer!();
+      const v = await pending;
+      expect(v.ok).toBe(true);
+      expect(v.matchedLive).toBe(true);
+      expect(v.score).toBe(liveScore);
+      expect(v.stars).toBe(liveStars);
+    },
+  );
 
   it('verifyRun() passes a failed validation through as its reason, and a verifier that cannot run as a rejection', async () => {
     const c = createController(7);
