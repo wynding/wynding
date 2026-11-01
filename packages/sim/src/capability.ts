@@ -143,6 +143,16 @@ export interface CapabilityProfile {
    *  a real rejection witness. Checked per tower (burst bundles only) in
    *  `checkCapabilityGlobal`. */
   readonly maxBurstTravelTicks: number;
+  /** Ceilings on a board's entrance and exit counts (format 3, ADR 0015) — 1 each at
+   *  sv16: the format can describe several pairs, but this sim build spawns at one
+   *  entrance and routes to one exit. Board-scoped, checked in `checkCapabilityBoard`. */
+  readonly maxEntrancesPerBoard: number;
+  readonly maxExitsPerBoard: number;
+  /** The one `hpPercent` every wave must carry (format 3) — 100 at sv16, where spawn
+   *  reads the catalog's hit points unscaled. The `requiredLeakCost` precedent: a value
+   *  the schema already admits but this build does not yet simulate is pinned, not
+   *  ignored. Board-scoped, checked per wave in `checkCapabilityBoard`. */
+  readonly requiredHpPercent: number;
 }
 
 /** `SIM_VERSION` 17 (imported from `./ruleset-shared`, the dependency-free leaf):
@@ -196,6 +206,9 @@ const PROFILES: Readonly<Record<number, CapabilityProfile>> = {
     maxSupportDamageMulFp: 1024,
     allowedBurstForms: ['aoe'],
     maxBurstTravelTicks: 8,
+    maxEntrancesPerBoard: 1,
+    maxExitsPerBoard: 1,
+    requiredHpPercent: 100,
   },
 };
 

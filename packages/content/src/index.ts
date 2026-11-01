@@ -11,6 +11,8 @@
 export type {
   Ruleset,
   RulesetBoard,
+  BoardEntrance,
+  BoardExit,
   WaveSchedule,
   WaveEntry,
   CreepDef,

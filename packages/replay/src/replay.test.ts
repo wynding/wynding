@@ -362,7 +362,7 @@ describe('replay validate() — terminal contract (ADR 0006)', () => {
     // GridError inside compileRuleset; validate must surface it as a rejection, not
     // let it escape as an unhandled 500.
     const badGeometry = JSON.parse(JSON.stringify(m1Ruleset)) as Ruleset;
-    (badGeometry.boards[0] as { entrance: { col: number; row: number } }).entrance = {
+    (badGeometry.boards[0]!.entrances[0] as { cell: { col: number; row: number } }).cell = {
       col: 5,
       row: 5,
     };
@@ -445,20 +445,21 @@ function makeBoard(
     id,
     widthTiles: opts.widthTiles ?? 9,
     heightTiles: opts.heightTiles ?? 3,
-    entrance: opts.entrance ?? { col: 0, row: 1 },
-    exit: opts.exit ?? { col: 8, row: 1 },
+    entrances: [{ id: 'in', cell: opts.entrance ?? { col: 0, row: 1 }, destination: ['out'] }],
+    exits: [{ id: 'out', cell: opts.exit ?? { col: 8, row: 1 } }],
     waves: [
       {
         index: 0,
         countdownTicks: opts.countdownTicks ?? 5,
         clearBonus: 0,
-        entries: [{ creepId: 'normal', count: 1, spacingTicks: 20 }],
+        hpPercent: 100,
+        entries: [{ creepId: 'normal', entrance: 'in', count: 1, spacingTicks: 20 }],
       },
     ],
   };
 }
 
-/** A minimal v2 bundle over the given boards, capability-profile-legal at SIM_VERSION 5. */
+/** A minimal format-3 bundle over the given boards, capability-profile-legal at SIM_VERSION. */
 function makeRuleset(
   boards: RulesetBoard[],
   opts: {
@@ -469,7 +470,7 @@ function makeRuleset(
   } = {},
 ): Ruleset {
   return {
-    formatVersion: 2,
+    formatVersion: 3,
     rulesetId: opts.rulesetId ?? 'compile-cache-probe',
     version: 1,
     creepCatalog: [

@@ -50,7 +50,7 @@ function waveIndexForCreep(r: typeof ruleset, creepId: string): number {
 // between the two kinds.
 const SYNTHETIC_BOARD_ID = 'wave-preview-board';
 const syntheticBundle: Ruleset = {
-  formatVersion: 2,
+  formatVersion: 3,
   rulesetId: 'wave-preview-test',
   version: 1,
   creepCatalog: [
@@ -98,28 +98,32 @@ const syntheticBundle: Ruleset = {
       id: SYNTHETIC_BOARD_ID,
       widthTiles: 9,
       heightTiles: 5,
-      entrance: { col: 0, row: 2 },
-      exit: { col: 8, row: 2 },
+      entrances: [{ id: 'west', cell: { col: 0, row: 2 }, destination: ['east'] }],
+      exits: [{ id: 'east', cell: { col: 8, row: 2 } }],
       waves: [
         {
           index: 0,
           countdownTicks: 100,
           clearBonus: 4,
+          hpPercent: 100,
           // First-appearance order 'armored' then 'normal' — deliberately NOT alphabetical
           // or catalog order, so a bug that re-sorts the summary alphabetically or by
           // catalog position (rather than preserving entry order) would be caught. The two
           // 'normal' entries (counts 2 + 1) must aggregate to a single count-3 row.
           entries: [
-            { creepId: 'armored', count: 1, spacingTicks: 10, offsetTicks: 0 },
-            { creepId: 'normal', count: 2, spacingTicks: 10, offsetTicks: 0 },
-            { creepId: 'normal', count: 1, spacingTicks: 10, offsetTicks: 5 },
+            { creepId: 'armored', entrance: 'west', count: 1, spacingTicks: 10, offsetTicks: 0 },
+            { creepId: 'normal', entrance: 'west', count: 2, spacingTicks: 10, offsetTicks: 0 },
+            { creepId: 'normal', entrance: 'west', count: 1, spacingTicks: 10, offsetTicks: 5 },
           ],
         },
         {
           index: 1,
           countdownTicks: 50,
           clearBonus: 4,
-          entries: [{ creepId: 'normal', count: 1, spacingTicks: 10, offsetTicks: 0 }],
+          hpPercent: 100,
+          entries: [
+            { creepId: 'normal', entrance: 'west', count: 1, spacingTicks: 10, offsetTicks: 0 },
+          ],
         },
       ],
     },

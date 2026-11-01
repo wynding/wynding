@@ -127,6 +127,8 @@ export interface TestWaveOpts {
   /** Which catalog creep this wave's single entry spawns (M2-S3; default 'normal') —
    *  pair with `TestBundleOpts.extraCreeps` to spawn a non-default catalog id. */
   readonly creepId?: string;
+  /** The wave's creep hit points as a percent of the catalog's (format 3; default 100). */
+  readonly hpPercent?: number;
 }
 export interface TestBundleOpts {
   readonly creepHp?: number;
@@ -170,7 +172,7 @@ export function testBundle(spec: GridSpec, opts: TestBundleOpts = {}): Ruleset {
     },
   ];
   return {
-    formatVersion: 2,
+    formatVersion: 3,
     rulesetId: 'test-ruleset',
     version: 1,
     creepCatalog: [
@@ -206,15 +208,17 @@ export function testBundle(spec: GridSpec, opts: TestBundleOpts = {}): Ruleset {
         id: 'test',
         widthTiles: spec.widthTiles,
         heightTiles: spec.heightTiles,
-        entrance: spec.entrance,
-        exit: spec.exit,
+        entrances: [{ id: 'in', cell: spec.entrance, destination: ['out'] }],
+        exits: [{ id: 'out', cell: spec.exit }],
         waves: waveOpts.map((w, index) => ({
           index,
           countdownTicks: w.countdownTicks ?? 500,
           clearBonus: w.waveClearBonus ?? 0,
+          hpPercent: w.hpPercent ?? 100,
           entries: [
             {
               creepId: w.creepId ?? 'normal',
+              entrance: 'in',
               count: w.waveCount ?? 10,
               spacingTicks: w.waveSpacing ?? 20,
               ...(w.offsetTicks !== undefined ? { offsetTicks: w.offsetTicks } : {}),

@@ -130,6 +130,25 @@ export function canonicalImmunities(immunities: readonly ('slow' | 'stun')[]): (
   );
 }
 
+/** Canonicalize a destination (ADR 0015 — a SET of exit ids) into the board's `exits`
+ *  order: one hash form regardless of authored order, the `canonicalImmunities`
+ *  precedent. The single implementation shared by `validateRulesetShape` (parse-time)
+ *  and `normalizeForHash` (defensive re-canonicalization for a hand-built bundle that
+ *  bypasses `parseRulesetJson`). Repeats collapse here; the schema has already
+ *  rejected them loudly by the time a parsed bundle reaches this, so the dedupe only
+ *  matters on the hand-built path. An id outside `exitIds` sorts last, in authored
+ *  order — unreachable after validation, kept total rather than throwing. */
+export function canonicalDestination(
+  destination: readonly string[],
+  exitIds: readonly string[],
+): string[] {
+  const rank = (id: string): number => {
+    const i = exitIds.indexOf(id);
+    return i === -1 ? exitIds.length : i;
+  };
+  return [...new Set(destination)].sort((a, b) => rank(a) - rank(b));
+}
+
 /** Integer ceiling division — `⌈a/b⌉` via `Math.floor((a+b-1)/b)`, never float
  *  division (the determinism contract). Used once, below, but named for its own
  *  proof obligation (Codex R2-4's formula cites it explicitly). */

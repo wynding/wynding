@@ -20,8 +20,15 @@ import {
 import { getBundledRuleset, defaultBoardId } from './registry';
 
 const ruleset = getBundledRuleset();
-const shippedBoard = ruleset.boards[0]!;
 const boardId = defaultBoardId(ruleset);
+// field-01 is one entrance → exit pair in format 3 (`west` → `east`).
+const shippedPair = ruleset.boards[0]!;
+const shippedBoard = {
+  widthTiles: shippedPair.widthTiles,
+  heightTiles: shippedPair.heightTiles,
+  entrance: shippedPair.entrances[0]!.cell,
+  exit: shippedPair.exits[0]!.cell,
+};
 
 describe('field-01 (the real M1 board) builds a solvable grid', () => {
   const grid = buildGrid(shippedBoard);

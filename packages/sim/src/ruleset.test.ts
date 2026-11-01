@@ -526,7 +526,13 @@ describe('compileRuleset — success', () => {
     const mutable = JSON.parse(JSON.stringify(bundle)) as {
       boards: {
         waves: {
-          entries: { creepId: string; count: number; spacingTicks: number; offsetTicks?: number }[];
+          entries: {
+            creepId: string;
+            entrance: string;
+            count: number;
+            spacingTicks: number;
+            offsetTicks?: number;
+          }[];
         }[];
       }[];
     };
@@ -534,6 +540,7 @@ describe('compileRuleset — success', () => {
     // Entry 1: 2 × 'normal' spacing 30, offset 5 → ticks [5, 35] — interleaves.
     mutable.boards[0]!.waves[0]!.entries.push({
       creepId: 'normal',
+      entrance: 'in',
       count: 2,
       spacingTicks: 30,
       offsetTicks: 5,

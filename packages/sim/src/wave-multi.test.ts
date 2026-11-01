@@ -179,13 +179,15 @@ describe('settlement precedes terminal, uniformly, on the final tick (G8)', () =
               index: 0,
               countdownTicks: 10,
               clearBonus: 3,
-              entries: [{ creepId: 'leaker', count: 1, spacingTicks: 5 }],
+              hpPercent: 100,
+              entries: [{ creepId: 'leaker', entrance: 'in', count: 1, spacingTicks: 5 }],
             },
             {
               index: 1,
               countdownTicks: 500,
               clearBonus: 7,
-              entries: [{ creepId: 'mark', count: 1, spacingTicks: 5 }],
+              hpPercent: 100,
+              entries: [{ creepId: 'mark', entrance: 'in', count: 1, spacingTicks: 5 }],
             },
           ],
         },
@@ -520,10 +522,11 @@ describe('bound gate — the terminal-tick budget', () => {
               index: 0,
               countdownTicks: 10,
               clearBonus: 0,
+              hpPercent: 100,
               entries: [
-                { creepId: 'normal', count: 2, spacingTicks: 5, offsetTicks: 50 },
-                { creepId: 'swift', count: 3, spacingTicks: 5 }, // offset 0 — arrives first
-                { creepId: 'tank', count: 4, spacingTicks: 5, offsetTicks: 100 },
+                { creepId: 'normal', entrance: 'in', count: 2, spacingTicks: 5, offsetTicks: 50 },
+                { creepId: 'swift', entrance: 'in', count: 3, spacingTicks: 5 }, // offset 0 — arrives first
+                { creepId: 'tank', entrance: 'in', count: 4, spacingTicks: 5, offsetTicks: 100 },
               ],
             },
           ],

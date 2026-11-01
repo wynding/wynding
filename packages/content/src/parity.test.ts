@@ -23,7 +23,7 @@
 // after temporarily logging the values from the scenarios (see git history of this
 // file for the harness used to derive them) — never hand-compute a golden.
 //
-// Also pins the v2 `rulesetHash` of the shipped artifact itself — a content-identity
+// Also pins the `rulesetHash` of the shipped artifact itself — a content-identity
 // digest, independent of the world-hash goldens above.
 
 import { describe, it, expect } from 'vitest';
@@ -483,7 +483,7 @@ describe('behavioral parity — v2-loaded bundle vs. the pre-verified goldens', 
   });
 });
 
-// --- GOLDEN — the v2 rulesetHash of the shipped artifact -------------------------
+// --- GOLDEN — the rulesetHash of the shipped artifact --------------------------------
 // Recompute with: pnpm --filter @wynding/content exec vitest run parity
 // A change here means the shipped artifact's CONTENT changed (or its normalized
 // encoding did) — not a behavior change per se, but every deployed replay/leaderboard
@@ -503,7 +503,13 @@ describe('behavioral parity — v2-loaded bundle vs. the pre-verified goldens', 
 // bundle — `antiair`'s `cadenceTicks` 20 -> 15, `scoring.survivalMul` 35 -> 50, and the
 // boss wave's `normal` escort gaining `offsetTicks` 600 — so the content-identity digest
 // moves again. No creep id, count or wave order changed (ruling 2's frozen column).
-const SHIPPED_RULESET_HASH = 'fd0dfb25fd3249493ac3af9fd294e3b601d475f20887614231646968b3b34f67';
+// Re-pinned M3 story 3 (measured): `formatVersion` 2 → 3 re-encodes the board — v2's
+// single `entrance`/`exit` cells become `entrances`/`exits` lists with a destination per
+// entrance, every wave entry names its entrance, every wave carries `hpPercent` — so the
+// normalized form, and with it the digest, moves. Every authored VALUE is unchanged
+// (one pair `west` → `east`, every entry on `west`, `hpPercent` 100), and the world-hash
+// goldens above do not move with it (`format3-parity.test.ts` proves the run is the same).
+const SHIPPED_RULESET_HASH = 'c12145a48f4a094eba02307d399e1ac0dd393e2432aaccc2564674e8cc117d34';
 // ---------------------------------------------------------------------------------
 
 describe('digest goldens — the shipped artifact content-hash is pinned and stable', () => {

@@ -49,7 +49,13 @@ import type {
   TowerTargetDomain,
 } from '@wynding/types';
 import { loadBoard, type BoardContext } from './context';
-import { RulesetError, canonicalImmunities, effectiveSpeedFp, SIM_VERSION } from './ruleset-shared';
+import {
+  RulesetError,
+  canonicalDestination,
+  canonicalImmunities,
+  effectiveSpeedFp,
+  SIM_VERSION,
+} from './ruleset-shared';
 import { validateRulesetShape } from './ruleset-schema';
 import { DIAG_LEN } from './movement';
 import { capabilityProfile, type CapabilityProfile } from './capability';
@@ -390,24 +396,34 @@ function normalizeForHash(bundle: Ruleset): unknown {
       starThresholds: bundle.scoring.starThresholds,
       earlyCallScoreDivisor: bundle.scoring.earlyCallScoreDivisor,
     },
-    boards: bundle.boards.map((b) => ({
-      id: b.id,
-      widthTiles: b.widthTiles,
-      heightTiles: b.heightTiles,
-      entrance: { col: b.entrance.col, row: b.entrance.row },
-      exit: { col: b.exit.col, row: b.exit.row },
-      waves: b.waves.map((w) => ({
-        index: w.index,
-        countdownTicks: w.countdownTicks,
-        clearBonus: w.clearBonus,
-        entries: w.entries.map((e) => ({
-          creepId: e.creepId,
-          count: e.count,
-          spacingTicks: e.spacingTicks,
-          offsetTicks: e.offsetTicks ?? 0,
+    boards: bundle.boards.map((b) => {
+      const exitIds = b.exits.map((x) => x.id);
+      return {
+        id: b.id,
+        widthTiles: b.widthTiles,
+        heightTiles: b.heightTiles,
+        entrances: b.entrances.map((e) => ({
+          id: e.id,
+          cell: { col: e.cell.col, row: e.cell.row },
+          // Set semantics (ADR 0015): one hash form whatever the authored order.
+          destination: canonicalDestination(e.destination, exitIds),
         })),
-      })),
-    })),
+        exits: b.exits.map((x) => ({ id: x.id, cell: { col: x.cell.col, row: x.cell.row } })),
+        waves: b.waves.map((w) => ({
+          index: w.index,
+          countdownTicks: w.countdownTicks,
+          clearBonus: w.clearBonus,
+          hpPercent: w.hpPercent,
+          entries: w.entries.map((e) => ({
+            creepId: e.creepId,
+            entrance: e.entrance,
+            count: e.count,
+            spacingTicks: e.spacingTicks,
+            offsetTicks: e.offsetTicks ?? 0,
+          })),
+        })),
+      };
+    }),
   };
 }
 
@@ -675,7 +691,22 @@ function checkCapabilityBoard(
       `board '${board.id}' has ${board.waves.length} waves, exceeds ${profile.maxWavesPerBoard} at simVersion ${v}`,
     );
   }
+  if (board.entrances.length > profile.maxEntrancesPerBoard) {
+    throw new RulesetError(
+      `board '${board.id}' has ${board.entrances.length} entrances, exceeds ${profile.maxEntrancesPerBoard} at simVersion ${v}`,
+    );
+  }
+  if (board.exits.length > profile.maxExitsPerBoard) {
+    throw new RulesetError(
+      `board '${board.id}' has ${board.exits.length} exits, exceeds ${profile.maxExitsPerBoard} at simVersion ${v}`,
+    );
+  }
   for (const wave of board.waves) {
+    if (wave.hpPercent !== profile.requiredHpPercent) {
+      throw new RulesetError(
+        `board '${board.id}' wave ${wave.index} hpPercent ${wave.hpPercent} must be ${profile.requiredHpPercent} at simVersion ${v}`,
+      );
+    }
     if (wave.entries.length > profile.maxEntriesPerWave) {
       throw new RulesetError(
         `board '${board.id}' wave ${wave.index} has ${wave.entries.length} entries, exceeds ${profile.maxEntriesPerWave} at simVersion ${v}`,
@@ -735,12 +766,13 @@ function checkCapabilityBoard(
     ),
   );
   if (boardFliesAir) {
-    const axisAligned =
-      board.entrance.col === board.exit.col || board.entrance.row === board.exit.row;
+    const entrance = board.entrances[0]!.cell;
+    const exit = board.exits[0]!.cell;
+    const axisAligned = entrance.col === exit.col || entrance.row === exit.row;
     if (!axisAligned) {
       throw new RulesetError(
-        `board '${board.id}' entrance (${board.entrance.col},${board.entrance.row}) -> exit ` +
-          `(${board.exit.col},${board.exit.row}) is not axis-aligned at simVersion ${v} ` +
+        `board '${board.id}' entrance (${entrance.col},${entrance.row}) -> exit ` +
+          `(${exit.col},${exit.row}) is not axis-aligned at simVersion ${v} ` +
           `(its wave schedule flies an air creep)`,
       );
     }
@@ -770,11 +802,12 @@ export function compileRuleset(bundle: Ruleset, boardId: string): CompiledRulese
   // replay validator can turn it into a clean rejection rather than a 500.
   let boardCtx: BoardContext;
   try {
+    // One pair at sv16 — `checkCapabilityBoard` has already capped both lists at one.
     boardCtx = loadBoard({
       widthTiles: board.widthTiles,
       heightTiles: board.heightTiles,
-      entrance: board.entrance,
-      exit: board.exit,
+      entrance: board.entrances[0]!.cell,
+      exit: board.exits[0]!.cell,
     });
   } catch (err) {
     throw new RulesetError(`unplayable board '${boardId}': ${(err as Error).message}`);

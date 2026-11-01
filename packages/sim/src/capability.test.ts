@@ -158,6 +158,9 @@ describe('capabilityProfile', () => {
       maxSupportDamageMulFp: 1024,
       allowedBurstForms: ['aoe'],
       maxBurstTravelTicks: 8,
+      maxEntrancesPerBoard: 1,
+      maxExitsPerBoard: 1,
+      requiredHpPercent: 100,
     });
     // Every prior version is deleted with each bump (G11, capability.ts's header).
     // sv16 is the same case sv15 was: its CONTENTS are what the assertion above just
@@ -211,8 +214,27 @@ describe('capability gate — accept at boundary, reject beyond, per dimension',
 
   it('maxEntriesPerWave defers to the schema ceiling (16) — a 2-entry wave compiles', () => {
     compiles((b) => {
-      b.boards[0]!.waves[0]!.entries.push({ creepId: 'normal', count: 1, spacingTicks: 5 });
+      b.boards[0]!.waves[0]!.entries.push({
+        creepId: 'normal',
+        entrance: 'in',
+        count: 1,
+        spacingTicks: 5,
+      });
     });
+  });
+
+  it('format 3 at sv16: one entrance, one exit, hpPercent 100 — a second opening or another percent is rejected', () => {
+    compiles(() => undefined);
+    rejects((b) => {
+      b.boards[0]!.entrances = [
+        ...b.boards[0]!.entrances,
+        { id: 'in2', cell: { col: 0, row: 3 }, destination: ['out'] },
+      ];
+    }, '2 entrances, exceeds 1');
+    rejects((b) => {
+      b.boards[0]!.exits = [...b.boards[0]!.exits, { id: 'out2', cell: { col: 8, row: 3 } }];
+    }, '2 exits, exceeds 1');
+    rejects((b) => (b.boards[0]!.waves[0]!.hpPercent = 101), 'hpPercent 101 must be 100');
   });
 
   it('maxOffsetTicks defers to the schema ceiling — a nonzero stream offset compiles', () => {
