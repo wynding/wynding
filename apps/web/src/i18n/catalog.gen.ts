@@ -237,6 +237,12 @@ export const EN = {
   "verify.fail": "Verification failed: {reason}",
   "verify.mismatch": "Verification mismatch: the replay re-simulated to a different outcome.",
   "verify.ok": "Verified: replay re-simulated to the same outcome.",
+  "verify.reason.crashed": "the verifier stopped unexpectedly",
+  "verify.reason.timeout": "it took too long",
+  "verify.reason.unavailable": "the verifier could not start",
+  "verify.reason.unknown": "something went wrong",
+  "verify.reason.unreadable": "the verifier's answer could not be read",
+  "verify.running": "Verifying this run…",
 } as const;
 
 export type MessageKey = keyof typeof EN;
@@ -477,4 +483,10 @@ export interface MessageParams {
   "verify.fail": { "reason": string | number };
   "verify.mismatch": Record<never, never>;
   "verify.ok": Record<never, never>;
+  "verify.reason.crashed": Record<never, never>;
+  "verify.reason.timeout": Record<never, never>;
+  "verify.reason.unavailable": Record<never, never>;
+  "verify.reason.unknown": Record<never, never>;
+  "verify.reason.unreadable": Record<never, never>;
+  "verify.running": Record<never, never>;
 }

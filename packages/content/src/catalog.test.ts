@@ -14,8 +14,11 @@
 //     zero-leftover oracle rests on an equal-cost assumption (150 × 12 = 1800) that a
 //     real catalog breaks; deriving the bounty from the table instead is what keeps that
 //     oracle meaningful here. Change one, change the other.
-//   - `slowFloorNum/Den: 3/4` is what makes this bundle COMPILE AT ALL. At the shipped ¼
-//     floor, `compileRuleset`'s termination gate rejects it (see the gate test below).
+//   - `slowFloorNum/Den: 3/4` is what made this bundle COMPILE AT ALL under sv16's
+//     36,000-tick cap: at the shipped ¼ floor, `compileRuleset`'s termination gate rejected
+//     it. Since sv17's 72,000 (M3 story 2) the ¼ floor compiles too (see the gate tests
+//     below); the ¾ stays because the committed replay and its measured window were
+//     recorded with it, and the floor changes how every slowed creep moves.
 
 import { readFileSync } from 'node:fs';
 import { describe, it, expect } from 'vitest';
@@ -220,7 +223,7 @@ describe('the compile-time gates this bundle sits inside', () => {
   const catalog = parseRulesetJson(text);
   const compiled = compileRuleset(catalog, CATALOG_BOARD_ID);
 
-  it('the ¾ slow floor is what makes it compile: 3,595 + 32,178 = 35,773 <= 36,000', () => {
+  it('the ¾ slow floor’s bound: 3,595 + 32,178 = 35,773 <= 72,000', () => {
     expect(catalog.balance.slowFloorNum).toBe(3);
     expect(catalog.balance.slowFloorDen).toBe(4);
     // ⌈23 × ¾⌉ = 18 — every slowable creep's floor speed.
@@ -232,23 +235,35 @@ describe('the compile-time gates this bundle sits inside', () => {
     expect(Math.ceil((cells * DIAG_LEN) / minEffSpeedFp)).toBe(32_178);
     expect(3_595 + 32_178).toBe(35_773);
     expect(35_773).toBeLessThanOrEqual(MAX_MATCH_TICKS);
-    expect(MAX_MATCH_TICKS).toBe(36_000);
-    // Margin, stated so a schedule edit that eats it is visible: 227 ticks.
-    expect(MAX_MATCH_TICKS - 35_773).toBe(227);
+    expect(MAX_MATCH_TICKS).toBe(72_000);
+    // Margin, stated so a schedule edit that eats it is visible: 36,227 ticks (227 under
+    // sv16's 36,000, which is why the floor was ¾ in the first place).
+    expect(MAX_MATCH_TICKS - 35_773).toBe(36_227);
   });
 
-  it('at the shipped ¼ floor the SAME schedule is REJECTED — the gate is real, not decorative', () => {
-    // `slow`'s mulFp is 128, so ⌊23 × 128/256⌋ = 11 at a ¼ floor, and the bound blows
-    // past 36,000. Proven by actually compiling the edited bundle, not by arithmetic
-    // alone: this is the test that fails at author time if a future edit reverts the
-    // floor.
+  it('at the shipped ¼ floor the same schedule compiles since sv17 — and the gate still bites one tick past the cap', () => {
+    // `slow`'s mulFp is 128, so ⌊23 × 128/256⌋ = 11 at a ¼ floor: 3,595 + ⌈579,200 / 11⌉
+    // = 56,250. Over sv16's 36,000 (this test used to prove the rejection) and under
+    // sv17's 72,000. Proven by actually compiling the edited bundles, not by arithmetic
+    // alone: the wave pushed 15,750 ticks later lands the bound on 72,000 exactly and
+    // compiles; one tick more is rejected.
     const quarterFloor = {
       ...catalog,
       balance: { ...catalog.balance, slowFloorNum: 1, slowFloorDen: 4 },
     };
-    expect(() => compileRuleset(quarterFloor, CATALOG_BOARD_ID)).toThrow(RulesetError);
     expect(Math.max(Math.floor((23 * 128) / 256), Math.ceil((23 * 1) / 4))).toBe(11);
-    expect(3_595 + Math.ceil(579_200 / 11)).toBeGreaterThan(MAX_MATCH_TICKS);
+    expect(3_595 + Math.ceil(579_200 / 11)).toBe(56_250);
+    expect(() => compileRuleset(quarterFloor, CATALOG_BOARD_ID)).not.toThrow();
+    const delayed = (extra: number) => ({
+      ...quarterFloor,
+      boards: quarterFloor.boards.map((b) => ({
+        ...b,
+        waves: b.waves.map((w) => ({ ...w, countdownTicks: w.countdownTicks + extra })),
+      })),
+    });
+    expect(56_250 + 15_750).toBe(MAX_MATCH_TICKS);
+    expect(() => compileRuleset(delayed(15_750), CATALOG_BOARD_ID)).not.toThrow();
+    expect(() => compileRuleset(delayed(15_751), CATALOG_BOARD_ID)).toThrow(RulesetError);
   });
 
   it('the AoE scan gate clears: MAX_TOWERS x 812 scheduled spawns = 812,000 <= 2,000,000', () => {

@@ -11,10 +11,11 @@ export type Run = 'win' | 'loss';
  *  in the action row, and wait for the panel's resting place to settle. Give feedback arrives a
  *  task after the dialog opens (the harness's ask refresh takes a Web Lock, as production's
  *  does), so the panel has re-settled for it by the time this returns. `query` adds the
- *  harness's other knobs (`&askLock=1`, `&sendDelay=<ms>`; `results-entry.ts`). */
+ *  harness's other knobs (`&askLock=1`, `&sendDelay=<ms>`; `results-entry.ts`). `long` is the
+ *  synthetic 30-wave run, whose Verify `verify.spec.ts` times. */
 export async function openResults(
   page: Page,
-  run: Run,
+  run: Run | 'long',
   text: 100 | 200 = 100,
   query = '',
 ): Promise<Locator> {

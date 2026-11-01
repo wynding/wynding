@@ -709,11 +709,14 @@ describe('the slow-aware bound gate (Codex R2-4/G10)', () => {
   // MAX_MATCH_TICKS budget, but adding the catalog's `slow` tower (strongest
   // mulFp 128, floor 1/4 ⇒ effective speed 13 vs base 26) pushes the worst-case
   // traversal over it — the hostile-self-slowing bound-gate proof (G10).
+  // Re-derived at sv17 (MAX_MATCH_TICKS 36,000 → 72,000): 50 × 50 fit even WITH the
+  // slow (⌈2,500 × 362 / 13⌉ = 69,616), so the board grows to 60 × 60 — ⌈3,600 × 362
+  // / 26⌉ = 50,124 fits without the slow tower, ⌈3,600 × 362 / 13⌉ = 100,247 does not.
   const BOUND_BOARD = {
-    widthTiles: 50,
-    heightTiles: 50,
-    entrance: { col: 0, row: 25 },
-    exit: { col: 49, row: 25 },
+    widthTiles: 60,
+    heightTiles: 60,
+    entrance: { col: 0, row: 30 },
+    exit: { col: 59, row: 30 },
   } as const;
 
   it('compiles without a slow tower in the catalog, rejects once one is added', () => {

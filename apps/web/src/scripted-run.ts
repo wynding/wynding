@@ -12,7 +12,7 @@
 // to the final tick, and the e2e results harness (`e2e-harness/results-entry.ts`) uses it to
 // reach a real win in a browser.
 
-import { MS_PER_TICK } from '@wynding/sim';
+import { MAX_MATCH_TICKS, MS_PER_TICK } from '@wynding/sim';
 import type { Controller } from './controller';
 
 /** One scripted build — the content package's `Placement` shape, restated so nothing shipped
@@ -23,14 +23,15 @@ export interface ScriptedPlacement {
   readonly towerId: string;
 }
 
-/** Start `controller` and play `plan` until the run resolves (or `maxTicks` pass), one tick
- *  per step at 1×. Returns how many placements were accepted, in script order — the content
- *  runner's `placedCount`. Throws on a tower id the catalog does not know, as that runner does.
- *  Never claims a wave early: every wave launches on its own countdown, as in the runner. */
+/** Start `controller` and play `plan` until the run resolves (or `maxTicks` pass — by default
+ *  the longest run the validator accepts, `MAX_MATCH_TICKS`), one tick per step at 1×. Returns
+ *  how many placements were accepted, in script order — the content runner's `placedCount`.
+ *  Throws on a tower id the catalog does not know, as that runner does. Never claims a wave
+ *  early: every wave launches on its own countdown, as in the runner. */
 export function playScript(
   controller: Controller,
   plan: readonly ScriptedPlacement[],
-  maxTicks = 20_000,
+  maxTicks = MAX_MATCH_TICKS,
 ): number {
   controller.start();
   let cursor = 0;

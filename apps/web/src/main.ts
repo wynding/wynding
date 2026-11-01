@@ -10,7 +10,13 @@
 
 import './ui.css';
 import { createSaveSlot } from '@wynding/platform';
-import { createController, type CaptureSnapshot, type Controller } from './controller';
+import {
+  createController,
+  type CaptureSnapshot,
+  type Controller,
+  type VerifyResult,
+} from './controller';
+import { spawnVerifyWorker, VerifyError, workerVerifier, type Verifier } from './verifier';
 import { createOverlay, type UiAction } from './overlay';
 import { createShell, HOME_HREF } from './shell';
 import { attachInput, type InputHandle } from './input';
@@ -165,6 +171,10 @@ export interface AppDeps {
    *  in a unit test. Defaults to the real navigator's, which is legitimately absent on a
    *  supported device (iOS below 16.4) — see `wakelock.ts`. */
   readonly wakeLock?: WakeLockApi | null;
+  /** Where Verify re-simulates a finished run (M3 story 2). Defaults to a dedicated module
+   *  worker per verification (`verifier.ts`), so the re-simulation never holds the main
+   *  thread; injected because jsdom has no `Worker`. */
+  readonly verifier?: Verifier;
 }
 
 export interface AppHandle {
@@ -187,6 +197,7 @@ export function createApp(doc: Document, root: HTMLElement, deps: AppDeps): AppH
   );
   const keymap = createKeymap();
   const controller = (deps.controllerFactory ?? createController)(deps.seed);
+  const verifier = deps.verifier ?? workerVerifier(spawnVerifyWorker, doc);
   const seedSource = deps.seedSource ?? (() => Date.now() >>> 0);
   const navigate =
     deps.navigate ??
@@ -350,6 +361,12 @@ export function createApp(doc: Document, root: HTMLElement, deps: AppDeps): AppH
    *  reached during construction, and a `let` declared further down would sit in its
    *  temporal dead zone. */
   let resultsStatusSeq = 0;
+  /** The verification the results dialog is running, if any (M3 story 2: `runVerify`). Beside
+   *  `resultsStatusSeq` for the same reason: `abandonResultsStatus` clears it. */
+  let verifying: {
+    readonly result: Promise<VerifyResult>;
+    readonly abort: AbortController;
+  } | null = null;
   /** The finished run the open results dialog is about — captured ONCE at the terminal edge
    *  (with the playtrace), which the survey's payload is built from. Null between runs, and on
    *  a dialog whose capture threw. */
@@ -762,9 +779,49 @@ export function createApp(doc: Document, root: HTMLElement, deps: AppDeps): AppH
     };
   }
   /** Invalidate any in-flight claim without making one — used when the dialog goes away,
-   *  so nothing pending can write onto the next run's results. */
+   *  so nothing pending can write onto the next run's results. A verification still running
+   *  for the dialog is stopped with it: no one is left to read its answer. */
   function abandonResultsStatus(): void {
     resultsStatusSeq++;
+    abandonVerify();
+  }
+
+  /** Start a verification, or join the one already running (`verifying`, M3 story 2). It
+   *  runs in a worker and can take seconds on a low-end phone, so a second press while it runs
+   *  JOINS it instead of starting another; once it answers, the next press verifies afresh, as
+   *  every press did when Verify was synchronous. Returns the verification itself: its answer,
+   *  and the signal that says whether Play again or teardown abandoned it. */
+  function runVerify(): NonNullable<typeof verifying> {
+    if (verifying !== null) return verifying;
+    const abort = new AbortController();
+    const result = controller.verifyRun((replay, bundle) => verifier(replay, bundle, abort.signal));
+    const entry = { result, abort };
+    verifying = entry;
+    const settled = (): void => {
+      if (verifying === entry) verifying = null;
+    };
+    result.then(settled, settled);
+    return entry;
+  }
+  function abandonVerify(): void {
+    verifying?.abort.abort();
+    verifying = null;
+  }
+  /** Why a verification could not run, in the player's language (ADR 0004). */
+  function verifyFailureReason(error: unknown): string {
+    if (error instanceof VerifyError) {
+      switch (error.failure) {
+        case 'unavailable':
+          return t('verify.reason.unavailable');
+        case 'crashed':
+          return t('verify.reason.crashed');
+        case 'timeout':
+          return t('verify.reason.timeout');
+        case 'unreadable':
+          return t('verify.reason.unreadable');
+      }
+    }
+    return t('verify.reason.unknown');
   }
 
   function exportPlaytrace(destination: 'clipboard' | 'file'): void {
@@ -1149,12 +1206,42 @@ export function createApp(doc: Document, root: HTMLElement, deps: AppDeps): AppH
         refreshHud();
         break;
       case 'verify': {
-        const r = controller.verifyRun();
-        let message: string;
-        if (!r.ok) message = t('verify.fail', { reason: r.reason ?? '' });
-        else if (r.matchedLive === false) message = t('verify.mismatch');
-        else message = t('verify.ok');
-        claimResultsStatus()(message);
+        // The region says at once that the run is being verified, and the answer replaces
+        // it when the worker returns it — through the same claim, so a later Copy, Save or
+        // Play again still silences it (#133's one-current-request rule).
+        const announce = claimResultsStatus();
+        // Resolved now, before anything can fail, so the last-resort write below needs
+        // nothing that could fail with the rest.
+        const fallback = t('verify.fail', { reason: t('verify.reason.unknown') });
+        announce(t('verify.running'));
+        const verification = runVerify();
+        void verification.result
+          .then((r) => {
+            if (!r.ok) return t('verify.fail', { reason: r.reason ?? '' });
+            return r.matchedLive === false ? t('verify.mismatch') : t('verify.ok');
+          })
+          // The verification could not run at all, or reading its answer threw: either way
+          // the region says it failed rather than leaving "Verifying" up, and the console says
+          // what failed, in production too — the region's reason is the player's, not the
+          // cause. One Play again or teardown abandoned is no failure: its signal says so,
+          // whatever it rejected with, and its claim is stale by then (`abandonResultsStatus`),
+          // so it writes nothing either.
+          .catch((error: unknown) => {
+            if (!verification.abort.signal.aborted) {
+              console.error('Wynding: Verify could not run.', error);
+            }
+            return t('verify.fail', { reason: verifyFailureReason(error) });
+          })
+          .then(announce)
+          // Even saying it failed failed. The region still may not be left at "Verifying".
+          .catch((error: unknown) => {
+            try {
+              announce(fallback);
+            } catch (writeError) {
+              console.error('Wynding: Verify could not write its status.', writeError);
+            }
+            console.error('Wynding: Verify could not report its result.', error);
+          });
         break;
       }
       case 'copyPlaytrace':
@@ -1364,6 +1451,9 @@ export function createApp(doc: Document, root: HTMLElement, deps: AppDeps): AppH
     destroy(): void {
       cancel();
       unsubscribe();
+      // A verification still running stops its worker, and its rejection, stale now, writes
+      // nothing into the overlay being torn down.
+      abandonResultsStatus();
       // The Dock footprint (#152): observer, scroll listener, pending frame, and every property and
       // class it wrote — cleared by its owner.
       dockResizeObserver?.disconnect();

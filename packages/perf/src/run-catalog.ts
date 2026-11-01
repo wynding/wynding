@@ -55,7 +55,8 @@ const latestSpawnTick =
   result.compiled.waves[0]!.countdownTicks + spawns[spawns.length - 1]!.offsetTicks;
 const cells = result.compiled.board.grid.width * result.compiled.board.grid.height;
 // ⌈23 × 3/4⌉ = 18 at the bundle's own ¾ slow floor; the shipped ¼ floor would give 11
-// and a bound of ~52,700, which `compileRuleset` rejects.
+// and a bound of 56,250, which sv16's 36,000 cap rejected (why the floor is ¾) and
+// sv17's 72,000 admits.
 const minEffSpeedFp = Math.ceil(
   (23 * result.compiled.balance.slowFloorNum) / result.compiled.balance.slowFloorDen,
 );

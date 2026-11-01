@@ -19,6 +19,8 @@ import {
   RulesetError,
   SIM_VERSION,
   MAX_MATCH_TICKS,
+  MAX_TOTAL_TOWER_COMMANDS,
+  MAX_TOWER_PLACEMENTS,
   type SimInput,
   type CompiledRuleset,
 } from '@wynding/sim';
@@ -60,22 +62,20 @@ export function currentRulesetHash(bundle: Ruleset): string {
 // the replay loop after only the public, forgeable simVersion/rulesetHash checks, so
 // without bounds a caller could submit millions of ticks (or inputs per tick) to burn
 // CPU until timeout on every request — an unauthenticated compute-exhaustion vector.
-/** Max ticks in a replay log (30 min at 20 Hz), and the hard ceiling the re-simulation
- *  may run to (log + empty catch-up to terminal) — THE SAME constant `compileRuleset`
- *  bounds a bundle's baseline run against — imported, not duplicated, so the two can
- *  never drift into a compiles-but-times-out gap. A ruleset-derived ceiling formula
- *  would only ever saturate to this cap (adversarial build/sell juggling dominates),
- *  so the constant is the honest bound. */
+/** Max ticks in a replay log (one hour at 20 Hz since sv17, 30 min before it), and the
+ *  hard ceiling the re-simulation may run to (log + empty catch-up to terminal) — THE
+ *  SAME constant `compileRuleset` bounds a bundle's baseline run against — imported, not
+ *  duplicated, so the two can never drift into a compiles-but-times-out gap. A
+ *  ruleset-derived ceiling formula would only ever saturate to this cap (adversarial
+ *  build/sell juggling dominates), so the constant is the honest bound. */
 const MAX_TICKS = MAX_MATCH_TICKS;
 /** Max inputs applied on a single tick — far above any legitimate command burst. */
 export const MAX_INPUTS_PER_TICK = 64;
-/**
- * Max tower commands (placeTower/sellTower) across the whole match. Each placeTower
- * that reaches the maze-invariant check runs a full grid-wide Dijkstra, and a rejected
- * placement is a free no-op (no bounty spent), so the economy cannot rate-limit
- * repeats — without this cap an attacker could pack minutes of CPU into one replay.
- */
-const MAX_TOTAL_TOWER_COMMANDS = 1_000;
+// The two tower budgets, both imported from `@wynding/sim` beside `MAX_MATCH_TICKS`:
+// `MAX_TOTAL_TOWER_COMMANDS` (placeTower + sellTower across the whole match, a CPU budget)
+// and `MAX_TOWER_PLACEMENTS` (placeTower alone, the DoT source count the sim's record rail
+// is derived from, issue #77). Their derivations from what legitimate play can issue are
+// recorded at their definitions (`ruleset-shared.ts`).
 
 /** A 64-char lowercase-hex SHA-256 digest. */
 const SHA256_HEX = /^[0-9a-f]{64}$/;
@@ -281,6 +281,7 @@ export function validate(
     };
   }
   let totalTowerCommands = 0;
+  let towerPlacements = 0;
   for (let t = 0; t < replay.tickInputs.length; t++) {
     const inputs = replay.tickInputs[t];
     if (!Array.isArray(inputs)) {
@@ -300,6 +301,12 @@ export function validate(
       const domainError = inputDomainError(input, ruleset);
       if (domainError !== null) {
         return { ok: false, reason: `tick ${t} input ${i}: ${domainError}` };
+      }
+      if (input.kind === 'placeTower' && ++towerPlacements > MAX_TOWER_PLACEMENTS) {
+        return {
+          ok: false,
+          reason: `too many tower placements: exceeds limit ${MAX_TOWER_PLACEMENTS}`,
+        };
       }
       if (
         (input.kind === 'placeTower' || input.kind === 'sellTower') &&

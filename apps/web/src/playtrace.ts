@@ -147,9 +147,10 @@ export function buildPlaytrace(source: PlaytraceSource): Playtrace {
     // an explicit cap; it named the wrong constant). `pendingInputs` is the controller's
     // PER-TICK buffer, which `effectiveCap()` bounds by `MAX_INPUTS_PER_TICK` (64, or 63
     // pre-start with one slot reserved for Start's own wave claim). The run-wide
-    // `MAX_TOTAL_TOWER_COMMANDS` (1,000) counts placeTower/sellTower across a whole match
-    // and is 15x too loose here — a "cap" that can never bind is not a cap, and it would
-    // have let a corrupted buffer through at 999 entries while claiming to be bounded.
+    // `MAX_TOTAL_TOWER_COMMANDS` (2,000 since sv17) counts placeTower/sellTower across a
+    // whole match and is about 30x too loose here — a "cap" that can never bind is not a
+    // cap, and it would have let a corrupted buffer through at 1,999 entries while claiming
+    // to be bounded.
     pendingInputs: (truncated ? pending.slice(0, MAX_INPUTS_PER_TICK) : pending).map(
       serializeInput,
     ),

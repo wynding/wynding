@@ -1020,8 +1020,13 @@ test('supports player-started runs, pause / speed controls, launches wave 1 on S
   const openResults = await new AxeBuilder({ page }).include('#app').analyze();
   expect(openResults.violations, JSON.stringify(openResults.violations, null, 2)).toEqual([]);
 
-  // Dev-verify re-simulates the recorded replay and confirms it matches.
+  // Dev-verify re-simulates the recorded replay and confirms it matches — in a worker the
+  // shipped build emitted as its own chunk (M3 story 2; `verify.spec.ts` has the rest).
+  const verifyWorker = page.waitForEvent('worker');
   await page.getByRole('button', { name: 'Verify this run' }).click();
+  expect(new URL((await verifyWorker).url()).pathname).toMatch(
+    /^\/assets\/verify-worker-[\w-]+\.js$/,
+  );
   await expect(page.locator('.wy-verify')).toContainText('Verified');
 
   // Focus-restore: Play again clears inert and returns focus to the board.

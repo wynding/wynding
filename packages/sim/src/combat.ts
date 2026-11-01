@@ -52,13 +52,15 @@
 //
 // HAZARD, for the next story that touches either budget: a burst consumption changes
 // the tower mask with NO tower command spent, which `MAX_TOTAL_TOWER_COMMANDS` (the
-// replay layer's pathfinding-CPU budget, motivated below) did not previously have to
-// account for. `effectiveField` recomputes a full-board BFS whenever the mask differs,
+// replay validator's pathfinding-CPU budget, `ruleset-shared.ts`) did not previously have
+// to account for. `effectiveField` recomputes a full-board BFS whenever the mask differs,
 // so N `placeTower` commands for `mine` can now force up to 2N recomputes — N at
 // placement, N at detonation. Still bounded (≤1 per tick against `MAX_MATCH_TICKS`, and
 // the server compiles its own board rather than the request's), so it is a budget
-// accounting note rather than a live concern — but the next widening must count
-// detonations. On any budget-conforming board the in-flight slack stays far under the
+// accounting note rather than a live concern. Counted at sv17's widening (M3 story 2): one
+// recompute per command and one per detonated placement, at most
+// `MAX_TOTAL_TOWER_COMMANDS + MAX_TOWER_PLACEMENTS` = 3,000 a match, against 72,000 ticks.
+// On any budget-conforming board the in-flight slack stays far under the
 // `MAX_TOWERS` (1000) cap vs the physical tower capacity, so the cap never bites
 // genuine play; a caller that drives the queue to the cap by abusive sell/rebuild
 // (or place/trigger/place) churn is exactly the forged/DoS case the backstop exists
@@ -79,7 +81,11 @@ import {
   isqrt,
   type CreepGeometry,
 } from './movement';
-import { effectiveSpeedFp, MAX_DOT_DURATION_CADENCE_RATIO } from './ruleset-shared';
+import {
+  effectiveSpeedFp,
+  MAX_DOT_DURATION_CADENCE_RATIO,
+  MAX_TOWER_PLACEMENTS,
+} from './ruleset-shared';
 import {
   MAX_TOWERS,
   forEachValidTower,
@@ -200,8 +206,8 @@ export interface DotRecord {
 
 /**
  * Forged-state / DoS backstop on the resident DoT-record table — the analogue of
- * {@link MAX_IN_FLIGHT_IMPACTS}, expressed the same structural way (a multiple of
- * {@link MAX_TOWERS}, not a bare literal): `applyDot` deterministically drops a NEW-PAIR
+ * {@link MAX_IN_FLIGHT_IMPACTS}, expressed the same structural way (a product of the
+ * budgets it rests on, not a bare literal): `applyDot` deterministically drops a NEW-PAIR
  * application once the table is full. Deliberately NOT a per-creep source cap, which would
  * contradict `docs/CONTEXT.md`'s Status effect entry ("each source's DoT coexists").
  *
@@ -210,11 +216,14 @@ export interface DotRecord {
  * which is what makes this rail derived rather than judged — plus the landing being applied,
  * which still sees the oldest record because impacts resolve in step (1) while expiry runs
  * in step (6), and that is exactly when `applyDot` tests capacity. A re-hit refreshes rather
- * than appends, so it can never add a target. Across sources the count `S` is
- * `min(MAX_TOWERS, MAX_TOTAL_TOWER_COMMANDS)` = 1,000 (see the HAZARD below — sources are
- * minted tower ids, not live towers, since a sold tower's records keep ticking). So the
- * worst legitimate table at a capacity test is `(RATIO+1)*S - 1 = 8,999`, just under the
- * rail: compiled content driven by an accepted replay can REACH it, never EXCEED it.
+ * than appends, so it can never add a target. Across sources the count `S` is bounded by
+ * the validator's placement budget `MAX_TOWER_PLACEMENTS` = 1,000, not by `MAX_TOWERS`:
+ * sources are minted tower ids, not live towers, since a sold tower's records keep
+ * ticking, and only a committed `placeTower` mints one — a sell never adds a source. So the
+ * worst table at a capacity test is under `(RATIO+1)*S = 9,000`: compiled content driven
+ * by an accepted replay can never EXCEED the rail. (Through sv16 `S` was the whole
+ * tower-command budget, which equalled `MAX_TOWERS` by coincidence; sv17 doubled that budget
+ * for juggling and gave placements a budget of their own, so the rail did not move.)
  *
  * Do not widen the duration:cadence gate — nor the aoe-plus-dot rejection beside it, whose
  * blast fan-out breaks the per-source bound — without re-deriving this;
@@ -223,15 +232,15 @@ export interface DotRecord {
  * counter is the tripwire). Too high costs only DoS resistance, since real play never
  * nears the rail.
  *
- * HAZARD (issue #77): only the duration:cadence half is compiler-visible. `packages/sim`
- * does not bound tower-id minting — its placement gate is a live-count check, and
- * build/sell/build mints fresh ids indefinitely — so the SOURCE COUNT rests on
- * `packages/replay`'s `MAX_TOTAL_TOWER_COMMANDS` (1,000). That equals `MAX_TOWERS` by
- * COINCIDENCE, not by binding: it is motivated there as a pathfinding-CPU budget and says
- * nothing about DoT. Raise it to allow longer matches — a change touching nothing in this
- * package — and a replay could mint that many sources and silently drop applications, with
- * no test failing. It cannot be imported here without the layering back-edge AGENTS.md
- * blocks, the same caveat issue #77 records.
+ * HAZARD (issue #77), CLOSED at sv17: `packages/sim` does not bound tower-id minting — its
+ * placement gate is a live-count check, and build/sell/build mints fresh ids indefinitely
+ * — so the SOURCE COUNT rests on the replay validator. Through sv16 it rested on the
+ * tower-command budget, which lived in `packages/replay`, equalled `MAX_TOWERS` by
+ * coincidence and could be raised with no test here failing. It now rests on the placement
+ * budget, which lives in `ruleset-shared.ts`; the validator imports it and this rail is
+ * computed from it, so the two move together, and the command budget can move alone.
+ * Only the duration:cadence half is still a COMPILE gate; the source half is a validator
+ * gate, and a caller that drives `step()` without `validate()` is outside it.
  *
  * Cost evidence, and the limits of that evidence: `packages/perf/src/dot-bench.ts`.
  *
@@ -246,7 +255,7 @@ export interface DotRecord {
  * change owing its own `simVersion` bump. If S5b's stress scene lands anywhere near it, that
  * is a finding to raise, not a constant to nudge.
  */
-export const MAX_DOT_RECORDS = (MAX_DOT_DURATION_CADENCE_RATIO + 1) * MAX_TOWERS;
+export const MAX_DOT_RECORDS = (MAX_DOT_DURATION_CADENCE_RATIO + 1) * MAX_TOWER_PLACEMENTS;
 
 /**
  * Optional per-step event collector (#31): NOT part of `SimState` (never serialized,

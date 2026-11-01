@@ -8,8 +8,10 @@
 // cap was still being chosen — which is how the first draft's 20,000 came to be rejected.
 // It no longer picks the number: PR #78's review derived the rail from the compile-time
 // duration:cadence gate as `(RATIO + 1) × MAX_TOWERS`, and `combat.ts` now states it as
-// DERIVED, not chosen. What remains here is confirmation that the derived rail is not
-// catastrophic — never the justification for its value.
+// DERIVED, not chosen — since sv17 as `(RATIO + 1) × MAX_TOWER_PLACEMENTS`, the replay
+// validator's placement budget, which is what actually bounds DoT sources (issue #77) and
+// keeps the rail where this tool measured it. What remains here is confirmation that the
+// derived rail is not catastrophic — never the justification for its value.
 //
 // A CLI task, not a Vitest test (`run.ts`'s precedent). `packages/perf`'s `test`
 // script runs `vitest run --coverage`, and `scenario.test.ts` already documents why
@@ -348,7 +350,8 @@ function main(): void {
   console.log(
     'This is a MEASUREMENT — read once, by a human, to confirm the DERIVED MAX_DOT_RECORDS ' +
       'is not catastrophic. It does not choose the value: that is fixed by the compile-time ' +
-      'duration:cadence gate as (RATIO + 1) x MAX_TOWERS. Nothing in CI depends on this: ' +
+      "duration:cadence gate and the replay validator's placement budget as " +
+      '(RATIO + 1) x MAX_TOWER_PLACEMENTS. Nothing in CI depends on this: ' +
       'not wired into `pnpm run perf`, `verify`, or any workflow (PLAN step 21).',
   );
 

@@ -440,7 +440,7 @@ describe('bound gate — the terminal-tick budget', () => {
     // the boundary is sharp: C* compiles, C*+1 throws (the previous test neither
     // landed on the boundary nor exercised the rejection).
     let lo = 1;
-    let hi = 36_000;
+    let hi = 72_000;
     while (lo < hi) {
       const mid = Math.ceil((lo + hi + 1) / 2);
       let ok = true;
@@ -454,9 +454,9 @@ describe('bound gate — the terminal-tick budget', () => {
     }
     const maxAccepted = lo;
     // The OPEN test board's traversal term is small but nonzero — the boundary
-    // must sit strictly inside (30_000, 36_000).
-    expect(maxAccepted).toBeGreaterThan(30_000);
-    expect(maxAccepted).toBeLessThan(36_000);
+    // must sit strictly inside (66_000, 72_000).
+    expect(maxAccepted).toBeGreaterThan(66_000);
+    expect(maxAccepted).toBeLessThan(72_000);
     expect(() => compileAtCountdown(maxAccepted)).not.toThrow();
     expect(() => compileAtCountdown(maxAccepted + 1)).toThrow(
       /cannot reach a terminal state within the tick budget/,
@@ -465,13 +465,13 @@ describe('bound gate — the terminal-tick budget', () => {
 
   it("an EARLY wave's tail can be the peak — a schedule whose first-wave tail exceeds the budget is rejected even though later prefixes are tiny", () => {
     // Kills the "last wave wins" mutant: the true peak is
-    // prefix_0 + tail_0 = 100 + 35_900 = 36_000, which with the nonzero traversal
+    // prefix_0 + tail_0 = 100 + 71_900 = 72_000, which with the nonzero traversal
     // term must throw; a no-max formula reads wave 1's 200 and would accept.
     expect(() =>
       compileRuleset(
         testBundle(OPEN, {
           waves: [
-            { waveCount: 1, waveSpacing: 5, countdownTicks: 100, offsetTicks: 35_900 },
+            { waveCount: 1, waveSpacing: 5, countdownTicks: 100, offsetTicks: 71_900 },
             { waveCount: 1, waveSpacing: 5, countdownTicks: 100 },
           ],
         }),
@@ -481,14 +481,16 @@ describe('bound gate — the terminal-tick budget', () => {
   });
 
   it("overlapping tails don't double-count: an early wave's long tail under later countdowns compiles", () => {
-    // countdowns [10k, 10k] with wave 0 carrying a 20k spawn offset: the latest
-    // spawn is max(10k+20k, 20k+0) = 30k — feasible. The superseded
-    // Σcountdowns + maxTail formula would have read 40k and falsely rejected.
+    // countdowns [20k, 20k] with wave 0 carrying a 40k spawn offset: the latest
+    // spawn is max(20k+40k, 40k+0) = 60k — feasible. The superseded
+    // Σcountdowns + maxTail formula would have read 80k and falsely rejected.
+    // (Doubled at sv17 with MAX_MATCH_TICKS: the sv16 schedule's 40k misreading fit
+    // under a 72k cap, so it no longer told the two formulas apart.)
     const ruleset = compileRuleset(
       testBundle(OPEN, {
         waves: [
-          { waveCount: 1, waveSpacing: 5, countdownTicks: 10_000, offsetTicks: 20_000 },
-          { waveCount: 1, waveSpacing: 5, countdownTicks: 10_000 },
+          { waveCount: 1, waveSpacing: 5, countdownTicks: 20_000, offsetTicks: 40_000 },
+          { waveCount: 1, waveSpacing: 5, countdownTicks: 20_000 },
         ],
       }),
       'test',
