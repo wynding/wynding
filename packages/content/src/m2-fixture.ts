@@ -5,11 +5,13 @@
 // build never carries it, and the JSON sits outside `rulesets/`, so no build step copies
 // it next to the shipped artifacts either.
 //
-// The JSON is byte-for-byte the `wynding-core.json` that `p1-m2` shipped, `rulesetId` and
-// all, so M2's mechanism tests, `m2-golden` and every hash pinned against it keep their
-// meaning unchanged: its `rulesetHash` is M2's (`m2-fixture.test.ts` pins it). It must
-// never be edited — a change to the game goes in `rulesets/wynding-core.json`. M2 stays
-// playable from the `p1-m2` tag.
+// The JSON is byte for byte the `wynding-core.json` shipped just before the crossing board
+// replaced it — M2's content in `formatVersion` 3 (`format3-parity.test.ts` proves it plays
+// as `p1-m2`'s format-2 file did), `rulesetId` and all — so M2's mechanism tests, `m2-golden`
+// and every hash pinned against it keep their meaning unchanged: its `rulesetHash` is the
+// one pinned before the move (`parity.test.ts`'s `M2_RULESET_HASH`). It must never be
+// edited — a change to the game goes in `rulesets/wynding-core.json`. M2 stays playable from
+// the `p1-m2` tag.
 //
 // Parsed through the same `parseRulesetJson` the registry uses, then cached frozen — the
 // registry's own posture (`registry.ts`).

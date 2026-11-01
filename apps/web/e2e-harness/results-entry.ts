@@ -6,8 +6,10 @@
 // one through the page — a win takes a ten-wave maze and a boss. So this page plays a proven
 // build script through the REAL controller before the app mounts (`scripted-run.ts`, the
 // content package's greedy rule): `?run=win` plays the content suite's winning showcase build
-// (WINNER_A, won on 10 lives), `?run=loss` its 12-tower prefix (lost on wave 9 of 10). The
-// app then boots on that finished run as `boot()` would — the real scene, the real overlay,
+// (WINNER_A, won on 10 lives), `?run=loss` its 12-tower prefix (lost on wave 9 of 10). Both
+// play the frozen M2 board WINNER_A was built for (M3 story 4: `m2-fixture.ts`, through the
+// controller's content seam), as `controller.test.ts`'s run stats do. The app then boots on
+// that finished run as `boot()` would — the real scene, the real overlay,
 // and `main.ts`'s own requestAnimationFrame scheduler — and opens its results dialog on the
 // first frame, with the run's own numbers. Nothing is forced: the outcome, score, stars and
 // stats are the run's.
@@ -78,9 +80,13 @@ import {
   THIRTY_WAVE_BOARD_ID,
   thirtyWaveBundle,
 } from '../../../packages/replay/src/test-support';
+import { getM2Fixture, M2_BOARD_ID } from '../../../packages/content/src/m2-fixture';
 
 /** The seed WINNER_A is tuned against (`packages/content/src/m2-golden.test.ts`). */
 const SCENARIO_SEED = 0x5eed;
+
+/** The board and waves WINNER_A was built on: M2's, frozen when the crossing board shipped. */
+const M2_CONTENT = { bundle: getM2Fixture(), boardId: M2_BOARD_ID } as const;
 
 const params = new URLSearchParams(window.location.search);
 if (params.get('text') === '200') {
@@ -112,7 +118,7 @@ const surveyTransport: SurveyTransport = {
 /** The run, played one tick short of its end; its last tick plays on the page's first press. */
 function endingOnPress(seed: number): Controller {
   // How many ticks the whole run takes, counted on a throwaway controller.
-  const probe = createController(seed);
+  const probe = createController(seed, M2_CONTENT);
   let ticks = 0;
   playScript(
     {
@@ -124,7 +130,7 @@ function endingOnPress(seed: number): Controller {
     },
     plan,
   );
-  const controller = createController(seed);
+  const controller = createController(seed, M2_CONTENT);
   playScript(controller, plan, ticks - 1);
   if (controller.isTerminal()) throw new Error('results harness: the run ended a tick early');
   // Until the press, time stands still: the app's frame loop advances nothing.
@@ -159,7 +165,7 @@ function endingOnPress(seed: number): Controller {
 /** A run left live at wave 3 (#191's stopped form): with `step`, its tenth `advance` throws, as a
  *  sim step that throws would; otherwise it plays on, until a broken draw or render stops it. */
 function stoppingRun(seed: number, stop: 'step' | 'draw' | 'render'): Controller {
-  const controller = createController(seed);
+  const controller = createController(seed, M2_CONTENT);
   playScript(controller, plan, 1_200); // wave 3 launched, the run live
   if (controller.isTerminal()) throw new Error('results harness: the stopping run ended');
   if (stop !== 'step') return controller;
@@ -320,7 +326,7 @@ createApp(document, root, {
           bundle: thirtyWaveBundle(getBundledRuleset()),
           boardId: THIRTY_WAVE_BOARD_ID,
         })
-      : createController(seed);
+      : createController(seed, M2_CONTENT);
     playScript(controller, plan);
     // The message is also `check:build-layering`'s marker for this module: rename it there too.
     if (!controller.isTerminal()) throw new Error('results harness: the scripted run did not end');
