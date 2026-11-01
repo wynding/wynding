@@ -66,6 +66,8 @@ export interface ReferenceBuild {
  *  the bundle's default board. */
 export interface ReferenceSet {
   readonly id: string;
+  /** The bundle, by the key its loader knows it by: a bundled ruleset's id, or the frozen M2
+   *  bundle's own key (`m2-fixture-key.ts`). */
   readonly rulesetId: string;
   readonly boardId: string;
   readonly seed: number;

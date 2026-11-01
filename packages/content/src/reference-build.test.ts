@@ -5,7 +5,7 @@
 import { describe, it, expect } from 'vitest';
 import { compileRuleset, type CompiledRuleset } from '@wynding/sim';
 import type { Ruleset } from '@wynding/types';
-import { getBundledRuleset } from './registry';
+import { getM2Fixture, M2_BOARD_ID } from './m2-fixture';
 import {
   compileReferenceBuild,
   drawGrid,
@@ -14,7 +14,7 @@ import {
 } from './reference-build';
 import { M2_PINNED_LOSER } from './reference-builds';
 
-const ruleset = compileRuleset(getBundledRuleset('wynding-core'), 'field-01');
+const ruleset = compileRuleset(getM2Fixture(), M2_BOARD_ID); // M2's board, frozen in M3 story 4
 
 /** The board drawn with `towers` (anchor + letter) over it, one string per row. */
 const draw = (towers: readonly (readonly [number, number, string])[]): string[] =>
@@ -64,13 +64,13 @@ describe('the grid reference-build format', () => {
   });
 
   it('rejects a letter whose tower this ruleset’s catalog does not carry', () => {
-    const bundle = getBundledRuleset('wynding-core');
+    const bundle = getM2Fixture();
     const withoutMine: Ruleset = {
       ...bundle,
       towerCatalog: bundle.towerCatalog.filter((t) => t.id !== 'mine'),
     };
     expect(() =>
-      compile(draw([[10, 12, 'm']]), 'm10,12', compileRuleset(withoutMine, 'field-01')),
+      compile(draw([[10, 12, 'm']]), 'm10,12', compileRuleset(withoutMine, M2_BOARD_ID)),
     ).toThrow(/'m' at \(10,12\) names no tower in this ruleset/);
   });
 

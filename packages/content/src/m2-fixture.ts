@@ -14,14 +14,17 @@
 // the `p1-m2` tag.
 //
 // Parsed through the same `parseRulesetJson` the registry uses, then cached frozen — the
-// registry's own posture (`registry.ts`).
+// registry's own posture (`registry.ts`). This is the Vite-side loader (tests, the e2e
+// harness); the balance command, which runs under `tsx`, reads the same file from disk
+// (`balance-artifacts.ts`) under the same key (`m2-fixture-key.ts`).
 
 import type { Ruleset } from '@wynding/types';
 import { parseRulesetJson } from '@wynding/sim';
 import rawM2Core from './fixtures/m2-wynding-core.json?raw';
+import { getBundledRuleset } from './registry';
+import { M2_FIXTURE_KEY } from './m2-fixture-key';
 
-/** The frozen M2 bundle's one board — M1's and M2's board. */
-export const M2_BOARD_ID = 'field-01';
+export { M2_BOARD_ID, M2_FIXTURE_KEY } from './m2-fixture-key';
 
 let cached: Ruleset | undefined;
 
@@ -29,4 +32,11 @@ let cached: Ruleset | undefined;
 export function getM2Fixture(): Ruleset {
   cached ??= parseRulesetJson(rawM2Core);
   return cached;
+}
+
+/** A bundle by the key a reference set names it by: the frozen M2 bundle under its own key,
+ *  any other through the registry. What tests hand the balance report, as the command line
+ *  hands it `loadArtifactRuleset`. */
+export function loadRulesetOrM2Fixture(key: string): Ruleset {
+  return key === M2_FIXTURE_KEY ? getM2Fixture() : getBundledRuleset(key);
 }

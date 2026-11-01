@@ -14,6 +14,7 @@
 //   units  0123456789012345678901234567
 
 import type { ReferenceBuild, ReferenceSet } from './reference-build';
+import { M2_BOARD_ID, M2_FIXTURE_KEY } from './m2-fixture-key';
 
 export const M2_WINNER_A: ReferenceBuild = {
   id: 'm2-winner-a',
@@ -125,11 +126,12 @@ export const M2_PINNED_LOSER: ReferenceBuild = {
   `,
 };
 
-/** M2's showcase on its own board — the calibration set. */
+/** M2's showcase on its own board — the calibration set. Since M3 story 4 M2's board and
+ *  waves are no longer shipped: the set runs on the frozen M2 bundle, by its own key. */
 export const M2_SHOWCASE: ReferenceSet = {
   id: 'm2-showcase',
-  rulesetId: 'wynding-core',
-  boardId: 'field-01',
+  rulesetId: M2_FIXTURE_KEY,
+  boardId: M2_BOARD_ID,
   seed: 0x5eed,
   builds: [M2_WINNER_A, M2_WINNER_B, M2_PINNED_LOSER],
 };

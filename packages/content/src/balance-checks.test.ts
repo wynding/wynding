@@ -6,7 +6,7 @@
 import { describe, it, expect } from 'vitest';
 import { compileRuleset, createInitialState, type SimState } from '@wynding/sim';
 import type { Cell } from '@wynding/types';
-import { getBundledRuleset } from './registry';
+import { getM2Fixture, M2_BOARD_ID } from './m2-fixture';
 import { runReferenceBuild, type BuildRun } from './balance-run';
 import { compileReferenceBuild, drawGrid, type ReferenceBuild } from './reference-build';
 import {
@@ -21,7 +21,7 @@ import {
   totalScheduledSpawns,
 } from './balance-checks';
 
-const ruleset = compileRuleset(getBundledRuleset('wynding-core'), 'field-01');
+const ruleset = compileRuleset(getM2Fixture(), M2_BOARD_ID); // M2's board, frozen in M3 story 4
 const initial = createInitialState(0x5eed, ruleset);
 
 /** A measured run with only the fields a check reads set. */

@@ -69,7 +69,6 @@ import { inProcessVerifier } from '../src/verifier';
 import { playScript } from '../src/scripted-run';
 import type { Controller } from '../src/controller';
 import { MS_PER_TICK } from '@wynding/sim';
-import { getBundledRuleset } from '@wynding/content';
 import type { SurveyAsk, SurveyTransport } from '../src/survey';
 import { mount } from '@wynding/render/scene';
 // Reached by relative path, as `apps/server`'s replay-parity test does: the content
@@ -323,7 +322,7 @@ createApp(document, root, {
     if (params.get('endOnPress') === '1') return endingOnPress(seed);
     const controller = long
       ? createController(seed, {
-          bundle: thirtyWaveBundle(getBundledRuleset()),
+          bundle: thirtyWaveBundle(getM2Fixture()),
           boardId: THIRTY_WAVE_BOARD_ID,
         })
       : createController(seed, M2_CONTENT);

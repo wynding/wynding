@@ -736,9 +736,9 @@ describe('controller — replay recording, terminal truncation & verify', () => 
     async () => {
       // The verifier runs in a worker and answers later. Play again can reset the controller in
       // between; the answer must still be about the run that was verified. A WON run (the
-      // showcase build, on the seed it is tuned against), so its score and stars are nonzero and
-      // a read after the reset could not pass for one before it.
-      const c = createController(0x5eed);
+      // showcase build, on the seed and the frozen M2 board it is tuned against), so its score
+      // and stars are nonzero and a read after the reset could not pass for one before it.
+      const c = createController(0x5eed, M2_CONTENT);
       expect(playScript(c, WINNER_A)).toBe(40);
       expect(c.isTerminal()).toBe(true);
       const liveScore = c.hud().score;
