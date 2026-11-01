@@ -233,5 +233,6 @@
   "tower.venom.short": "Venom",
   "verify.fail": "Verification failed: {reason}",
   "verify.mismatch": "Verification mismatch: the replay re-simulated to a different outcome.",
-  "verify.ok": "Verified: replay re-simulated to the same outcome."
+  "verify.ok": "Verified: replay re-simulated to the same outcome.",
+  "verify.running": "Verifying this run…"
 }

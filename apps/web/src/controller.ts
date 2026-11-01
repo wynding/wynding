@@ -48,8 +48,9 @@ import {
   type TracerVM,
 } from '@wynding/render';
 import { markFlyerSparks, noteTowerless, stepOutcome } from './combat-events';
-import { validate, currentRulesetHash, MAX_INPUTS_PER_TICK, type Replay } from '@wynding/replay';
+import { currentRulesetHash, MAX_INPUTS_PER_TICK, type Replay } from '@wynding/replay';
 import { getBundledRuleset, defaultBoardId, type Ruleset } from '@wynding/content';
+import type { Verifier } from './verifier';
 
 export type Speed = 1 | 2;
 
@@ -350,8 +351,11 @@ export interface Controller {
    *  the replay validator's terminal `finalHash`. `pendingInputs` is a frozen clone of
    *  the current tick's buffer — commands issued but not yet committed. */
   capture(): CaptureSnapshot;
-  /** Dev-only: re-simulate the recorded log and confirm it reproduces the live score. */
-  verifyRun(): VerifyResult;
+  /** Re-simulate the recorded log through `verify` and confirm it reproduces the live
+   *  outcome. Everything it compares against — the replay, the live score, stars and final
+   *  hash — is read when it is CALLED, so a run reset while `verify` works (Play again)
+   *  cannot change the answer. Rejects only if `verify` does: it could not run at all. */
+  verifyRun(verify: Verifier): Promise<VerifyResult>;
   /** The run's numbers for the results panel (#181 H2), read from the COMMITTED state (a
    *  pending build is not a tower yet). Meaningful at any boundary; the panel reads it once,
    *  at the terminal transition. */
@@ -1684,17 +1688,19 @@ export function createController(
       // consumer holding the capture must not be able to reach into the next step().
       pendingInputs: freezeRecorded(buffer),
     }),
-    verifyRun(): VerifyResult {
+    async verifyRun(verify: Verifier): Promise<VerifyResult> {
       // Terminal guard: validate() completes an unfinished log with empty ticks, so a
       // mid-run call would otherwise report a misleading hash/score mismatch. A distinct
       // not-terminal outcome — no mismatch claim, no mismatch message.
       if (!isTerminalPhase(state.phase)) return { ok: false, reason: 'not-terminal' };
+      // Read BEFORE the first await: `verify` runs off the main thread (M3 story 2), and
+      // the live state is free to move on — or be reset by Play again — while it works.
       const replay = doBuildReplay();
-      const result = validate(replay, bundle);
-      if (!result.ok) return { ok: false, reason: result.reason };
       const liveScore = deriveScore(state, ruleset);
       const liveStars = deriveStars(state, ruleset);
       const liveFinalHash = hashSimState(state);
+      const result = await verify(replay, bundle);
+      if (!result.ok) return { ok: false, reason: result.reason };
       return {
         ok: true,
         score: result.score,

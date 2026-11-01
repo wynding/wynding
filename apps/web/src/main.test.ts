@@ -55,6 +55,7 @@ import {
   type Scheduler,
 } from './main';
 import { createController, type Controller } from './controller';
+import { inProcessVerifier, type Verifier } from './verifier';
 import { MAX_RECENT_AGE_MS } from './playtrace';
 import { validateSurveyPayload, type SurveyPayload } from '@wynding/feedback';
 import { type SurveyAsk, type SurveySendResult, type SurveyTransport } from './survey';
@@ -217,7 +218,7 @@ describe('main — createApp wiring & frame loop', () => {
     expect(connected).toEqual([true]);
   });
 
-  it('routes control buttons and reaches a results screen, verify, and play-again', () => {
+  it('routes control buttons and reaches a results screen, verify, and play-again', async () => {
     const root = document.createElement('div');
     document.body.appendChild(root);
     const sched = manualSchedule();
@@ -227,6 +228,7 @@ describe('main — createApp wiring & frame loop', () => {
       schedule: sched.schedule,
       now: () => clock,
       seed: 7,
+      verifier: inProcessVerifier,
     });
     openApps.push(app); // torn down even if an assertion throws first
 
@@ -289,7 +291,11 @@ describe('main — createApp wiring & frame loop', () => {
     named('Run data').click();
     expect(verify.closest('[hidden]')).toBeNull();
     verify.click();
-    expect(root.querySelector('.wy-verify')!.textContent).toContain('Verified');
+    // Verify answers asynchronously (M3 story 2): it says so at once, then the answer lands.
+    expect(root.querySelector('.wy-verify')!.textContent).toBe('Verifying this run…');
+    await vi.waitFor(() =>
+      expect(root.querySelector('.wy-verify')!.textContent).toContain('Verified'),
+    );
 
     playAgain.click();
     expect(results.hidden).toBe(true);
@@ -3082,7 +3088,10 @@ describe('main — hardware Back never exits out from under work (#138)', () => 
 
 describe('main — the playtrace capture and its export actions (#133)', () => {
   /** An app wired with an inspectable delivery and a pinned `runId` mint. */
-  function playtraceApp(runIds: string[] = ['run-1', 'run-2', 'run-3']) {
+  function playtraceApp(
+    runIds: string[] = ['run-1', 'run-2', 'run-3'],
+    verifier: Verifier = inProcessVerifier,
+  ) {
     const root = document.createElement('div');
     document.body.appendChild(root);
     const sched = manualSchedule();
@@ -3104,6 +3113,7 @@ describe('main — the playtrace capture and its export actions (#133)', () => {
       now: () => clock,
       seed: 1,
       mintRunId: () => runIds[minted++] ?? `run-overflow-${String(minted)}`,
+      verifier,
       playtraceDelivery: {
         copy: async (text: string) => {
           const queued = copyGateQueue.shift();
@@ -3143,6 +3153,7 @@ describe('main — the playtrace capture and its export actions (#133)', () => {
       return btn;
     };
     return {
+      app,
       root,
       results,
       copied,
@@ -3289,11 +3300,91 @@ describe('main — the playtrace capture and its export actions (#133)', () => {
     h.resultsButton('Copy run data').click();
     const verify = h.resultsButton('Verify this run');
     verify.click();
+    await vi.waitFor(() => expect(h.status()).toContain('Verified'));
     const afterVerify = h.status();
-    expect(afterVerify).not.toBe('');
     releaseCopy(true);
     await vi.waitFor(() => expect(h.copyGateSettled()).toBe(true));
     expect(h.status(), 'a stale copy overwrote the verify announcement').toBe(afterVerify);
+  });
+
+  /** A verifier that holds each verification until the test answers it (M3 story 2: the
+   *  shipped one runs in a worker, so an answer always arrives later than the press). */
+  function heldVerifier() {
+    const calls: {
+      signal: AbortSignal | undefined;
+      answer: () => void;
+      fail: (e: Error) => void;
+    }[] = [];
+    const verifier: Verifier = (replay, bundle, signal) =>
+      new Promise((resolve, reject) => {
+        calls.push({
+          signal,
+          answer: () => void inProcessVerifier(replay, bundle).then(resolve),
+          fail: reject,
+        });
+      });
+    return { verifier, calls };
+  }
+
+  it('Verify says it is verifying at once, and the answer replaces that when it lands (M3 story 2)', async () => {
+    const held = heldVerifier();
+    const h = playtraceApp(undefined, held.verifier);
+    h.resolve();
+    h.resultsButton('Verify this run').click();
+    expect(h.status()).toBe('Verifying this run…');
+    expect(held.calls).toHaveLength(1);
+    // The page is not waiting on it: frames keep running and other actions still answer.
+    h.frame();
+    h.resultsButton('Save run data').click();
+    expect(h.status()).toMatch(/^Run data saved as /);
+    h.resultsButton('Verify this run').click(); // re-claims the region, JOINS the running one
+    expect(h.status()).toBe('Verifying this run…');
+    expect(held.calls, 'a second press joins, never starts another').toHaveLength(1);
+    held.calls[0]!.answer();
+    await vi.waitFor(() =>
+      expect(h.status()).toBe('Verified: replay re-simulated to the same outcome.'),
+    );
+    // Once answered, the next press verifies afresh, as a synchronous Verify always did.
+    h.resultsButton('Verify this run').click();
+    expect(held.calls).toHaveLength(2);
+  });
+
+  it('a verification that cannot run says it failed, with the reason', async () => {
+    const held = heldVerifier();
+    const h = playtraceApp(undefined, held.verifier);
+    h.resolve();
+    h.resultsButton('Verify this run').click();
+    held.calls[0]!.fail(new Error('the verify worker failed'));
+    await vi.waitFor(() =>
+      expect(h.status()).toBe('Verification failed: the verify worker failed'),
+    );
+  });
+
+  it('Play again stops a verification still running, and its answer never reaches the next run', async () => {
+    const held = heldVerifier();
+    const h = playtraceApp(undefined, held.verifier);
+    h.resolve();
+    h.resultsButton('Verify this run').click();
+    const first = held.calls[0]!;
+    expect(first.signal?.aborted).toBe(false);
+    h.resultsButton('Play again').click();
+    expect(first.signal?.aborted, 'the worker is told to stop').toBe(true);
+    first.fail(new Error('aborted')); // what an abandoned worker verifier does
+    h.resolve(); // the next run's dialog
+    await Promise.resolve();
+    expect(h.status(), 'nothing from the last run lands here').toBe('');
+    // ...and its own Verify starts its own verification.
+    h.resultsButton('Verify this run').click();
+    expect(held.calls).toHaveLength(2);
+  });
+
+  it('destroy() stops a verification still running', () => {
+    const held = heldVerifier();
+    const h = playtraceApp(undefined, held.verifier);
+    h.resolve();
+    h.resultsButton('Verify this run').click();
+    h.app.destroy();
+    expect(held.calls[0]!.signal?.aborted).toBe(true);
   });
 
   it('says a refused clipboard FAILED rather than looking like a press that did nothing', async () => {
@@ -3584,6 +3675,7 @@ describe('main — the end-of-run survey (#158, ADR 0014)', () => {
       gameVersion: GAME_VERSION,
       ...(options.transport === false ? {} : { surveyTransport: transport, surveyAsk: ask }),
       playtraceDelivery: { copy: async () => {}, save: () => {} },
+      verifier: inProcessVerifier,
     });
     openApps.push(app);
     const results = root.querySelector<HTMLElement>('.wy-results')!;

@@ -12,6 +12,7 @@ import {
   type RunStats,
 } from './controller';
 import { playScript, type ScriptedPlacement } from './scripted-run';
+import { inProcessVerifier, type Verifier } from './verifier';
 // The content package's showcase build and its shared greedy runner, reached by relative path
 // as `apps/server/src/replay-parity.test.ts` does (its header says why: the package's
 // `exports` map has no subpath for test support). Imported, never copied, so these tests
@@ -656,7 +657,7 @@ describe('controller — outcomesMatch classifier (unit, #41)', () => {
 });
 
 describe('controller — replay recording, terminal truncation & verify', () => {
-  it('the recorded log is deeply immutable — commands and nested anchors are frozen clones', () => {
+  it('the recorded log is deeply immutable — commands and nested anchors are frozen clones', async () => {
     const c = createController(7);
     c.start(); // PLAN.md P4: advance() no-ops while held
     c.armTower('basic');
@@ -676,23 +677,28 @@ describe('controller — replay recording, terminal truncation & verify', () => 
       (place.anchor as { col: number }).col = 99;
     }).toThrow(TypeError);
     runToTerminal(c);
-    expect(c.verifyRun().ok).toBe(true);
+    expect((await c.verifyRun(inProcessVerifier)).ok).toBe(true);
   });
 
-  it('verifyRun() mid-run (non-terminal) reports a distinct not-terminal outcome, never a mismatch (#41)', () => {
+  it('verifyRun() mid-run (non-terminal) reports a distinct not-terminal outcome, never a mismatch (#41)', async () => {
     const c = createController(7);
     c.start(); // PLAN.md P4: advance() no-ops while held
     c.armTower('basic');
     c.aimAt(3, 3);
     c.confirm();
     tick(c);
-    const v = c.verifyRun();
+    let asked = false;
+    const v = await c.verifyRun(() => {
+      asked = true;
+      return inProcessVerifier(c.buildReplay(), getBundledRuleset());
+    });
     expect(v.ok).toBe(false);
     expect(v.reason).toBe('not-terminal');
     expect(v.matchedLive).toBeUndefined(); // never a mismatch claim for a live match
+    expect(asked, 'a live run is never sent to the verifier').toBe(false);
   });
 
-  it('records a validating log that stops at the terminal transition and reproduces the score', () => {
+  it('records a validating log that stops at the terminal transition and reproduces the score', async () => {
     const c = createController(7);
     c.start(); // PLAN.md P4: advance() no-ops while held
     const elapsed = runToTerminal(c);
@@ -710,10 +716,52 @@ describe('controller — replay recording, terminal truncation & verify', () => 
     expect(result.ok).toBe(true);
 
     // The dev-verify self-check re-simulates to the same score/stars the HUD showed.
-    const v = c.verifyRun();
+    const v = await c.verifyRun(inProcessVerifier);
     expect(v.ok).toBe(true);
     expect(v.matchedLive).toBe(true);
     expect(v.score).toBe(c.hud().score);
+  });
+
+  it('verifyRun() reads the run when it is called, not when the verifier answers (M3 story 2)', async () => {
+    // The verifier runs in a worker and answers later. Play again can reset the controller in
+    // between; the answer must still be about the run that was verified.
+    const c = createController(7);
+    c.start();
+    runToTerminal(c);
+    const liveScore = c.hud().score;
+    let answer: (() => void) | undefined;
+    const held: Verifier = (replay, bundle) =>
+      new Promise((resolve) => {
+        answer = () => {
+          void inProcessVerifier(replay, bundle).then(resolve);
+        };
+      });
+    const pending = c.verifyRun(held);
+    c.startRun(99); // a fresh run: the live state is gone
+    expect(c.isTerminal()).toBe(false);
+    answer!();
+    const v = await pending;
+    expect(v.ok).toBe(true);
+    expect(v.matchedLive).toBe(true);
+    expect(v.score).toBe(liveScore);
+  });
+
+  it('verifyRun() passes a failed validation through as its reason, and a verifier that cannot run as a rejection', async () => {
+    const c = createController(7);
+    c.start();
+    runToTerminal(c);
+    const refused = await c.verifyRun(() =>
+      Promise.resolve({ ok: false, reason: 'sim version mismatch: replay=1 runtime=2' }),
+    );
+    expect(refused).toEqual({ ok: false, reason: 'sim version mismatch: replay=1 runtime=2' });
+    // Same score and stars, a different world: a mismatch, never a pass (#41).
+    const real = await inProcessVerifier(c.buildReplay(), getBundledRuleset());
+    const diverged = await c.verifyRun(() => Promise.resolve({ ...real, finalHash: '0' }));
+    expect(diverged.ok).toBe(true);
+    expect(diverged.matchedLive).toBe(false);
+    await expect(c.verifyRun(() => Promise.reject(new Error('no worker')))).rejects.toThrow(
+      'no worker',
+    );
   });
 
   it('offers no sell refund once the match is terminal (preview mirrors the frozen step)', () => {
