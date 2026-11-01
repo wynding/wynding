@@ -47,12 +47,6 @@ import { fnv1a, withoutDestination } from './test-digest';
 /** Shared fixed seed for both pinned scenarios. */
 const SCENARIO_SEED = 0x5eed;
 
-/** Run steps of the bundled ruleset from a fresh state, seeded and driven by
- *  `inputs`, continuing while `continueWhile(tick, state)` holds. Returns the
- *  terminal state and the per-tick world-hash trace. `probe`, if given, is called
- *  with the post-step state on every tick — used to observe transient per-tick
- *  facts (e.g. a slow status landing) that the terminal state alone cannot prove
- *  (Codex R2-3). */
 /** A scenario's final state and per-tick hash trace — plus the same trace of the state
  *  minus M3 story 3's `destination` column, which must reproduce every pin from before
  *  that column existed. */
@@ -62,6 +56,12 @@ interface ScenarioRun {
   readonly traceWithoutDestination: string[];
 }
 
+/** Run steps of the bundled ruleset from a fresh state, seeded and driven by
+ *  `inputs`, continuing while `continueWhile(tick, state)` holds. Returns the
+ *  terminal state and the per-tick world-hash traces (`ScenarioRun`). `probe`, if
+ *  given, is called with the post-step state on every tick — used to observe transient
+ *  per-tick facts (e.g. a slow status landing) that the terminal state alone cannot
+ *  prove (Codex R2-3). */
 function runScenario(
   inputs: (tick: number) => SimInput[],
   continueWhile: (tick: number, state: SimState) => boolean,

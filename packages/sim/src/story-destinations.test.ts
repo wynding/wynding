@@ -658,7 +658,14 @@ describe('step rebuilds EVERY destination’s field on a maze change — placeme
      *  from the one the field BEFORE that change would have given — the rebuild steered
      *  them. Proves each scenario genuinely exercises each destination's rebuild. */
     readonly steered: readonly (readonly number[])[];
-    readonly changeTicks: readonly number[];
+    /** Every maze change: its tick, the tower cells blocked before and after it, and the
+     *  towers standing once that tick's `step` is done. */
+    readonly changes: readonly {
+      readonly tick: number;
+      readonly cellsBefore: number;
+      readonly cellsAfter: number;
+      readonly towersAfter: number;
+    }[];
   }
 
   /**
@@ -691,7 +698,13 @@ describe('step rebuilds EVERY destination’s field on a maze change — placeme
     const s = createInitialState(TEST_RNG_SEED, ruleset);
     const checked = ruleset.board.fields.map(() => 0);
     const steered: number[][] = [];
-    const changeTicks: number[] = [];
+    const changes: {
+      tick: number;
+      cellsBefore: number;
+      cellsAfter: number;
+      towersAfter: number;
+    }[] = [];
+    const cells = (mask: Uint8Array): number => mask.reduce((n, v) => n + (v === 0 ? 0 : 1), 0);
     let prev: { mask: Uint8Array; fields: DistanceField[] } | null = null;
     let stale: DistanceField[] | null = null;
     for (let t = 0; t < ticks && s.phase === 'running'; t++) {
@@ -699,10 +712,16 @@ describe('step rebuilds EVERY destination’s field on a maze change — placeme
       const { preview } = previewInputs(s, ruleset, inputs);
       const mask = materializeTowerMask(grid, preview.towers, ruleset.towerById);
       const fields = ruleset.board.fields.map((f) => computeDistanceField(grid, f.exit, mask));
-      if (prev !== null && !sameMask(prev.mask, mask)) {
-        changeTicks.push(s.tick);
+      const changed = prev !== null && !sameMask(prev.mask, mask);
+      if (changed) {
+        changes.push({
+          tick: s.tick,
+          cellsBefore: cells(prev!.mask),
+          cellsAfter: cells(mask),
+          towersAfter: -1, // filled in once this tick's step is done
+        });
         steered.push(fields.map(() => 0));
-        stale = prev.fields;
+        stale = prev!.fields;
       }
       // Each creep's segment as this tick's movement will find it.
       const before = new Map<
@@ -729,6 +748,7 @@ describe('step rebuilds EVERY destination’s field on a maze change — placeme
         });
       }
       step(s, ruleset, inputs);
+      if (changed) changes[changes.length - 1]!.towersAfter = s.towers.id.length;
       const c = s.creeps;
       for (let i = 0; i < c.id.length; i++) {
         if (c.creepId[i] !== 'normal') continue; // ground only
@@ -769,7 +789,18 @@ describe('step rebuilds EVERY destination’s field on a maze change — placeme
       }
       prev = { mask, fields };
     }
-    return { state: s, checked, steered, changeTicks };
+    return { state: s, checked, steered, changes };
+  }
+
+  /** Every maze change in `run` went from one NON-EMPTY tower mask to a different non-empty
+   *  one, with a tower still standing after it — so `step` derived the new fields through
+   *  `effectiveFields` (index.ts), never its no-tower shortcut to the board's own fields. */
+  function expectNonEmptyToNonEmpty(run: FollowRun): void {
+    for (const ch of run.changes) {
+      expect(ch.cellsBefore, `tick ${ch.tick}: the mask before`).toBeGreaterThan(0);
+      expect(ch.cellsAfter, `tick ${ch.tick}: the mask after`).toBeGreaterThan(0);
+      expect(ch.towersAfter, `tick ${ch.tick}: towers standing`).toBeGreaterThanOrEqual(1);
+    }
   }
 
   // Long, tough streams on both routes, so creeps of each destination are always about
@@ -778,20 +809,31 @@ describe('step rebuilds EVERY destination’s field on a maze change — placeme
     { creepId: 'normal', entrance: 'west', count: 8, spacingTicks: 15 },
     { creepId: 'normal', entrance: 'north', count: 8, spacingTicks: 15, offsetTicks: 5 },
   ];
-  const TOUGH = compileRuleset(crossingBundle(STREAMS, { creepHp: 1_000_000 }), 'crossing');
+  // A FRESH compile per test: the field cache is keyed on the compiled board, so a shared
+  // ruleset would let one test's last cached mask serve the next test's first change.
+  const tough = (towers?: readonly TowerDef[]): CompiledRuleset =>
+    compileRuleset(crossingBundle(STREAMS, { creepHp: 1_000_000, towers }), 'crossing');
+  // A BYSTANDER tower, off both lines (cols 1-2, rows 7-8), standing from tick 0 to the
+  // end of every leg: no maze change below ever starts or ends on an empty board, so `step`
+  // reaches every one through `effectiveFields`, never its no-tower shortcut.
+  const BYSTANDER = place(1, 7);
+  const START: SimInput[] = [{ kind: 'callWaveEarly' }, BYSTANDER];
   // One tower on each stream's line, clear of the crossing and of every creep at tick 20:
   // (8,3) blocks row 4 at cols 8-9 (the west → east line); (5,6) blocks col 5 at rows 6-7
   // (the north → south line). Neither seals anything.
   const ON_BOTH_LINES = [place(8, 3), place(5, 6)];
+  const isBystander = (s: SimState, i: number): boolean =>
+    s.towers.col[i] === 1 && s.towers.row[i] === 7;
 
   it('a PLACEMENT re-routes both destinations’ creeps from the next movement step', () => {
     const run = runFollowing(
-      TOUGH,
-      (s) => (s.tick === 0 ? [{ kind: 'callWaveEarly' }] : s.tick === 20 ? ON_BOTH_LINES : []),
+      tough(),
+      (s) => (s.tick === 0 ? START : s.tick === 20 ? ON_BOTH_LINES : []),
       3_000,
     );
-    expect(run.changeTicks).toEqual([20]);
-    expect(run.state.towers.id).toHaveLength(2);
+    expect(run.changes.map((ch) => ch.tick)).toEqual([20]);
+    expectNonEmptyToNonEmpty(run);
+    expect(run.state.towers.id).toHaveLength(3);
     expect(run.checked.every((n) => n > 0)).toBe(true);
     expect(run.steered[0]![EAST_FIELD]).toBeGreaterThan(0);
     expect(run.steered[0]![SOUTH_FIELD]).toBeGreaterThan(0);
@@ -799,17 +841,23 @@ describe('step rebuilds EVERY destination’s field on a maze change — placeme
 
   it('a SELL that reopens both lines re-routes both destinations back', () => {
     const run = runFollowing(
-      TOUGH,
+      tough(),
       (s) => {
-        if (s.tick === 0) return [{ kind: 'callWaveEarly' }];
+        if (s.tick === 0) return START;
         if (s.tick === 20) return ON_BOTH_LINES;
-        if (s.tick === 120) return s.towers.id.map((id) => ({ kind: 'sellTower', tower: id }));
+        if (s.tick === 120) {
+          // Sell the two line towers; the bystander stays.
+          return s.towers.id.flatMap((id, i) =>
+            isBystander(s, i) ? [] : [{ kind: 'sellTower' as const, tower: id }],
+          );
+        }
         return [];
       },
       3_000,
     );
-    expect(run.changeTicks).toEqual([20, 120]);
-    expect(run.state.towers.id).toHaveLength(0);
+    expect(run.changes.map((ch) => ch.tick)).toEqual([20, 120]);
+    expectNonEmptyToNonEmpty(run);
+    expect(run.state.towers.id).toHaveLength(1); // the bystander
     expect(run.steered[1]![EAST_FIELD]).toBeGreaterThan(0);
     expect(run.steered[1]![SOUTH_FIELD]).toBeGreaterThan(0);
   });
@@ -818,19 +866,15 @@ describe('step rebuilds EVERY destination’s field on a maze change — placeme
     // The mine sits on the north → south line; the north creeps detouring round it set it
     // off (trigger 576 fp from its footprint's centre), and it is consumed — a maze change
     // no command made.
-    const mined = compileRuleset(
-      crossingBundle(STREAMS, { creepHp: 1_000_000, towers: [TEST_TOWER, TEST_BURST_TOWER] }),
-      'crossing',
-    );
     const run = runFollowing(
-      mined,
-      (s) =>
-        s.tick === 0 ? [{ kind: 'callWaveEarly' }] : s.tick === 20 ? [place(5, 6, 'mine')] : [],
+      tough([TEST_TOWER, TEST_BURST_TOWER]),
+      (s) => (s.tick === 0 ? START : s.tick === 20 ? [place(5, 6, 'mine')] : []),
       3_000,
     );
-    expect(run.changeTicks).toHaveLength(2); // the placement, then the detonation
-    expect(run.changeTicks[0]).toBe(20);
-    expect(run.state.towers.id).toHaveLength(0); // consumed
+    expect(run.changes).toHaveLength(2); // the placement, then the detonation
+    expect(run.changes[0]!.tick).toBe(20);
+    expectNonEmptyToNonEmpty(run);
+    expect(run.state.towers.id).toHaveLength(1); // the mine consumed; the bystander stands
     expect(run.steered[0]![SOUTH_FIELD]).toBeGreaterThan(0); // around the mine…
     expect(run.steered[1]![SOUTH_FIELD]).toBeGreaterThan(0); // …and straight again after it
   });

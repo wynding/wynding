@@ -16,8 +16,10 @@
 // is byte-comparable with the format-2 hash. Everything else is in the comparison.
 //
 // `m2-golden.test.ts` itself re-pins at story 3's `SIM_VERSION` bump (the destination
-// column enters the world hash); this file never does. If it goes red, format 3 changed
-// how `field-01` plays — a defect, not a re-pin.
+// column enters the world hash); this file does not. While story 3 is the newest change
+// to these hashes, red here means format 3 changed how `field-01` plays — a defect, not a
+// re-pin. The next change that legitimately moves this run re-measures the reference
+// below or deletes this file: it proves story 3's parity, not a permanent one.
 
 import { describe, it, expect } from 'vitest';
 import { compileRuleset, hashSimState, deriveScore, deriveStars } from '@wynding/sim';
@@ -30,7 +32,8 @@ import { fnv1a, withoutDestination } from './test-digest';
 const SCENARIO_SEED = 0x5eed;
 
 /** The format-2 run of WINNER A over `field-01` (sv16, measured on `main` at 3d8d410,
- *  before any story-3 change). Frozen: a historical record, never re-measured. */
+ *  before any story-3 change) — re-measured or deleted, never patched, at the next change
+ *  that moves the run (see the header). */
 const FORMAT2_REFERENCE = {
   traceHashDigest: 'bb093415',
   finalStateHash: '34cb27bf',

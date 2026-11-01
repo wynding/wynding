@@ -241,7 +241,10 @@ const GOLDEN = {
 // -------------------------------------------------------------------------------
 
 /** The golden as it stood before M3 story 3's `destination` creep column — the values
- *  `withoutDestination(state)` must still hash to. Frozen: a record, never re-pinned. */
+ *  `withoutDestination(state)` must still hash to. It proves THAT change was hash-only,
+ *  and nothing later: the next change that moves these hashes re-measures it (if a
+ *  column-free comparison still means something then) or deletes it, like every other
+ *  `withoutDestination` pin in the sim and content suites. */
 const GOLDEN_BEFORE_DESTINATION = {
   finalHash: 'd93528da',
   traceDigest: '442f4adb',

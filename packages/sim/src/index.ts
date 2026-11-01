@@ -270,11 +270,11 @@ function coerceSoa(state: SimState, ruleset: CompiledRuleset, mode: CoerceMode):
   if (!Array.isArray(c.slowUntilTick)) c.slowUntilTick = [];
   if (!Array.isArray(c.stunUntilTick)) c.stunUntilTick = [];
   // A state with no `destination` column at all — a snapshot taken before the column
-  // existed — therefore loses every creep below. That is not a resume path, by design:
-  // ADR 0008 §4 makes a snapshot resumable only under its own `simVersion`, so the
-  // resume identity check discards such a snapshot before it ever reaches `step`, and
-  // replay's strict version equality rejects a log from an earlier version by name
-  // (`replay.test.ts`). Here it is simply a forged state, coerced like any other.
+  // existed — therefore loses every creep below. No resume path exists (ADR 0008 §3: no
+  // mid-run resume at MVP), and ADR 0008 §4 binds the future one to check a snapshot's
+  // `simVersion` before it reaches `step`; replay's strict version equality already
+  // rejects a log from any other version. Here it is simply a forged state, coerced like
+  // any other — never a throw (ADR 0006 §4).
   if (!Array.isArray(c.destination)) c.destination = [];
 
   const waveCount = ruleset.waves.length;
