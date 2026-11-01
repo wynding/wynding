@@ -11,24 +11,27 @@ import { openResults, toggleOf } from './results-harness';
 // the page keeps drawing frames while it works, and that a worker that cannot load ends the
 // verification instead of leaving "Verifying" up for good.
 //
-// The frame-gap checks run on the harness's synthetic 30-wave run (`?run=long`), the length M3
-// moved Verify off the main thread for; the failure paths on its M2 win (`?run=win`), which
-// opens sooner. The dialog opens on the finished run either way.
+// The frame-gap check verifies the harness's synthetic 30-wave run (`?run=long`), the length M3
+// moved Verify off the main thread for, once in the worker and once on the main thread, and
+// compares the two; the failure paths use its M2 win (`?run=win`), which opens sooner. The
+// dialog opens on the finished run either way.
 
 const VERIFYING = 'Verifying this run…';
 const VERIFIED = 'Verified: replay re-simulated to the same outcome.';
 const COULD_NOT_START = 'Verification failed: the verifier could not start';
 
-/** The longest the page may go without a frame while the worker verifies the 30-wave run. Measured
- *  on an M-series Mac with two Playwright workers (eight runs, M3 story 2): 15–30 ms, so this
- *  is four times the worst of them, headroom for a loaded CI runner. */
-const WORKER_MAX_GAP_MS = 120;
+/** How many times shorter than a main-thread Verify's longest frame gap the worker's must be. The
+ *  check is RELATIVE because both arms run in one test, on one machine, back to back: a loaded CI
+ *  runner (SwiftShader, parallel workers) slows both, and only the ratio says whether the worker
+ *  kept the page drawing. Measured on an M-series Mac with two Playwright workers (eight runs
+ *  each, M3 story 2): worker 15–30 ms, main thread 425–624 ms, a ratio of 14 or more. The
+ *  worker's gap includes the main thread's own share — building the replay and copying it into
+ *  the worker — which is why the bar is 4, not the measured ratio. */
+const MIN_GAP_RATIO = 4;
 
-/** The least the control's main-thread Verify of the same run must stall the page for, which is
- *  what makes the bound above mean something: a main-thread Verify would fail it. Measured
- *  425–624 ms over eight runs on the same machine, so this is under half the fastest, and still
- *  well above {@link WORKER_MAX_GAP_MS}. A slower machine only widens the stall. The M2 win's own
- *  main-thread stall (88 ms) was too short to tell the two apart, hence the long run. */
+/** The least the main-thread arm must stall the page for, so a run too short to stall it (the M2
+ *  win's main-thread stall was 88 ms) cannot make the ratio vacuous. Under half the fastest
+ *  measured; a slower machine only widens the stall. */
 const CONTROL_MIN_GAP_MS = 200;
 
 /** The worker chunk the build emits for `verify-worker.ts`. */
@@ -94,49 +97,47 @@ function longestFrameGap({ frames, pressedAt, answeredAt }: VerifyTrace): number
 test('Verify runs in a worker: it says so at once, the page keeps drawing, and the answer lands', async ({
   page,
 }) => {
-  const dialog = await openResults(page, 'long');
+  // The worker arm: the shipped verifier.
+  let dialog = await openResults(page, 'long');
   await toggleOf(dialog).click();
   await traceVerify(page);
-
   const spawned = page.waitForEvent('worker');
-  const trace = pressVerify(page, dialog);
+  const tracing = pressVerify(page, dialog);
   const worker = await spawned;
   // A chunk of its own, emitted by the build — not inlined, not served from source.
   expect(new URL(worker.url()).pathname).toMatch(WORKER_CHUNK);
   const closed = worker.waitForEvent('close');
-
-  const answered = await trace;
-  expect(answered.texts).toEqual([VERIFYING, VERIFIED]);
-  const gap = longestFrameGap(answered);
-  test.info().annotations.push({ type: 'longest frame gap (ms)', description: gap.toFixed(1) });
-  expect(
-    gap,
-    'the longest the page went without a frame while the worker verified (ms)',
-  ).toBeLessThan(WORKER_MAX_GAP_MS);
+  const inWorker = await tracing;
+  expect(inWorker.texts).toEqual([VERIFYING, VERIFIED]);
   // And the worker is gone once it answered: one per verification.
   await closed;
-});
 
-test('control: the same Verify on the main thread stalls the page far past that bound', async ({
-  page,
-}) => {
-  // Without this, the bound above could pass on a run too short for a main-thread Verify to
-  // fail it. `&verifyOnMain=1` swaps the harness's verifier for the in-process one.
-  const dialog = await openResults(page, 'long', 100, '&verifyOnMain=1');
-  await toggleOf(dialog).click();
-  await traceVerify(page);
+  // The main-thread arm, on the same run and the same machine, straight after: `&verifyOnMain=1`
+  // swaps the harness's verifier for the in-process one.
   let workers = 0;
   page.on('worker', () => workers++);
+  dialog = await openResults(page, 'long', 100, '&verifyOnMain=1');
+  await toggleOf(dialog).click();
+  await traceVerify(page);
+  const onMain = await pressVerify(page, dialog);
+  expect(onMain.texts).toEqual([VERIFYING, VERIFIED]);
+  expect(workers, 'the main-thread arm verified in the page, not a worker').toBe(0);
 
-  const trace = await pressVerify(page, dialog);
-  expect(trace.texts).toEqual([VERIFYING, VERIFIED]);
-  expect(workers, 'verified in the page, not a worker').toBe(0);
-  const gap = longestFrameGap(trace);
-  test.info().annotations.push({ type: 'longest frame gap (ms)', description: gap.toFixed(1) });
+  const workerGap = longestFrameGap(inWorker);
+  const mainGap = longestFrameGap(onMain);
+  test
+    .info()
+    .annotations.push(
+      { type: 'longest frame gap, worker (ms)', description: workerGap.toFixed(1) },
+      { type: 'longest frame gap, main thread (ms)', description: mainGap.toFixed(1) },
+    );
+  expect(mainGap, 'a main-thread Verify of this run stalls the page (ms)').toBeGreaterThanOrEqual(
+    CONTROL_MIN_GAP_MS,
+  );
   expect(
-    gap,
-    'the longest the page went without a frame while it verified on its own thread (ms)',
-  ).toBeGreaterThanOrEqual(CONTROL_MIN_GAP_MS);
+    workerGap,
+    `the worker's longest frame gap, against a quarter of the main thread's ${mainGap.toFixed(1)} ms`,
+  ).toBeLessThan(mainGap / MIN_GAP_RATIO);
 });
 
 // The two ways a worker can fail to start, end to end. Both read "could not start", because

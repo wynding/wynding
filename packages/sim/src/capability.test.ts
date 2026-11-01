@@ -1,22 +1,20 @@
-// capability.test.ts — the per-simVersion capability profile (M2-S1, widened at
-// M2-S2 to sv6, M2-S3 to sv7, M2-S4a to sv8, M2-S5a to sv9, M2-S6 to sv10, M2-S7 to
-// sv11, M2-S8 to sv12, M2-S9 to sv13, M2-S10 to sv14, #70 to sv15 — the first
-// bump that widens nothing — #25 to sv16, which widens nothing either and does not
-// even change a tick rule, only the terminal grading contract — and M3 story 2 to sv17,
-// whose run-length cap and tower budgets live outside the profile): the simVersion-17
-// profile's exact
-// shape, an
-// unknown-simVersion throw, and — since the profile itself is inert data gated only
-// inside `compileRuleset` — accept-at-boundary / reject-beyond-boundary coverage for
-// every dimension still narrower than the schema, exercised through `compileRuleset`
-// against `test-support`'s bundle. Every rejection pins the gate's own message,
-// because this file's whole premise is per-dimension coverage — removing a capability
-// check must turn a case RED, not shift it quietly to a different throw. Pinning the
-// message is what tells those two apart. A `burst/single` bundle is the sharpest
-// current example and the reason the discipline matters: it trips `allowedBurstForms`
-// and NOTHING ELSE would catch it (ship-review traced the path — form-uniform sees one
-// form, the aoe scan finds no aoe effect, and `maxBurstTravelTicks` passes), so that
-// bundle would compile clean into a live untested mechanic if the gate were removed.
+// capability.test.ts — the per-simVersion capability profile (M2-S1, widened at M2-S2 to
+// sv6, M2-S3 to sv7, M2-S4a to sv8, M2-S5a to sv9, M2-S6 to sv10, M2-S7 to sv11, M2-S8 to
+// sv12, M2-S9 to sv13, M2-S10 to sv14, #70 to sv15 — the first bump that widens nothing —
+// #25 to sv16, which widens nothing either and does not even change a tick rule, only the
+// terminal grading contract — and M3 story 2 to sv17, whose run-length cap and tower
+// budgets live outside the profile): the simVersion-17 profile's exact shape, an
+// unknown-simVersion throw, and — since the profile itself is inert data gated only inside
+// `compileRuleset` — accept-at-boundary / reject-beyond-boundary coverage for every
+// dimension still narrower than the schema, exercised through `compileRuleset` against
+// `test-support`'s bundle. Every rejection pins the gate's own message, because this
+// file's whole premise is per-dimension coverage — removing a capability check must turn a
+// case RED, not shift it quietly to a different throw. Pinning the message is what tells
+// those two apart. A `burst/single` bundle is the sharpest current example and the reason
+// the discipline matters: it trips `allowedBurstForms` and NOTHING ELSE would catch it
+// (ship-review traced the path — form-uniform sees one form, the aoe scan finds no aoe
+// effect, and `maxBurstTravelTicks` passes), so that bundle would compile clean into a
+// live untested mechanic if the gate were removed.
 //
 // sv10 DEFERS TO THE SCHEMA on waves/entries/offsets/clearBonus/both early-call
 // divisors (unchanged from sv6) AND ALSO on `maxTowerCatalogSize`/

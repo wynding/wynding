@@ -222,7 +222,14 @@ export function workerVerifier(spawn: () => VerifyWorkerPort, page: VerifyPage):
       signal?.addEventListener('abort', onAbort);
       page.addEventListener('visibilitychange', onVisibility);
       onVisibility(); // a page hidden already starts its windows when it is next shown
-      worker.postMessage({ replay, bundle });
+      try {
+        worker.postMessage({ replay, bundle });
+      } catch (error) {
+        // A run that cannot be copied to the worker (a `DataCloneError`) never reaches it, so
+        // the verification ends here — through `finish()`, which stops the worker and its
+        // listeners rather than leaving them for a timer, or for good while the page is hidden.
+        fail(new VerifyError('unavailable', describe(error, 'the run could not be sent')));
+      }
     });
 }
 

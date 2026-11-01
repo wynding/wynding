@@ -59,7 +59,8 @@
 // the server compiles its own board rather than the request's), so it is a budget
 // accounting note rather than a live concern. Counted at sv17's widening (M3 story 2): one
 // recompute per command and one per detonated placement, at most
-// `MAX_TOTAL_TOWER_COMMANDS + MAX_TOWER_PLACEMENTS` = 3,000 a match, against 72,000 ticks. On any budget-conforming board the in-flight slack stays far under the
+// `MAX_TOTAL_TOWER_COMMANDS + MAX_TOWER_PLACEMENTS` = 3,000 a match, against 72,000 ticks.
+// On any budget-conforming board the in-flight slack stays far under the
 // `MAX_TOWERS` (1000) cap vs the physical tower capacity, so the cap never bites
 // genuine play; a caller that drives the queue to the cap by abusive sell/rebuild
 // (or place/trigger/place) churn is exactly the forged/DoS case the backstop exists

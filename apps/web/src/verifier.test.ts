@@ -191,6 +191,28 @@ describe('workerVerifier — one worker per verification (M3 story 2)', () => {
     expect(error).toMatchObject({ failure: 'unavailable', message: 'Worker is not defined' });
   });
 
+  it('a run that cannot be sent to the worker rejects as unavailable, and leaves nothing behind', async () => {
+    vi.useFakeTimers();
+    const worker = fakeWorker();
+    worker.postMessage = () => {
+      throw new DOMException('could not be cloned', 'DataCloneError');
+    };
+    const page = fakePage();
+    const abort = new AbortController();
+    const { error } = await outcome(over(worker, page)(finishedReplay(), bundle, abort.signal));
+    expect(error).toBeInstanceOf(VerifyError);
+    expect(error).toMatchObject({ failure: 'unavailable', message: 'could not be cloned' });
+    expect(worker.terminated, 'the worker is stopped').toBe(1);
+    expect(worker.onmessage).toBeNull();
+    expect(vi.getTimerCount(), 'no window left running').toBe(0);
+    // Nor is anything still listening: neither the page coming back nor an abort reaches it.
+    page.hide();
+    page.show();
+    abort.abort();
+    expect(vi.getTimerCount()).toBe(0);
+    expect(worker.terminated).toBe(1);
+  });
+
   it.each([
     ['before', false],
     ['after', true],

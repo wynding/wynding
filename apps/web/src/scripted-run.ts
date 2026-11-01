@@ -25,8 +25,9 @@ export interface ScriptedPlacement {
 
 /** Start `controller` and play `plan` until the run resolves (or `maxTicks` pass — by default
  *  the longest run the validator accepts, `MAX_MATCH_TICKS`), one tick per step at 1×. Returns
- *  how many placements were accepted, in script order — the content runner's `placedCount`. Throws on a tower id the catalog does not know, as that runner does.
- *  Never claims a wave early: every wave launches on its own countdown, as in the runner. */
+ *  how many placements were accepted, in script order — the content runner's `placedCount`.
+ *  Throws on a tower id the catalog does not know, as that runner does. Never claims a wave
+ *  early: every wave launches on its own countdown, as in the runner. */
 export function playScript(
   controller: Controller,
   plan: readonly ScriptedPlacement[],

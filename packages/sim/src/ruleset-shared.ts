@@ -195,7 +195,9 @@ export const MAX_DOT_DURATION_CADENCE_RATIO = 8;
  *
  * M3's first-pass I is 1,423 (80 starting + 1,084 kills + 102 clear bonuses + 157 early
  * calls, `docs/milestones/m3.md`): at most 711 placements and 1,423 commands. Both budgets
- * leave the balance pass room to raise I to 2,000; past that, re-derive both. The shipped
+ * leave the balance pass room to raise I to 2,000; past that, re-derive both —
+ * `packages/content/src/tower-budgets.test.ts` holds every shipped board to I and to the
+ * flip's net of 2, and its failure says which budget to re-derive. The shipped
  * client logs only commands its own preview accepts, so the free no-ops a rejected
  * placement would be do not come from play.
  */

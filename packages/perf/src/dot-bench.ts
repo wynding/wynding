@@ -350,7 +350,8 @@ function main(): void {
   console.log(
     'This is a MEASUREMENT — read once, by a human, to confirm the DERIVED MAX_DOT_RECORDS ' +
       'is not catastrophic. It does not choose the value: that is fixed by the compile-time ' +
-      'duration:cadence gate as (RATIO + 1) x MAX_TOWERS. Nothing in CI depends on this: ' +
+      "duration:cadence gate and the replay validator's placement budget as " +
+      '(RATIO + 1) x MAX_TOWER_PLACEMENTS. Nothing in CI depends on this: ' +
       'not wired into `pnpm run perf`, `verify`, or any workflow (PLAN step 21).',
   );
 
