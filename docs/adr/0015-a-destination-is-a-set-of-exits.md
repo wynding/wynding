@@ -43,8 +43,10 @@ entrance.**
   flyer would choose between several exits is left for the first board that needs it.
 
 M3 ships only one-exit destinations (`west → {east}`, `north → {south}`). "Pick any exit" is a
-different one-exit set, and "nearest exit" is the set of all the board's exits — both are content,
-not new mechanics.
+different one-exit set — content alone. "Nearest exit" is the set of all the board's exits: the
+format already holds it, but enabling it takes one small sim story that decides the two open
+questions below and widens the capability profile, and that story bumps `simVersion`. What the set
+shape saves is a second format change and a migration of every board's data.
 
 ## Considered options
 
@@ -52,7 +54,8 @@ not new mechanics.
   the same exit, which is not the board he chose.
 - **Exactly one exit per entrance** (a single exit id, not a set). Simpler today and enough for
   M3. Rejected because "nearest exit" — the wish Rob named — would then need a second format
-  change and a second replay break; a one-element set costs nothing extra now.
+  change and a data migration on top of its sim story; a one-element set costs nothing extra
+  now.
 - **A destination per wave entry.** The most flexible: each stream picks its own exit. Rejected for
   now: nothing asks for it, it would add a field to every wave entry, and it can be added later as
   an override on top of the entrance's default without changing this shape.
