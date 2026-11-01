@@ -36,223 +36,43 @@ type Stream = readonly [creepId: string, count: number, spacingTicks: number, of
 
 /** The first-pass arc, row for row: streams, countdown, clear bonus. The spec's W and N
  *  routes collapse onto the one entrance. */
+// prettier-ignore
 const ARC: readonly (readonly [streams: readonly Stream[], countdown: number, clear: number])[] = [
-  [[['normal', 10, 20]], 600, 2],
-  [[['swarm', 16, 5]], 500, 2],
-  [[['normal', 10, 20]], 500, 2],
-  [
-    [
-      ['fast', 8, 15],
-      ['fast', 6, 15, 60],
-    ],
-    500,
-    2,
-  ],
-  [
-    [
-      ['armored', 6, 25],
-      ['normal', 8, 20],
-    ],
-    500,
-    2,
-  ],
-  [[['flying', 8, 15]], 500, 2],
-  [
-    [
-      ['normal', 12, 15],
-      ['swarm', 10, 6],
-    ],
-    500,
-    2,
-  ],
-  [
-    [
-      ['resolute', 6, 15],
-      ['fast', 6, 15],
-    ],
-    500,
-    2,
-  ],
-  [
-    [
-      ['armored-flyer', 6, 20],
-      ['normal', 8, 20, 100],
-    ],
-    500,
-    2,
-  ],
-  [
-    [
-      ['boss', 1, 20],
-      ['normal', 8, 20, 600],
-    ],
-    600,
-    6,
-  ],
-  [
-    [
-      ['normal', 8, 20],
-      ['normal', 8, 20],
-    ],
-    700,
-    3,
-  ],
-  [
-    [
-      ['swarm', 14, 5],
-      ['swarm', 12, 5],
-    ],
-    500,
-    3,
-  ],
-  [
-    [
-      ['resolute', 8, 15],
-      ['resolute', 8, 15],
-    ],
-    500,
-    3,
-  ],
-  [
-    [
-      ['armored', 6, 25],
-      ['armored', 6, 25],
-    ],
-    500,
-    3,
-  ],
-  [
-    [
-      ['normal', 10, 15],
-      ['swarm', 10, 5],
-      ['fast', 6, 15, 120],
-    ],
-    500,
-    3,
-  ],
-  [[['flying', 10, 12]], 550, 3],
-  [
-    [
-      ['fast', 12, 12],
-      ['resolute', 8, 15],
-    ],
-    500,
-    3,
-  ],
-  [
-    [
-      ['armored', 8, 20],
-      ['swarm', 16, 5],
-    ],
-    500,
-    3,
-  ],
-  [
-    [
-      ['armored-flyer', 8, 18],
-      ['armored', 8, 20],
-      ['swarm', 10, 5, 120],
-    ],
-    550,
-    3,
-  ],
-  [
-    [
-      ['boss', 1, 20],
-      ['boss', 1, 20, 200],
-      ['normal', 8, 20, 600],
-      ['normal', 8, 20, 800],
-    ],
-    700,
-    7,
-  ],
-  [
-    [
-      ['normal', 6, 15],
-      ['normal', 6, 15],
-    ],
-    800,
-    4,
-  ],
-  [
-    [
-      ['swarm', 16, 4],
-      ['swarm', 10, 4],
-    ],
-    500,
-    4,
-  ],
-  [
-    [
-      ['fast', 10, 12],
-      ['fast', 10, 12],
-    ],
-    550,
-    4,
-  ],
-  [
-    [
-      ['armored', 8, 20],
-      ['armored', 8, 20],
-    ],
-    550,
-    4,
-  ],
-  [
-    [
-      ['normal', 10, 12],
-      ['normal', 10, 12],
-      ['swarm', 8, 4, 150],
-    ],
-    550,
-    4,
-  ],
-  [
-    [
-      ['armored-flyer', 10, 15],
-      ['flying', 10, 15],
-    ],
-    600,
-    4,
-  ],
-  [
-    [
-      ['swarm', 14, 4],
-      ['fast', 8, 12, 60],
-      ['resolute', 6, 12],
-    ],
-    550,
-    4,
-  ],
-  [
-    [
-      ['armored', 8, 20],
-      ['armored', 8, 20],
-      ['fast', 8, 12, 100],
-    ],
-    550,
-    4,
-  ],
-  [
-    [
-      ['armored-flyer', 8, 15],
-      ['armored-flyer', 6, 15],
-      ['armored', 8, 18],
-      ['swarm', 8, 4, 120],
-    ],
-    600,
-    4,
-  ],
-  [
-    [
-      ['boss', 2, 400],
-      ['boss', 1, 20, 200],
-      ['armored-flyer', 8, 20, 1000],
-      ['armored-flyer', 8, 20, 800],
-    ],
-    700,
-    8,
-  ],
+  // One wave per line, numbered in the trailing comment and held that way by the
+  // `prettier-ignore` above: a table a reader checks against the spec's by eye.
+  [[['normal', 10, 20]], 600, 2],                                                        //  1
+  [[['swarm', 16, 5]], 500, 2],                                                          //  2
+  [[['normal', 10, 20]], 500, 2],                                                        //  3
+  [[['fast', 8, 15], ['fast', 6, 15, 60]], 500, 2],                                      //  4
+  [[['armored', 6, 25], ['normal', 8, 20]], 500, 2],                                     //  5
+  [[['flying', 8, 15]], 500, 2],                                                         //  6
+  [[['normal', 12, 15], ['swarm', 10, 6]], 500, 2],                                      //  7
+  [[['resolute', 6, 15], ['fast', 6, 15]], 500, 2],                                      //  8
+  [[['armored-flyer', 6, 20], ['normal', 8, 20, 100]], 500, 2],                          //  9
+  [[['boss', 1, 20], ['normal', 8, 20, 600]], 600, 6],                                   // 10
+  [[['normal', 8, 20], ['normal', 8, 20]], 700, 3],                                      // 11
+  [[['swarm', 14, 5], ['swarm', 12, 5]], 500, 3],                                        // 12
+  [[['resolute', 8, 15], ['resolute', 8, 15]], 500, 3],                                  // 13
+  [[['armored', 6, 25], ['armored', 6, 25]], 500, 3],                                    // 14
+  [[['normal', 10, 15], ['swarm', 10, 5], ['fast', 6, 15, 120]], 500, 3],                // 15
+  [[['flying', 10, 12]], 550, 3],                                                        // 16
+  [[['fast', 12, 12], ['resolute', 8, 15]], 500, 3],                                     // 17
+  [[['armored', 8, 20], ['swarm', 16, 5]], 500, 3],                                      // 18
+  [[['armored-flyer', 8, 18], ['armored', 8, 20], ['swarm', 10, 5, 120]], 550, 3],       // 19
+  [[['boss', 1, 20], ['boss', 1, 20, 200], ['normal', 8, 20, 600],
+    ['normal', 8, 20, 800]], 700, 7],                                                    // 20
+  [[['normal', 6, 15], ['normal', 6, 15]], 800, 4],                                      // 21
+  [[['swarm', 16, 4], ['swarm', 10, 4]], 500, 4],                                        // 22
+  [[['fast', 10, 12], ['fast', 10, 12]], 550, 4],                                        // 23
+  [[['armored', 8, 20], ['armored', 8, 20]], 550, 4],                                    // 24
+  [[['normal', 10, 12], ['normal', 10, 12], ['swarm', 8, 4, 150]], 550, 4],              // 25
+  [[['armored-flyer', 10, 15], ['flying', 10, 15]], 600, 4],                             // 26
+  [[['swarm', 14, 4], ['fast', 8, 12, 60], ['resolute', 6, 12]], 550, 4],                // 27
+  [[['armored', 8, 20], ['armored', 8, 20], ['fast', 8, 12, 100]], 550, 4],              // 28
+  [[['armored-flyer', 8, 15], ['armored-flyer', 6, 15], ['armored', 8, 18],
+    ['swarm', 8, 4, 120]], 600, 4],                                                      // 29
+  [[['boss', 2, 400], ['boss', 1, 20, 200], ['armored-flyer', 8, 20, 1000],
+    ['armored-flyer', 8, 20, 800]], 700, 8],                                             // 30
 ];
 
 export interface ThirtyWaveOptions {
@@ -301,16 +121,19 @@ export interface Placement {
   readonly towerId: string;
 }
 
-/** The scripted defense: 2 × 2 towers on a 3-tile lattice (a one-tile lane between any
- *  two, so no placement can seal the path), nearest the entrance → exit line first, the
- *  catalog's kinds in turn. Built to give the re-simulation a real workload, not to win. */
+/** The scripted defense: 56 2 × 2 towers on a 3-tile lattice (a one-tile lane between any
+ *  two, so no placement can seal the path), nearest the entrance → exit row first, eight of
+ *  the catalog's kinds in turn (every kind but the `mine`, which its first trigger consumes,
+ *  leaving its cell empty). Built to give the re-simulation a real workload, not to win on
+ *  merit. */
 export const DEFENSE_PLAN: readonly Placement[] = (() => {
   const kinds = ['basic', 'antiair', 'venom', 'slow', 'splash', 'stun', 'frost-splash', 'beacon'];
   const anchors: { col: number; row: number }[] = [];
   for (let col = 2; col <= 23; col += 3) {
     for (let row = 2; row <= 20; row += 3) anchors.push({ col, row });
   }
-  anchors.sort((a, b) => Math.abs(a.row - 10.5) - Math.abs(b.row - 10.5) || a.col - b.col);
+  // Distance from the lane between rows 10 and 11, doubled to stay in integers.
+  anchors.sort((a, b) => Math.abs(2 * a.row - 21) - Math.abs(2 * b.row - 21) || a.col - b.col);
   return anchors.map((a, i) => ({ ...a, towerId: kinds[i % kinds.length]! }));
 })();
 
