@@ -52,7 +52,7 @@ shape saves is a second format change and a migration of every board's data.
 ## Considered options
 
 - **Keep one exit per board.** Rejected by Rob's crossing-pairs ruling: every creep would drain to
-  the same exit, which is not the board he chose.
+  the same exit, which is not the board that ruling chose.
 - **Exactly one exit per entrance** (a single exit id, not a set). Simpler today and enough for
   M3. Rejected because "nearest exit" — the wish Rob named — would then need a second format
   change and a data migration on top of its sim story; a one-element set costs nothing extra
