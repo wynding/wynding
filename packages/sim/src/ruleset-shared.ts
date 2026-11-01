@@ -112,8 +112,21 @@ export class RulesetError extends Error {
  *  here from `packages/replay`), and a placement budget of 1,000 joins it
  *  (`MAX_TOWER_PLACEMENTS`). `MAX_DOT_RECORDS` (`combat.ts`) is now derived from the
  *  placement budget and stays 9,000, so no runtime bound `step` reads moves. The capability
- *  profile's fields are unchanged; none of these is one of them. */
-export const SIM_VERSION = 17;
+ *  profile's fields are unchanged; none of these is one of them.
+ *
+ *  M3 story 3 bumps 17 → 18 — entrances, exits and destinations (ADR 0015), and
+ *  per-wave creep HP growth, on ruleset `formatVersion` 3. A board may carry several
+ *  entrances and exits, each entrance assigned a destination: a creep spawns at its
+ *  wave entry's entrance, takes that entrance's destination for life, routes on its
+ *  destination's own flow-field and leaks only at an exit in it; the maze invariant,
+ *  "first" targeting and the AoE lead are all measured per destination. `SimState`
+ *  gains one creep column (`destination`, appended last), so every world hash moves —
+ *  but nothing else about a one-pair board does: `field-01` in format 3 reproduces the
+ *  sv17 run of the M2 golden replay tick for tick in every pre-existing field
+ *  (`format3-parity.test.ts`, content). Every creep now spawns with
+ *  `spawnHp(catalog hp, its wave's hpPercent)`, which is the catalog value at 100 —
+ *  every shipped wave's. The capability profile gains the two destination ceilings. */
+export const SIM_VERSION = 18;
 
 /** Canonical immunity order — `slow` before `stun` (decision: "one hash form"). */
 const IMMUNITY_ORDER = ['slow', 'stun'] as const;

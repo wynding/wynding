@@ -222,7 +222,7 @@ function runCanonical(
 // --- GOLDEN — a behavior change here requires a SIM_VERSION bump (CI-enforced) --
 // Recompute with: pnpm --filter @wynding/sim exec vitest run determinism
 const GOLDEN = {
-  finalHash: 'd93528da',
+  finalHash: 'b716ede6',
   // Re-pinned M2-S6 P5 ('31e0a94c'): the `stunUntilTick` column widens every creep's shape.
   // Re-pinned M2-S7 P6 (SIM_VERSION 10 → 11): `Impact` gained a `domain` mask, so every tick
   // with an impact IN FLIGHT hashed differently — but `finalHash` was deliberately NOT
@@ -236,7 +236,12 @@ const GOLDEN = {
   // exists to allow; the scenario's own witnesses were re-checked rather than assumed — all
   // three builds still land (the reduced bounty does not starve them), the detour, kills, slow
   // and DoT witnesses stand, and the run still ends `lost` with `lives === 0`.
-  traceDigest: '442f4adb', // fnv1a(trace.join(':'))
+  //
+  // Re-pinned M3 story 3 (SIM_VERSION 17 → 18; was 'd93528da' / '442f4adb'): the new
+  // `destination` creep column (ADR 0015) widens every creep's serialized shape — a
+  // HASH-ONLY move, asserted rather than claimed: `GOLDEN_BEFORE_DESTINATION` below holds
+  // the previous pair, tick for tick, for the state with that column projected out.
+  traceDigest: 'ecbad7af', // fnv1a(trace.join(':'))
 } as const;
 // -------------------------------------------------------------------------------
 

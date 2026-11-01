@@ -932,6 +932,10 @@ describe('the done-criterion scenario (Codex R1-13): one blast tower SURVIVES a 
     // Re-pinned M2-S6 P5: the new `stunUntilTick` creep column (P1) widens every
     // creep's serialized shape; this scenario carries no `stun` tower, so the
     // three measured values above are again UNCHANGED — another hash-only move.
-    expect(hashSimState(state)).toBe('34ee3f5f');
+    // Re-pinned M3 story 3 (SIM_VERSION 17 → 18): the new `destination` creep column
+    // (ADR 0015) widens every creep's shape; the three measured values above are
+    // UNCHANGED once more, and the previous pin, asserted above under
+    // `withoutDestination`, proves the column is all that moved — a hash-only move.
+    expect(hashSimState(state)).toBe('75879dbb');
   });
 });

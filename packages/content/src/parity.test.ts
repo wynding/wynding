@@ -154,8 +154,11 @@ describe('behavioral parity — v2-loaded bundle vs. the pre-verified goldens', 
       'stars',
       deriveStars(state, ruleset),
     );
-    expect(hashSimState(state)).toBe('40e08409');
-    expect(fnv1a(trace.join(':'))).toBe('ca77e5d5');
+    // Re-pinned M3 story 3 (SIM_VERSION 17 → 18): the new `destination` creep column (ADR
+    // 0015) widens every creep's shape — a hash-only move, asserted below: the previous pin
+    // still holds under `withoutDestination`.
+    expect(hashSimState(state)).toBe('2d36cb85');
+    expect(fnv1a(trace.join(':'))).toBe('31ec2e16');
     // The pin from before M3 story 3's `destination` creep column, which the state minus that column must still hash to — the proof the column is all that moved the pin above.
     expect(hashSimState(withoutDestination(state))).toBe('40e08409');
     expect(fnv1a(traceWithoutDestination.join(':'))).toBe('ca77e5d5');
@@ -455,8 +458,11 @@ describe('behavioral parity — v2-loaded bundle vs. the pre-verified goldens', 
     // running THIS script with the sv14 rule restored reproduces the previous golden
     // byte-for-byte (hash bf13755b, trace 0c6af742), which is what proves the
     // affordability pacing added above changed nothing on its own.
-    expect(hashSimState(state)).toBe('1ca97ecb');
-    expect(fnv1a(trace.join(':'))).toBe('636178da');
+    // Re-pinned M3 story 3 (SIM_VERSION 17 → 18): the new `destination` creep column (ADR
+    // 0015) widens every creep's shape — a hash-only move, asserted below: the previous pin
+    // still holds under `withoutDestination`.
+    expect(hashSimState(state)).toBe('66d1a6b3');
+    expect(fnv1a(trace.join(':'))).toBe('283985f1');
     // The pin from before M3 story 3's `destination` creep column, which the state minus that column must still hash to — the proof the column is all that moved the pin above.
     expect(hashSimState(withoutDestination(state))).toBe('1ca97ecb');
     expect(fnv1a(traceWithoutDestination.join(':'))).toBe('636178da');

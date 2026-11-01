@@ -103,7 +103,10 @@ describe('M3 story 1 — the balance checker, calibrated on M2', () => {
     () => {
       const { state } = measured(M2_WINNER_A.id);
       // `m2-golden.test.ts`'s `GOLDEN.finalHash` — the one M2 pin that holds a literal hash.
-      expect(hashSimState(state)).toBe('34cb27bf');
+      // Re-pinned M3 story 3 (SIM_VERSION 17 → 18): the new `destination` creep column (ADR
+      // 0015) widens every creep's shape — a hash-only move, asserted below: the previous
+      // pin still holds under `withoutDestination`.
+      expect(hashSimState(state)).toBe('90a12ed3');
       // The pre-`destination`-column pin, under the projection that removes it.
       expect(hashSimState(withoutDestination(state))).toBe('34cb27bf');
     },
