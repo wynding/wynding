@@ -118,7 +118,7 @@ describe('runBuildScript timed steps (M3 story 1)', { timeout: 120_000 }, () => 
     const soldAt: number[] = [];
     const sellsSent: number[] = [];
     let kept = 0;
-    const { placedCount } = runBuildScript(ruleset, SEED, plan, {
+    const { placedCount, stalled } = runBuildScript(ruleset, SEED, plan, {
       afterStep: (s, _r, inputs, _placed, { sold }) => {
         const tick = s.tick - 1;
         if (inputs.some((i) => i.kind === 'sellTower')) sellsSent.push(tick);
@@ -133,6 +133,8 @@ describe('runBuildScript timed steps (M3 story 1)', { timeout: 120_000 }, () => 
     expect(sellsSent).toEqual([50, 51, 52, 53, 54, 55, 56, 57, 58, 59, 60]);
     expect(soldAt).toEqual([60]);
     expect(placedCount).toBe(3);
+    // Rejected ten times, then accepted: the cursor moved on, so nothing is stalled.
+    expect(stalled).toBe(false);
   });
 
   describe('a mine removes itself when it detonates — steps are credited by the sim’s acceptance, not the tower count', () => {

@@ -5,10 +5,11 @@
 // `balance-calibration.test.ts`'s.
 
 import { describe, it, expect } from 'vitest';
-import { compileRuleset } from '@wynding/sim';
+import { compileRuleset, createInitialState, type SimState } from '@wynding/sim';
 import { getBundledRuleset } from './registry';
-import { balanceReport } from './balance-report';
-import { drawGrid, type ReferenceSet } from './reference-build';
+import { balanceReport, closestText, strongest } from './balance-report';
+import type { BuildRun } from './balance-run';
+import { drawGrid, type ReferenceBuild, type ReferenceSet } from './reference-build';
 import { M2_PINNED_LOSER, M2_SHOWCASE, M2_WINNER_A, M2_WINNER_B } from './reference-builds';
 
 const ruleset = compileRuleset(getBundledRuleset('wynding-core'), 'field-01');
@@ -110,6 +111,39 @@ describe('the balance report', () => {
   it('fails when no reference set is registered', () => {
     expect(balanceReport([], getBundledRuleset).failures).toEqual([
       'no reference sets are registered',
+    ]);
+  });
+});
+
+describe('the report’s small rules', () => {
+  /** A finished run with only what `strongest` reads. */
+  function entry(id: string, state: Partial<SimState>, sells: BuildRun['sells'] = []) {
+    const run = {
+      state: { ...createInitialState(0, ruleset), ...state },
+      sells,
+    } as unknown as BuildRun;
+    return { build: { id } as ReferenceBuild, run };
+  }
+
+  it('names a later winner on more lives over the first, and skips a live-sell juggler', () => {
+    const juggler = entry('juggler', { phase: 'won', lives: 10 }, [
+      { tick: 900, col: 2, row: 2, towerId: 'basic', creepsAlive: 3 },
+    ]);
+    const first = entry('first', { phase: 'won', lives: 6 });
+    const later = entry('later', { phase: 'won', lives: 8 });
+    const loser = entry('loser', { phase: 'lost', lives: 0 });
+    expect(strongest([juggler, first, later, loser], ruleset)?.build.id).toBe('later');
+    expect(strongest([juggler, loser], ruleset)).toBeNull();
+  });
+
+  it('prints a near miss as <0.01, never as the 0.00 the legend keeps for a leak', () => {
+    expect([0, 0.004, 0.005, 0.5].map(closestText)).toEqual(['0.00', '<0.01', '0.01', '0.50']);
+  });
+
+  it('fails a registered set with no builds', () => {
+    const empty: ReferenceSet = { ...M2_SHOWCASE, id: 'empty', builds: [] };
+    expect(balanceReport([empty], getBundledRuleset).failures).toEqual([
+      'empty: the set has no builds',
     ]);
   });
 });

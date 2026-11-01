@@ -73,7 +73,7 @@ function profileTable(run: BuildRun): string[] {
         String(w.leaks),
         String(w.livesLost),
         String(w.lives),
-        w.closestApproach === null ? '-' : w.closestApproach.toFixed(2),
+        w.closestApproach === null ? '-' : closestText(w.closestApproach),
         `${w.towers} +${w.placed}`,
         String(w.unspent),
         String(w.peakAlive),
@@ -82,9 +82,15 @@ function profileTable(run: BuildRun): string[] {
   ];
 }
 
+/** A closest approach to two places — but a near miss above 0 reads `<0.01`, never `0.00`,
+ *  because the legend keeps `0` for a leak. */
+export function closestText(fraction: number): string {
+  return fraction > 0 && fraction < 0.005 ? '<0.01' : fraction.toFixed(2);
+}
+
 /** The build that won on the most lives, then the highest score, never selling with a
  *  creep alive; first wins a tie. `null` if no build qualifies. */
-function strongest(
+export function strongest(
   runs: readonly { readonly build: ReferenceBuild; readonly run: BuildRun }[],
   ruleset: CompiledRuleset,
 ): { readonly build: ReferenceBuild; readonly run: BuildRun } | null {
@@ -142,6 +148,7 @@ export function balanceReport(
     '',
   ];
   for (const set of sets) {
+    if (set.builds.length === 0) failures.push(`${set.id}: the set has no builds`);
     const ruleset = compileRuleset(load(set.rulesetId), set.boardId);
     lines.push(
       `== ${set.id}: ${set.rulesetId} / ${set.boardId}, seed 0x${set.seed.toString(16)} ==`,

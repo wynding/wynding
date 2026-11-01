@@ -16,9 +16,12 @@ import { waveIndexForCreep } from './wave-lookup';
 export const TOP_TWO_SPEND_SHARE_FLOOR = 0.25;
 
 /** A build's tower ids ordered by bounty spent on each, descending; ties break on the id
- *  so the order is total and reproducible (M2's `idsBySpend`). */
+ *  by code unit — never the host locale — so the order is total and the same everywhere
+ *  (M2's `idsBySpend`). */
 export function idsBySpend(spendById: Readonly<Record<string, number>>): string[] {
-  return Object.keys(spendById).sort((a, b) => spendById[b]! - spendById[a]! || a.localeCompare(b));
+  return Object.keys(spendById).sort(
+    (a, b) => spendById[b]! - spendById[a]! || (a < b ? -1 : a > b ? 1 : 0),
+  );
 }
 
 /**

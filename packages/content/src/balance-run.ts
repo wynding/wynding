@@ -49,7 +49,10 @@ export interface WaveProfile {
   /** This wave's creeps that leaked, and the lives they cost. */
   readonly leaks: number;
   readonly livesLost: number;
-  /** `null` when none of this wave's creeps was ever seen on the board. */
+  /** Sampled at the end of every tick from the creeps still on the board, and 0 for a leak.
+   *  A creep's movement on the tick it dies is not sampled — at most one tick of travel,
+   *  well under 1% of a route — and `null` means none of the wave's creeps survived a tick
+   *  to be sampled. */
   readonly closestApproach: number | null;
   /** At the end of the wave's window. */
   readonly lives: number;
@@ -171,7 +174,8 @@ export function runReferenceBuild(
   const known = new Map<number, { readonly creepId: string; readonly wave: number }>();
   const standing = new Map<string, string>();
   const builtOn = new Set<string>();
-  const spendById: Record<string, number> = {};
+  // No prototype: a tower id such as `constructor` must read as unspent, not as Object's.
+  const spendById: Record<string, number> = Object.create(null) as Record<string, number>;
   const leaks: LeakRecord[] = [];
   const sells: SellRecord[] = [];
   let spend = 0;
@@ -215,7 +219,11 @@ export function runReferenceBuild(
       // and `known` already holds it.
       for (const id of leaked) {
         const creep = known.get(id);
-        if (creep === undefined) throw new Error(`balance run: creep ${id} leaked unseen`);
+        if (creep === undefined) {
+          // Only a creep that crosses its whole route within one tick could leak unseen; no
+          // legal board and catalog allow that, so say so loudly rather than guess its wave.
+          throw new Error(`balance run: creep ${id} leaked on the tick it spawned`);
+        }
         leaks.push({ tick: tickBefore, ...creep });
         const row = rows[creep.wave]!;
         row.leaks++;
