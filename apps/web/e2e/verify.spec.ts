@@ -19,10 +19,17 @@ const VERIFYING = 'Verifying this run…';
 const VERIFIED = 'Verified: replay re-simulated to the same outcome.';
 const COULD_NOT_START = 'Verification failed: the verifier could not start';
 
-/** The longest the page may go without a frame while Verify works: a few frames at 60 Hz. A
- *  main-thread re-simulation of the 30-wave run blocks for several times this in one go, as
- *  the control test below shows; the M2 win's is too short to tell the two apart. */
-const MAX_FRAME_GAP_MS = 100;
+/** The longest the page may go without a frame while the worker verifies the 30-wave run. Measured
+ *  on an M-series Mac with two Playwright workers (eight runs, M3 story 2): 15–30 ms, so this
+ *  is four times the worst of them, headroom for a loaded CI runner. */
+const WORKER_MAX_GAP_MS = 120;
+
+/** The least the control's main-thread Verify of the same run must stall the page for, which is
+ *  what makes the bound above mean something: a main-thread Verify would fail it. Measured
+ *  425–624 ms over eight runs on the same machine, so this is under half the fastest, and still
+ *  well above {@link WORKER_MAX_GAP_MS}. A slower machine only widens the stall. The M2 win's own
+ *  main-thread stall (88 ms) was too short to tell the two apart, hence the long run. */
+const CONTROL_MIN_GAP_MS = 200;
 
 /** The worker chunk the build emits for `verify-worker.ts`. */
 const WORKER_CHUNK = /\/assets\/verify-worker-[\w-]+\.js$/;
@@ -100,15 +107,17 @@ test('Verify runs in a worker: it says so at once, the page keeps drawing, and t
 
   const answered = await trace;
   expect(answered.texts).toEqual([VERIFYING, VERIFIED]);
+  const gap = longestFrameGap(answered);
+  test.info().annotations.push({ type: 'longest frame gap (ms)', description: gap.toFixed(1) });
   expect(
-    longestFrameGap(answered),
+    gap,
     'the longest the page went without a frame while the worker verified (ms)',
-  ).toBeLessThan(MAX_FRAME_GAP_MS);
+  ).toBeLessThan(WORKER_MAX_GAP_MS);
   // And the worker is gone once it answered: one per verification.
   await closed;
 });
 
-test('control: the same Verify on the main thread stalls the page past that bound', async ({
+test('control: the same Verify on the main thread stalls the page far past that bound', async ({
   page,
 }) => {
   // Without this, the bound above could pass on a run too short for a main-thread Verify to
@@ -122,33 +131,56 @@ test('control: the same Verify on the main thread stalls the page past that boun
   const trace = await pressVerify(page, dialog);
   expect(trace.texts).toEqual([VERIFYING, VERIFIED]);
   expect(workers, 'verified in the page, not a worker').toBe(0);
+  const gap = longestFrameGap(trace);
+  test.info().annotations.push({ type: 'longest frame gap (ms)', description: gap.toFixed(1) });
   expect(
-    longestFrameGap(trace),
+    gap,
     'the longest the page went without a frame while it verified on its own thread (ms)',
-  ).toBeGreaterThanOrEqual(MAX_FRAME_GAP_MS);
+  ).toBeGreaterThanOrEqual(CONTROL_MIN_GAP_MS);
 });
 
-test('a worker that cannot load ends the verification and says why', async ({ page }) => {
-  await page.route(WORKER_CHUNK, (route) => route.abort());
-  const dialog = await openResults(page, 'win');
-  await toggleOf(dialog).click();
-  await dialog.getByRole('button', { name: 'Verify this run' }).click();
-  await expect(dialog.getByRole('status')).toHaveText(COULD_NOT_START);
+// The two ways a worker can fail to start, end to end. Both read "could not start", because
+// that is what happened in both: the region tells the player whether a verification could run,
+// not which browser event said it could not. The unit suite (`verifier.test.ts`) tells the
+// paths apart — an `error` before `ready`, the ready window passing, a crash after `ready` —
+// and the console carries the cause for each, which each test declares (and so requires).
+test.describe('a worker that cannot load', () => {
+  test.use({
+    expectedErrors: {
+      patterns: [/^Wynding: Verify could not run\. VerifyError: the verify worker failed/],
+    },
+  });
+
+  test('ends the verification and says why', async ({ page }) => {
+    await page.route(WORKER_CHUNK, (route) => route.abort());
+    const dialog = await openResults(page, 'win');
+    await toggleOf(dialog).click();
+    await dialog.getByRole('button', { name: 'Verify this run' }).click();
+    await expect(dialog.getByRole('status')).toHaveText(COULD_NOT_START);
+  });
 });
 
-test('a worker whose load stalls, firing nothing, still ends the verification', async ({
-  page,
-}) => {
-  // No error event ever comes: only the ready handshake's window ends it. The page's clock is
-  // Playwright's, so that window passes in a moment.
-  await page.clock.install();
-  let requested = false;
-  await page.route(WORKER_CHUNK, () => void (requested = true)); // held: never answered
-  const dialog = await openResults(page, 'win');
-  await toggleOf(dialog).click();
-  await dialog.getByRole('button', { name: 'Verify this run' }).click();
-  await expect(dialog.getByRole('status')).toHaveText(VERIFYING);
-  await expect.poll(() => requested, 'the worker chunk was asked for').toBe(true);
-  await page.clock.fastForward('00:16'); // past VERIFY_READY_TIMEOUT_MS (15 s)
-  await expect(dialog.getByRole('status')).toHaveText(COULD_NOT_START);
+test.describe('a worker whose load stalls', () => {
+  test.use({
+    expectedErrors: {
+      patterns: [
+        /^Wynding: Verify could not run\. VerifyError: the verify worker did not start in time/,
+      ],
+    },
+  });
+
+  test('firing nothing, still ends the verification', async ({ page }) => {
+    // No error event ever comes: only the ready handshake's window ends it. The page's clock is
+    // Playwright's, so that window passes in a moment.
+    await page.clock.install();
+    let requested = false;
+    await page.route(WORKER_CHUNK, () => void (requested = true)); // held: never answered
+    const dialog = await openResults(page, 'win');
+    await toggleOf(dialog).click();
+    await dialog.getByRole('button', { name: 'Verify this run' }).click();
+    await expect(dialog.getByRole('status')).toHaveText(VERIFYING);
+    await expect.poll(() => requested, 'the worker chunk was asked for').toBe(true);
+    await page.clock.fastForward('00:16'); // past VERIFY_READY_TIMEOUT_MS (15 s)
+    await expect(dialog.getByRole('status')).toHaveText(COULD_NOT_START);
+  });
 });

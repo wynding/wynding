@@ -3356,10 +3356,11 @@ describe('main — the playtrace capture and its export actions (#133)', () => {
     const held = heldVerifier();
     const h = playtraceApp(undefined, held.verifier);
     h.resolve();
-    // DEV logs what the browser said, for whoever debugs it; the region says it plainly.
-    const warned = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    // The console gets what the browser said, in production too; the region says it plainly.
+    const logged = vi.spyOn(console, 'error').mockImplementation(() => {});
     const cases: [Error, string][] = [
       [new VerifyError('unavailable', 'Failed to load'), 'the verifier could not start'],
+      [new VerifyError('crashed', 'out of memory'), 'the verifier stopped unexpectedly'],
       [new VerifyError('timeout', 'did not answer'), 'it took too long'],
       [new VerifyError('unreadable', 'not an answer'), "the verifier's answer could not be read"],
       [new Error('anything else'), 'something went wrong'],
@@ -3369,13 +3370,50 @@ describe('main — the playtrace capture and its export actions (#133)', () => {
       expect(held.calls).toHaveLength(i + 1);
       held.calls[i]!.fail(error);
       await vi.waitFor(() => expect(h.status()).toBe(`Verification failed: ${reason}`));
+      expect(logged).toHaveBeenLastCalledWith('Wynding: Verify could not run.', error);
     }
-    expect(warned).toHaveBeenCalledTimes(cases.length);
-    warned.mockRestore();
+    expect(logged).toHaveBeenCalledTimes(cases.length);
+    logged.mockRestore();
+  });
+
+  it('a genuine AbortError from a verification nobody abandoned is a failure, logged as one', async () => {
+    // Abandonment is read off the verification's own signal, never off what it rejected with.
+    const held = heldVerifier();
+    const h = playtraceApp(undefined, held.verifier);
+    h.resolve();
+    const logged = vi.spyOn(console, 'error').mockImplementation(() => {});
+    h.resultsButton('Verify this run').click();
+    const abortError = new DOMException('The operation was aborted.', 'AbortError');
+    held.calls[0]!.fail(abortError);
+    await vi.waitFor(() => expect(h.status()).toBe('Verification failed: something went wrong'));
+    expect(logged).toHaveBeenCalledWith('Wynding: Verify could not run.', abortError);
+    logged.mockRestore();
+  });
+
+  it('a throw while saying it failed still ends "Verifying", with the fallback, and is logged', async () => {
+    const held = heldVerifier();
+    const h = playtraceApp(undefined, held.verifier);
+    h.resolve();
+    // The failure path's own first step — its log — throws.
+    const logged = vi
+      .spyOn(console, 'error')
+      .mockImplementationOnce(() => {
+        throw new Error('console unavailable');
+      })
+      .mockImplementation(() => {});
+    h.resultsButton('Verify this run').click();
+    held.calls[0]!.fail(new VerifyError('timeout', 'did not answer'));
+    // Not "it took too long": that path is the one that threw.
+    await vi.waitFor(() => expect(h.status()).toBe('Verification failed: something went wrong'));
+    expect(logged).toHaveBeenLastCalledWith(
+      'Wynding: Verify could not report its result.',
+      new Error('console unavailable'),
+    );
+    logged.mockRestore();
   });
 
   it('a throw while reading the answer is announced as a failure, never left at "Verifying"', async () => {
-    const warned = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    const logged = vi.spyOn(console, 'error').mockImplementation(() => {});
     const h = playtraceApp(undefined, inProcessVerifier, (controller) => ({
       ...controller,
       verifyRun: async () =>
@@ -3389,8 +3427,8 @@ describe('main — the playtrace capture and its export actions (#133)', () => {
     h.resolve();
     h.resultsButton('Verify this run').click();
     await vi.waitFor(() => expect(h.status()).toBe('Verification failed: something went wrong'));
-    expect(warned).toHaveBeenCalledOnce();
-    warned.mockRestore();
+    expect(logged).toHaveBeenCalledOnce();
+    logged.mockRestore();
   });
 
   it('Play again stops a verification still running, and its answer never reaches the next run', async () => {
@@ -3402,10 +3440,14 @@ describe('main — the playtrace capture and its export actions (#133)', () => {
     expect(first.signal?.aborted).toBe(false);
     h.resultsButton('Play again').click();
     expect(first.signal?.aborted, 'the worker is told to stop').toBe(true);
-    first.fail(first.signal!.reason as Error); // what an abandoned worker verifier does
+    const logged = vi.spyOn(console, 'error').mockImplementation(() => {});
+    // Whatever it rejects with — its signal says it was abandoned, so it is no failure.
+    first.fail(new Error('the worker went away'));
     h.resolve(); // the next run's dialog
-    await Promise.resolve();
+    await new Promise((resolve) => setTimeout(resolve, 0));
     expect(h.status(), 'nothing from the last run lands here').toBe('');
+    expect(logged, 'an abandonment is not logged as a failure').not.toHaveBeenCalled();
+    logged.mockRestore();
     // ...and its own Verify starts its own verification.
     h.resultsButton('Verify this run').click();
     expect(held.calls).toHaveLength(2);
@@ -3441,12 +3483,12 @@ describe('main — the playtrace capture and its export actions (#133)', () => {
     h.app.destroy();
     const { signal, fail } = held.calls[0]!;
     expect(signal?.aborted).toBe(true);
-    const warned = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    const logged = vi.spyOn(console, 'error').mockImplementation(() => {});
     fail(signal!.reason as Error); // what the worker verifier does when its signal aborts
     await new Promise((resolve) => setTimeout(resolve, 0));
     expect(h.status(), 'nothing written into the torn-down dialog').toBe('Verifying this run…');
-    expect(warned, 'an abandonment is not logged as a failure').not.toHaveBeenCalled();
-    warned.mockRestore();
+    expect(logged, 'an abandonment is not logged as a failure').not.toHaveBeenCalled();
+    logged.mockRestore();
   });
 
   it('says a refused clipboard FAILED rather than looking like a press that did nothing', async () => {

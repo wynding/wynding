@@ -3,7 +3,8 @@
 // sv11, M2-S8 to sv12, M2-S9 to sv13, M2-S10 to sv14, #70 to sv15 — the first
 // bump that widens nothing — #25 to sv16, which widens nothing either and does not
 // even change a tick rule, only the terminal grading contract — and M3 story 2 to sv17,
-// whose run-length cap lives outside the profile): the simVersion-17 profile's exact
+// whose run-length cap and tower budgets live outside the profile): the simVersion-17
+// profile's exact
 // shape, an
 // unknown-simVersion throw, and — since the profile itself is inert data gated only
 // inside `compileRuleset` — accept-at-boundary / reject-beyond-boundary coverage for
@@ -66,8 +67,11 @@ import { describe, it, expect } from 'vitest';
 import type { Ruleset } from '@wynding/types';
 import { capabilityProfile } from './capability';
 import { MAX_IMPACT_EFFECTS, MAX_BLAST_RADIUS_FP, MAX_DOT_RECORDS } from './combat';
-import { MAX_TOWERS } from './tower';
-import { MAX_DOT_DURATION_CADENCE_RATIO, MAX_TOTAL_TOWER_COMMANDS } from './ruleset-shared';
+import {
+  MAX_DOT_DURATION_CADENCE_RATIO,
+  MAX_TOTAL_TOWER_COMMANDS,
+  MAX_TOWER_PLACEMENTS,
+} from './ruleset-shared';
 import { compileRuleset, MAX_AIR_BOARD_SIDE_TILES, RulesetError } from './ruleset';
 import { SIM_VERSION } from './index';
 import { testBundle } from './test-support';
@@ -132,7 +136,7 @@ describe('capabilityProfile', () => {
     expect(capabilityProfile(SIM_VERSION).maxAoeRadiusFp).toBeLessThanOrEqual(MAX_BLAST_RADIUS_FP);
   });
 
-  it('simVersion 17 carries sv16’s profile verbatim — a run-length-cap bump — still deferring wave/economy/catalog-size/immunity/domain/role axes to the schema', () => {
+  it('simVersion 17 carries sv16’s profile verbatim — a bump of the tick cap and the validator’s tower budgets, none of them a profile field — still deferring wave/economy/catalog-size/immunity/domain/role axes to the schema', () => {
     expect(capabilityProfile(17)).toEqual({
       maxTowerCatalogSize: 64,
       maxWavesPerBoard: 64,
@@ -160,9 +164,9 @@ describe('capabilityProfile', () => {
     // Every prior version is deleted with each bump (G11, capability.ts's header).
     // sv16 is the same case sv15 was: its CONTENTS are what the assertion above just
     // pinned, so it did not go for misdescribing any axis — it went because v17's
-    // run-length cap (`MAX_MATCH_TICKS` 72,000) compiles bundles and validates replays
-    // v16 rejected, and a live sv16 entry would advertise semantics this build no longer
-    // honours. It throws like any other unknown version, as sv15 does.
+    // run-length cap (`MAX_MATCH_TICKS` 72,000) and tower budgets compile bundles and
+    // validate replays v16 rejected, and a live sv16 entry would advertise semantics this
+    // build no longer honours. It throws like any other unknown version, as sv15 does.
     expect(() => capabilityProfile(16)).toThrow(RulesetError);
     expect(() => capabilityProfile(15)).toThrow(RulesetError);
   });
@@ -366,15 +370,16 @@ describe('capability gate — accept at boundary, reject beyond, per dimension',
     // `+ 1`: impacts resolve in step (1) but expiry runs in step (6), so on the tick a
     // source's oldest record expires, the newly-landing shot still sees it — the peak is
     // `ratio + 1` for that one tick, and that is when capacity is tested (Codex P2).
-    // ...times the SOURCE count, which is the replay validator's tower-command budget —
-    // every source is a minted tower id, and minting one takes a `placeTower` — not
-    // `MAX_TOWERS`, since a sold source's records keep ticking. Imported, so the budget and
-    // the rail move together (issue #77's hazard, closed at sv17). Through sv16 the budget
-    // equalled MAX_TOWERS (1,000) by coincidence; it is 2,000 now, and the rail 18,000.
-    expect(MAX_DOT_RECORDS).toBe((MAX_DOT_DURATION_CADENCE_RATIO + 1) * MAX_TOTAL_TOWER_COMMANDS);
-    expect(MAX_TOTAL_TOWER_COMMANDS).toBe(2_000);
-    expect(MAX_TOTAL_TOWER_COMMANDS).toBeGreaterThan(MAX_TOWERS);
-    expect(MAX_DOT_RECORDS).toBe(18_000);
+    // ...times the SOURCE count, which is the replay validator's PLACEMENT budget: every
+    // source is a minted tower id, and only a committed `placeTower` mints one. Not
+    // `MAX_TOWERS`, since a sold source's records keep ticking, and not the command total,
+    // since a sell never adds a source. Imported, so the budget and the rail move together
+    // (issue #77's hazard, closed at sv17); the command total doubled at sv17 and the rail
+    // did not move with it.
+    expect(MAX_DOT_RECORDS).toBe((MAX_DOT_DURATION_CADENCE_RATIO + 1) * MAX_TOWER_PLACEMENTS);
+    expect(MAX_TOWER_PLACEMENTS).toBe(1_000);
+    expect(MAX_TOTAL_TOWER_COMMANDS).toBe(2 * MAX_TOWER_PLACEMENTS);
+    expect(MAX_DOT_RECORDS).toBe(9_000);
   });
 
   it('maxDotDurationCadenceRatio: a DoT may last 8x its tower fire cadence, not 9x (Codex P2, PR #78)', () => {

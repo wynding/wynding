@@ -8,8 +8,10 @@
 // cap was still being chosen — which is how the first draft's 20,000 came to be rejected.
 // It no longer picks the number: PR #78's review derived the rail from the compile-time
 // duration:cadence gate as `(RATIO + 1) × MAX_TOWERS`, and `combat.ts` now states it as
-// DERIVED, not chosen. What remains here is confirmation that the derived rail is not
-// catastrophic — never the justification for its value.
+// DERIVED, not chosen — since sv17 as `(RATIO + 1) × MAX_TOWER_PLACEMENTS`, the replay
+// validator's placement budget, which is what actually bounds DoT sources (issue #77) and
+// keeps the rail where this tool measured it. What remains here is confirmation that the
+// derived rail is not catastrophic — never the justification for its value.
 //
 // A CLI task, not a Vitest test (`run.ts`'s precedent). `packages/perf`'s `test`
 // script runs `vitest run --coverage`, and `scenario.test.ts` already documents why

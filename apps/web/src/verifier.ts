@@ -17,7 +17,14 @@
 // good. So the worker says it is ready the moment its module has loaded; no word within
 // {@link VERIFY_READY_TIMEOUT_MS} is a worker that could not start, and no answer within
 // {@link VERIFY_TIMEOUT_MS} of the press is one that took too long. Both reject with a
-// {@link VerifyError}, and both terminate the worker.
+// {@link VerifyError}, and both terminate the worker. `ready` also tells the two ways a worker
+// can fail apart: an `error` before it is one that could not start, and after it one that
+// crashed while verifying.
+//
+// THE WINDOWS RUN ONLY WHILE THE PAGE IS VISIBLE. A phone that backgrounds the app suspends the
+// worker with it, and a timer that came due meanwhile would fire on resume and call a
+// verification that was never given its time "too long". So both timers stop when the page is
+// hidden and start again, at their full length, when it is visible.
 //
 // The verifier is injected because jsdom has no `Worker`: unit tests verify in-process with
 // {@link inProcessVerifier}, and the shipped app — `main.ts`'s default — with
@@ -37,20 +44,23 @@ export interface VerifyRequest {
 export type VerifyWorkerMessage =
   { readonly kind: 'ready' } | { readonly kind: 'result'; readonly result: ValidationResult };
 
-/** No `ready` within this long of the spawn: the worker could not start. Loading the worker's
- *  one chunk takes well under a second; 15 s allows for a slow device and a cold cache. */
+/** No `ready` within this long of the spawn, or of the page's return to view: the worker could
+ *  not start. Loading the worker's one chunk takes well under a second; 15 s allows for a slow
+ *  device and a cold cache. */
 export const VERIFY_READY_TIMEOUT_MS = 15_000;
 
-/** No answer within this long of the spawn: the verification took too long. A 30-wave run
- *  verifies in about 5 s on ADR 0005's low-end profile, so this is a stall, not a slow phone. */
+/** No answer within this long of the spawn, or of the page's return to view: the verification
+ *  took too long. A 30-wave run verifies in about 5 s on ADR 0005's low-end profile, so this is
+ *  a stall, not a slow phone. */
 export const VERIFY_TIMEOUT_MS = 120_000;
 
 /** Why a verification could not run at all. `main.ts` says which, in the player's language. */
-export type VerifyFailure = 'unavailable' | 'timeout' | 'unreadable';
+export type VerifyFailure = 'unavailable' | 'crashed' | 'timeout' | 'unreadable';
 
-/** A verification that could not run: the worker could not start (`unavailable`), took too
- *  long (`timeout`), or answered with something that was not an answer (`unreadable`). The
- *  message carries what the browser said, when it said anything, for whoever debugs it. */
+/** A verification that could not run: the worker could not start (`unavailable`), failed
+ *  after it had (`crashed`), took too long (`timeout`), or answered with something that was
+ *  not an answer (`unreadable`). The message carries what the browser said, when it said
+ *  anything, for whoever debugs it. */
 export class VerifyError extends Error {
   constructor(
     readonly failure: VerifyFailure,
@@ -114,8 +124,17 @@ function readMessage(data: unknown): VerifyWorkerMessage | null {
   return null;
 }
 
-/** A {@link Verifier} that runs each verification in a worker of its own from `spawn`. */
-export function workerVerifier(spawn: () => VerifyWorkerPort): Verifier {
+/** The page whose visibility pauses a verification's windows: as much of `Document` as
+ *  {@link workerVerifier} uses. */
+export interface VerifyPage {
+  readonly visibilityState: DocumentVisibilityState;
+  addEventListener(type: 'visibilitychange', listener: () => void): void;
+  removeEventListener(type: 'visibilitychange', listener: () => void): void;
+}
+
+/** A {@link Verifier} that runs each verification in a worker of its own from `spawn`, its
+ *  windows paused while `page` is hidden. */
+export function workerVerifier(spawn: () => VerifyWorkerPort, page: VerifyPage): Verifier {
   return (replay, bundle, signal) =>
     new Promise<ValidationResult>((resolve, reject) => {
       if (signal?.aborted === true) {
@@ -131,22 +150,41 @@ export function workerVerifier(spawn: () => VerifyWorkerPort): Verifier {
         );
         return;
       }
-      const readyTimer = setTimeout(() => {
-        fail(new VerifyError('unavailable', 'the verify worker did not start in time'));
-      }, VERIFY_READY_TIMEOUT_MS);
-      const answerTimer = setTimeout(() => {
-        fail(new VerifyError('timeout', 'the verify worker did not answer in time'));
-      }, VERIFY_TIMEOUT_MS);
+      /** Whether the worker has said `ready`: its module loaded, so it started. */
+      let ready = false;
+      let readyTimer: ReturnType<typeof setTimeout> | undefined;
+      let answerTimer: ReturnType<typeof setTimeout> | undefined;
+      function disarm(): void {
+        clearTimeout(readyTimer);
+        clearTimeout(answerTimer);
+      }
+      /** Start both windows afresh, at their full length — the ready one only while the
+       *  worker has not said it yet. */
+      function arm(): void {
+        disarm();
+        if (!ready) {
+          readyTimer = setTimeout(() => {
+            fail(new VerifyError('unavailable', 'the verify worker did not start in time'));
+          }, VERIFY_READY_TIMEOUT_MS);
+        }
+        answerTimer = setTimeout(() => {
+          fail(new VerifyError('timeout', 'the verify worker did not answer in time'));
+        }, VERIFY_TIMEOUT_MS);
+      }
+      const onVisibility = (): void => {
+        if (page.visibilityState === 'visible') arm();
+        else disarm();
+      };
       const onAbort = (): void => {
         fail(abandoned(signal!));
       };
       function finish(): void {
-        clearTimeout(readyTimer);
-        clearTimeout(answerTimer);
+        disarm();
         worker.onmessage = null;
         worker.onerror = null;
         worker.onmessageerror = null;
         signal?.removeEventListener('abort', onAbort);
+        page.removeEventListener('visibilitychange', onVisibility);
         worker.terminate();
       }
       function fail(reason: unknown): void {
@@ -160,6 +198,7 @@ export function workerVerifier(spawn: () => VerifyWorkerPort): Verifier {
             new VerifyError('unreadable', 'the verify worker sent something that is not an answer'),
           );
         } else if (message.kind === 'ready') {
+          ready = true;
           clearTimeout(readyTimer);
         } else {
           finish();
@@ -169,12 +208,20 @@ export function workerVerifier(spawn: () => VerifyWorkerPort): Verifier {
       worker.onerror = (event) => {
         // Handled here, so the browser does not also report it as an uncaught error.
         event.preventDefault();
-        fail(new VerifyError('unavailable', describe(event, 'the verify worker failed')));
+        fail(
+          ready
+            ? new VerifyError('crashed', describe(event, 'the verify worker stopped'))
+            : new VerifyError('unavailable', describe(event, 'the verify worker failed')),
+        );
       };
+      // Either side of `ready` this is a message that could not be read — after it, the
+      // answer itself — so it is `unreadable` either way, never a failure to start.
       worker.onmessageerror = () => {
         fail(new VerifyError('unreadable', 'the verify worker’s answer could not be read'));
       };
       signal?.addEventListener('abort', onAbort);
+      page.addEventListener('visibilitychange', onVisibility);
+      onVisibility(); // a page hidden already starts its windows when it is next shown
       worker.postMessage({ replay, bundle });
     });
 }

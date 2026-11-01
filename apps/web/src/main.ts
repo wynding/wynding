@@ -197,7 +197,7 @@ export function createApp(doc: Document, root: HTMLElement, deps: AppDeps): AppH
   );
   const keymap = createKeymap();
   const controller = (deps.controllerFactory ?? createController)(deps.seed);
-  const verifier = deps.verifier ?? workerVerifier(spawnVerifyWorker);
+  const verifier = deps.verifier ?? workerVerifier(spawnVerifyWorker, doc);
   const seedSource = deps.seedSource ?? (() => Date.now() >>> 0);
   const navigate =
     deps.navigate ??
@@ -789,9 +789,10 @@ export function createApp(doc: Document, root: HTMLElement, deps: AppDeps): AppH
   /** Start a verification, or join the one already running (`verifying`, M3 story 2). It
    *  runs in a worker and can take seconds on a low-end phone, so a second press while it runs
    *  JOINS it instead of starting another; once it answers, the next press verifies afresh, as
-   *  every press did when Verify was synchronous. */
-  function runVerify(): Promise<VerifyResult> {
-    if (verifying !== null) return verifying.result;
+   *  every press did when Verify was synchronous. Returns the verification itself: its answer,
+   *  and the signal that says whether Play again or teardown abandoned it. */
+  function runVerify(): NonNullable<typeof verifying> {
+    if (verifying !== null) return verifying;
     const abort = new AbortController();
     const result = controller.verifyRun((replay, bundle) => verifier(replay, bundle, abort.signal));
     const entry = { result, abort };
@@ -800,7 +801,7 @@ export function createApp(doc: Document, root: HTMLElement, deps: AppDeps): AppH
       if (verifying === entry) verifying = null;
     };
     result.then(settled, settled);
-    return result;
+    return entry;
   }
   function abandonVerify(): void {
     verifying?.abort.abort();
@@ -812,6 +813,8 @@ export function createApp(doc: Document, root: HTMLElement, deps: AppDeps): AppH
       switch (error.failure) {
         case 'unavailable':
           return t('verify.reason.unavailable');
+        case 'crashed':
+          return t('verify.reason.crashed');
         case 'timeout':
           return t('verify.reason.timeout');
         case 'unreadable':
@@ -1207,23 +1210,38 @@ export function createApp(doc: Document, root: HTMLElement, deps: AppDeps): AppH
         // it when the worker returns it — through the same claim, so a later Copy, Save or
         // Play again still silences it (#133's one-current-request rule).
         const announce = claimResultsStatus();
+        // Resolved now, before anything can fail, so the last-resort write below needs
+        // nothing that could fail with the rest.
+        const fallback = t('verify.fail', { reason: t('verify.reason.unknown') });
         announce(t('verify.running'));
-        void runVerify()
+        const verification = runVerify();
+        void verification.result
           .then((r) => {
             if (!r.ok) return t('verify.fail', { reason: r.reason ?? '' });
             return r.matchedLive === false ? t('verify.mismatch') : t('verify.ok');
           })
           // The verification could not run at all, or reading its answer threw: either way
-          // the region says it failed rather than leaving "Verifying" up. A verification Play
-          // again or teardown abandoned lands here too, and its claim is stale by then
-          // (`abandonResultsStatus`), so it writes nothing.
+          // the region says it failed rather than leaving "Verifying" up, and the console says
+          // what failed, in production too — the region's reason is the player's, not the
+          // cause. One Play again or teardown abandoned is no failure: its signal says so,
+          // whatever it rejected with, and its claim is stale by then (`abandonResultsStatus`),
+          // so it writes nothing either.
           .catch((error: unknown) => {
-            if (import.meta.env.DEV && !isAbandonment(error)) {
-              console.warn('Verify could not run:', error);
+            if (!verification.abort.signal.aborted) {
+              console.error('Wynding: Verify could not run.', error);
             }
             return t('verify.fail', { reason: verifyFailureReason(error) });
           })
-          .then(announce);
+          .then(announce)
+          // Even saying it failed failed. The region still may not be left at "Verifying".
+          .catch((error: unknown) => {
+            try {
+              announce(fallback);
+            } catch (writeError) {
+              console.error('Wynding: Verify could not write its status.', writeError);
+            }
+            console.error('Wynding: Verify could not report its result.', error);
+          });
         break;
       }
       case 'copyPlaytrace':
@@ -1471,12 +1489,6 @@ export function createApp(doc: Document, root: HTMLElement, deps: AppDeps): AppH
       rotate.remove();
     },
   };
-}
-
-/** A verification `abandonVerify` stopped: its signal was aborted with no reason of its own,
- *  which rejects with an `AbortError`. Nothing went wrong, so there is nothing to log. */
-function isAbandonment(error: unknown): boolean {
-  return (error as { name?: unknown } | null)?.name === 'AbortError';
 }
 
 /** The app's ONE storage adapter, module-scoped (Story 11 P3): the install banner's

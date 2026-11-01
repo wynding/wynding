@@ -148,11 +148,14 @@ export interface CapabilityProfile {
 /** `SIM_VERSION` 17 (imported from `./ruleset-shared`, the dependency-free leaf):
  *  sv16's capability surface, field for field. No axis activates, no ceiling here moves,
  *  no witness changes hands — this entry is the sv16 profile's contents verbatim, and
- *  that is not an oversight. The bump (M3 story 2) moves a bound that lives OUTSIDE the
+ *  that is not an oversight. The bump (M3 story 2) moves bounds that live OUTSIDE the
  *  profile: `MAX_MATCH_TICKS` doubles to 72,000 (`ruleset.ts`), so a bundle whose
  *  hands-off schedule plus worst-case walk lands between 36,001 and 72,000 ticks now
- *  compiles, and a replay that terminates in that range now validates. Every bundle that
- *  compiled at sv16 still compiles, and `step` simulates bit-for-bit as it did.
+ *  compiles and a replay that terminates in that range validates; and the replay
+ *  validator's tower budgets (`ruleset-shared.ts`) become 2,000 commands, of which at most
+ *  1,000 may be placements. Every bundle that compiled at sv16 still compiles, and `step`
+ *  simulates bit-for-bit as it did: none of these is read by `step`, and the one runtime
+ *  bound derived from them, `MAX_DOT_RECORDS`, is 9,000 either side.
  *
  *  ONE PROFILE, NOT A HISTORY (G11): the sv16 profile is deleted with this bump. Like
  *  the sv15 entry before it, the deleted entry would still have described every axis

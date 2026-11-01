@@ -20,6 +20,7 @@ import {
   SIM_VERSION,
   MAX_MATCH_TICKS,
   MAX_TOTAL_TOWER_COMMANDS,
+  MAX_TOWER_PLACEMENTS,
   type SimInput,
   type CompiledRuleset,
 } from '@wynding/sim';
@@ -70,10 +71,11 @@ export function currentRulesetHash(bundle: Ruleset): string {
 const MAX_TICKS = MAX_MATCH_TICKS;
 /** Max inputs applied on a single tick — far above any legitimate command burst. */
 export const MAX_INPUTS_PER_TICK = 64;
-// Max tower commands (placeTower/sellTower) across the whole match: `MAX_TOTAL_TOWER_COMMANDS`,
-// imported from `@wynding/sim` beside `MAX_MATCH_TICKS`. It lives there because the sim's
-// DoT-record rail is derived from it (issue #77); its derivation from what legitimate play
-// can issue, and its CPU motivation, are recorded at its definition (`ruleset-shared.ts`).
+// The two tower budgets, both imported from `@wynding/sim` beside `MAX_MATCH_TICKS`:
+// `MAX_TOTAL_TOWER_COMMANDS` (placeTower + sellTower across the whole match, a CPU budget)
+// and `MAX_TOWER_PLACEMENTS` (placeTower alone, the DoT source count the sim's record rail
+// is derived from, issue #77). Their derivations from what legitimate play can issue are
+// recorded at their definitions (`ruleset-shared.ts`).
 
 /** A 64-char lowercase-hex SHA-256 digest. */
 const SHA256_HEX = /^[0-9a-f]{64}$/;
@@ -279,6 +281,7 @@ export function validate(
     };
   }
   let totalTowerCommands = 0;
+  let towerPlacements = 0;
   for (let t = 0; t < replay.tickInputs.length; t++) {
     const inputs = replay.tickInputs[t];
     if (!Array.isArray(inputs)) {
@@ -298,6 +301,12 @@ export function validate(
       const domainError = inputDomainError(input, ruleset);
       if (domainError !== null) {
         return { ok: false, reason: `tick ${t} input ${i}: ${domainError}` };
+      }
+      if (input.kind === 'placeTower' && ++towerPlacements > MAX_TOWER_PLACEMENTS) {
+        return {
+          ok: false,
+          reason: `too many tower placements: exceeds limit ${MAX_TOWER_PLACEMENTS}`,
+        };
       }
       if (
         (input.kind === 'placeTower' || input.kind === 'sellTower') &&

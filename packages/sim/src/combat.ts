@@ -57,9 +57,9 @@
 // so N `placeTower` commands for `mine` can now force up to 2N recomputes — N at
 // placement, N at detonation. Still bounded (≤1 per tick against `MAX_MATCH_TICKS`, and
 // the server compiles its own board rather than the request's), so it is a budget
-// accounting note rather than a live concern. Counted at sv17's widening (M3 story 2,
-// 1,000 → 2,000 commands): at most 4,000 recomputes a match, against 72,000 ticks. On
-// any budget-conforming board the in-flight slack stays far under the
+// accounting note rather than a live concern. Counted at sv17's widening (M3 story 2): one
+// recompute per command and one per detonated placement, at most
+// `MAX_TOTAL_TOWER_COMMANDS + MAX_TOWER_PLACEMENTS` = 3,000 a match, against 72,000 ticks. On any budget-conforming board the in-flight slack stays far under the
 // `MAX_TOWERS` (1000) cap vs the physical tower capacity, so the cap never bites
 // genuine play; a caller that drives the queue to the cap by abusive sell/rebuild
 // (or place/trigger/place) churn is exactly the forged/DoS case the backstop exists
@@ -83,7 +83,7 @@ import {
 import {
   effectiveSpeedFp,
   MAX_DOT_DURATION_CADENCE_RATIO,
-  MAX_TOTAL_TOWER_COMMANDS,
+  MAX_TOWER_PLACEMENTS,
 } from './ruleset-shared';
 import {
   MAX_TOWERS,
@@ -216,12 +216,13 @@ export interface DotRecord {
  * which still sees the oldest record because impacts resolve in step (1) while expiry runs
  * in step (6), and that is exactly when `applyDot` tests capacity. A re-hit refreshes rather
  * than appends, so it can never add a target. Across sources the count `S` is bounded by
- * `MAX_TOTAL_TOWER_COMMANDS` = 2,000, not by `MAX_TOWERS`: sources are minted tower ids,
- * not live towers, since a sold tower's records keep ticking, and minting one takes a
- * `placeTower`. So the worst table at a capacity test is under `(RATIO+1)*S = 18,000`:
- * compiled content driven by an accepted replay can never EXCEED the rail. (`S` was
- * `min(MAX_TOWERS, 1,000)` = 1,000 through sv16, and the rail 9,000; sv17 doubled the
- * command budget for M3's 30-wave run, and the rail with it.)
+ * the validator's placement budget `MAX_TOWER_PLACEMENTS` = 1,000, not by `MAX_TOWERS`:
+ * sources are minted tower ids, not live towers, since a sold tower's records keep
+ * ticking, and only a committed `placeTower` mints one — a sell never adds a source. So the
+ * worst table at a capacity test is under `(RATIO+1)*S = 9,000`: compiled content driven
+ * by an accepted replay can never EXCEED the rail. (Through sv16 `S` was the whole
+ * tower-command budget, which equalled `MAX_TOWERS` by coincidence; sv17 doubled that budget
+ * for juggling and gave placements a budget of their own, so the rail did not move.)
  *
  * Do not widen the duration:cadence gate — nor the aoe-plus-dot rejection beside it, whose
  * blast fan-out breaks the per-source bound — without re-deriving this;
@@ -232,21 +233,20 @@ export interface DotRecord {
  *
  * HAZARD (issue #77), CLOSED at sv17: `packages/sim` does not bound tower-id minting — its
  * placement gate is a live-count check, and build/sell/build mints fresh ids indefinitely
- * — so the SOURCE COUNT rests on the replay validator's tower-command budget. Through sv16
- * that budget lived in `packages/replay`, where it equalled `MAX_TOWERS` by coincidence and
- * could be raised with no test here failing. It now lives in `ruleset-shared.ts`, the
- * validator imports it, and this rail is computed from it, so the two move together.
+ * — so the SOURCE COUNT rests on the replay validator. Through sv16 it rested on the
+ * tower-command budget, which lived in `packages/replay`, equalled `MAX_TOWERS` by
+ * coincidence and could be raised with no test here failing. It now rests on the placement
+ * budget, which lives in `ruleset-shared.ts`; the validator imports it and this rail is
+ * computed from it, so the two move together, and the command budget can move alone.
  * Only the duration:cadence half is still a COMPILE gate; the source half is a validator
  * gate, and a caller that drives `step()` without `validate()` is outside it.
  *
  * Cost evidence, and the limits of that evidence: `packages/perf/src/dot-bench.ts`.
  *
- * Reaching the rail is a hostile state, not a play cost — it needs ~2,000 DoT sources in
+ * Reaching the rail is a hostile state, not a play cost — it needs ~1,000 DoT sources in
  * sustained contact, against ~150 towers on the whole stress scene, and real tables sit in
- * the hundreds. Doubling the rail at sv17 doubles the worst-case per-tick DoT cost a
- * hostile replay could drive; on the server's own bundle, `venom`'s 60-tick records expire
- * long before that many sources could accumulate. The per-source bound is analytic, not
- * measured on a DoT-bearing scene: none exists yet (`stress-40x40.json` carries `direct` and `slow` only, and `dot-bench.ts` seeds
+ * the hundreds. The per-source bound is analytic, not measured on a DoT-bearing scene: none
+ * exists yet (`stress-40x40.json` carries `direct` and `slow` only, and `dot-bench.ts` seeds
  * SYNTHETIC filler to reach the cap). S5b adds the DoT-bearing stress twin; until then, do
  * not cite a measured concurrency figure here.
  *
@@ -254,7 +254,7 @@ export interface DotRecord {
  * change owing its own `simVersion` bump. If S5b's stress scene lands anywhere near it, that
  * is a finding to raise, not a constant to nudge.
  */
-export const MAX_DOT_RECORDS = (MAX_DOT_DURATION_CADENCE_RATIO + 1) * MAX_TOTAL_TOWER_COMMANDS;
+export const MAX_DOT_RECORDS = (MAX_DOT_DURATION_CADENCE_RATIO + 1) * MAX_TOWER_PLACEMENTS;
 
 /**
  * Optional per-step event collector (#31): NOT part of `SimState` (never serialized,

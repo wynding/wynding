@@ -234,6 +234,7 @@
   "verify.fail": "Verification failed: {reason}",
   "verify.mismatch": "Verification mismatch: the replay re-simulated to a different outcome.",
   "verify.ok": "Verified: replay re-simulated to the same outcome.",
+  "verify.reason.crashed": "the verifier stopped unexpectedly",
   "verify.reason.timeout": "it took too long",
   "verify.reason.unavailable": "the verifier could not start",
   "verify.reason.unknown": "something went wrong",

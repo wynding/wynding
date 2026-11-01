@@ -12,6 +12,7 @@ import {
   SIM_VERSION,
   MAX_MATCH_TICKS,
   MAX_TOTAL_TOWER_COMMANDS,
+  MAX_TOWER_PLACEMENTS,
   type SimInput,
 } from '@wynding/sim';
 import { getBundledRuleset, defaultBoardId } from '@wynding/content';
@@ -138,29 +139,48 @@ describe('replay validate() — re-simulation budget caps', () => {
     expect(r.reason).toContain('too many inputs');
   });
 
-  it('rejects a replay whose total tower commands exceed the budget — 2,001 since sv17', () => {
-    expect(MAX_TOTAL_TOWER_COMMANDS).toBe(2_000);
-    const build: SimInput[] = [
-      { kind: 'placeTower', anchor: { col: 1, row: 1 }, towerId: 'basic' },
-    ];
+  // The two tower budgets (sv17, `ruleset-shared.ts`): 2,000 commands in all, of which at
+  // most 1,000 may be placements. Both are checked before anything is simulated.
+  const placeAt = (col: number, row: number): SimInput => ({
+    kind: 'placeTower',
+    anchor: { col, row },
+    towerId: 'basic',
+  });
+  const sell: SimInput = { kind: 'sellTower', tower: 1 };
+
+  it('rejects the 1,001st placement — the DoT source budget', () => {
+    expect(MAX_TOWER_PLACEMENTS).toBe(1_000);
     const r = validate(
-      makeReplay({ tickInputs: Array.from({ length: 2_001 }, () => build) }),
+      makeReplay({ tickInputs: Array.from({ length: 1_001 }, () => [placeAt(1, 1)]) }),
       m1Ruleset,
     );
+    expect(r.ok).toBe(false);
+    expect(r.reason).toBe('too many tower placements: exceeds limit 1000');
+  });
+
+  it('rejects the 2,001st tower command, a sell, with the placements inside their budget', () => {
+    expect(MAX_TOTAL_TOWER_COMMANDS).toBe(2_000);
+    const tickInputs = [
+      ...Array.from({ length: 1_000 }, () => [placeAt(1, 1)]),
+      ...Array.from({ length: 1_001 }, () => [sell]),
+    ];
+    const r = validate(makeReplay({ tickInputs }), m1Ruleset);
     expect(r.ok).toBe(false);
     expect(r.reason).toBe('too many tower commands: exceeds limit 2000');
   });
 
-  it('admits the juggling run 1,000 rejected: 40 kept basics and 481 sell-and-rebuild flips (QC, M3 story 2)', () => {
-    // The counterexample to sv16's 1,000: 40 + 2 × 481 = 1,002 tower commands, every one of
-    // them committed and paid for (40 × 5 + 481 × (5 − 3) = 1,162 bounty), on M2's own arc.
-    // The bundle starts with that much bounty and a long first countdown, so the whole
-    // script plays before a creep exists and nothing can block an anchor.
+  /**
+   * Play a juggling build on M2's own board and validate its log: `kept` basics placed and
+   * kept, then `flips` sell-and-rebuild flips of one more, every command committed and paid
+   * for (5 a placement, 5 − 3 a flip). The bundle starts with enough bounty and a long first
+   * countdown that the whole script plays before a creep exists, so nothing blocks an anchor.
+   */
+  function juggle(kept: number, flips: number) {
     const base = getBundledRuleset();
     const board = base.boards[0]!;
     const bundle: Ruleset = {
       ...base,
-      balance: { ...base.balance, startingBounty: 2_000, startingLives: 1_000 },
+      balance: { ...base.balance, startingBounty: 3_000 },
       boards: [
         {
           ...board,
@@ -169,7 +189,6 @@ describe('replay validate() — re-simulation budget caps', () => {
       ],
     };
     const ruleset = compileRuleset(bundle, board.id);
-    const kept = DEFENSE_PLAN.slice(0, 40);
     const flip = DEFENSE_PLAN[40]!;
     let state = createInitialState(1, ruleset);
     const tickInputs: SimInput[][] = [];
@@ -177,27 +196,21 @@ describe('replay validate() — re-simulation budget caps', () => {
       tickInputs.push(inputs);
       state = step(state, ruleset, inputs);
     };
-    const place = (a: { col: number; row: number }): SimInput => ({
-      kind: 'placeTower',
-      anchor: { col: a.col, row: a.row },
-      towerId: 'basic',
-    });
-    for (const a of kept) play([place(a)]);
-    for (let i = 0; i < 481; i++) {
-      play([place(flip)]);
+    for (const a of DEFENSE_PLAN.slice(0, kept)) play([placeAt(a.col, a.row)]);
+    for (let i = 0; i < flips; i++) {
+      play([placeAt(flip.col, flip.row)]);
       const at = state.towers.col.findIndex(
         (c, k) => c === flip.col && state.towers.row[k] === flip.row,
       );
       play([{ kind: 'sellTower', tower: state.towers.id[at]! }]);
     }
     expect(state.waveCursor, 'the script ran before any wave launched').toBe(0);
-    expect(state.towers.id).toHaveLength(40); // every flip committed and was undone
-    expect(state.bounty).toBe(2_000 - 1_162);
+    expect(state.towers.id, 'every flip committed and was undone').toHaveLength(kept);
+    expect(state.bounty).toBe(3_000 - 5 * kept - 2 * flips);
     while (!isTerminalPhase(state.phase)) play([]);
 
-    const commands = tickInputs.reduce((n, t) => n + t.length, 0);
-    expect(commands).toBe(1_002);
-    const r = validate(
+    const commands = tickInputs.flat();
+    const result = validate(
       {
         seed: 1,
         boardId: board.id,
@@ -207,8 +220,29 @@ describe('replay validate() — re-simulation budget caps', () => {
       },
       bundle,
     );
-    expect(r.ok, r.reason).toBe(true);
-    expect(r.finalHash).toBe(hashSimState(state));
+    return {
+      result,
+      liveFinalHash: hashSimState(state),
+      commands: commands.length,
+      placements: commands.filter((c) => c.kind === 'placeTower').length,
+    };
+  }
+
+  it('admits the juggling run 1,000 commands rejected: 40 kept basics and 481 flips (QC, M3 story 2)', () => {
+    // The counterexample to sv16's 1,000: 1,002 commands and 521 placements, 1,162 spent.
+    const run = juggle(40, 481);
+    expect(run.commands).toBe(1_002);
+    expect(run.placements).toBe(521);
+    expect(run.result.ok, run.result.reason).toBe(true);
+    expect(run.result.finalHash).toBe(run.liveFinalHash);
+  }, 30_000);
+
+  it('admits a run at both budgets exactly: 1,000 placements, 2,000 commands', () => {
+    const run = juggle(0, 1_000);
+    expect(run.placements).toBe(MAX_TOWER_PLACEMENTS);
+    expect(run.commands).toBe(MAX_TOTAL_TOWER_COMMANDS);
+    expect(run.result.ok, run.result.reason).toBe(true);
+    expect(run.result.finalHash).toBe(run.liveFinalHash);
   }, 30_000);
 });
 

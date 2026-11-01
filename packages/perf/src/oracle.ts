@@ -250,10 +250,9 @@ export const PEAK_ARMORED_LIVE_THRESHOLD = 50;
  *  silently discarded for want of table capacity (`combat.ts`'s `applyDot`,
  *  `MAX_DOT_RECORDS`).
  *
- *  LIMIT, recorded not fixed (packet §6): `MAX_DOT_RECORDS` was 9,000 when this was
- *  measured, and the measured peak `dotRecords` is 175 (stress) / 368 (control) — ~24x away
- *  then, and twice that since the rail doubled with the replay's tower-command budget, from
- *  the only condition that can make this counter nonzero. The assertion is correct as
+ *  LIMIT, recorded not fixed (packet §6): `MAX_DOT_RECORDS` is 9,000 and the measured
+ *  peak `dotRecords` is 175 (stress) / 368 (control) — ~24x away from the only
+ *  condition that can make this counter nonzero. The assertion is correct as
  *  specified and stays as the guard row, but a green result here is not evidence the
  *  warm-up-inclusive drop-aggregation path has ever actually been exercised: no run
  *  to date has come remotely close to triggering it. */
