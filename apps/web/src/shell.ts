@@ -504,7 +504,8 @@ export function createShell(
   previewHp.className = 'wy-wave-preview-hp';
   previewHp.hidden = true;
   const previewHpFull = doc.createElement('span');
-  previewHpFull.className = 'wy-preview-full';
+  // Its own class, not a row's `wy-preview-full`: the rows' sentences are read by that class.
+  previewHpFull.className = 'wy-preview-hp-full';
   const previewHpGlance = doc.createElement('span');
   previewHpGlance.className = 'wy-preview-hp-glance';
   previewHpGlance.setAttribute('aria-hidden', 'true');

@@ -1285,19 +1285,14 @@ a.wy-home:focus-visible {
   font-weight: 700;
 }
 
-/* A stream's route (M3 story 4): its arrow — the heading the board draws on that entrance and
-   its exit — then the walls it runs between, in words. Compact's column drops the words (below)
-   and keeps the arrow; the row's full sentence names the route either way. */
-.wy-preview-route {
-  display: flex;
+/* A stream's route (M3 story 4): its arrow leads the row — the heading the board draws on that
+   entrance and its exit. The walls it runs between, in words, lead a single entry's detail
+   (`.wy-preview-route-name`, below); a multi-entry line and Compact's column keep the arrow
+   alone, and the row's full sentence names the route either way. */
+.wy-preview-arrow {
   flex: none;
-  align-items: center;
-  gap: 0.25em;
-}
-
-.wy-preview-route-name {
-  color: var(--wy-fg-dim);
-  white-space: nowrap;
+  margin-inline-end: 0.3em;
+  font-weight: 700;
 }
 
 /* The wave's hit-point clause (M3 creep HP growth), once, between the title and the rows; hidden
@@ -1308,6 +1303,20 @@ a.wy-home:focus-visible {
   flex: none;
   margin: 0;
   font-weight: 700;
+}
+
+/* The clause's full sentence, hidden as a row's is (`.wy-preview-full`, restated rather than
+   shared: specs and AT tooling read the rows' sentences by that class). */
+.wy-preview-hp-full {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+  border: 0;
 }
 
 /* The name and deviating clause beside a SINGLE-entry wave, shown only where they fit — by
@@ -1330,6 +1339,7 @@ a.wy-home:focus-visible {
   content: '';
 }
 
+.wy-preview-route-name,
 .wy-preview-name,
 .wy-preview-clause {
   margin-inline-start: 0.6em;
@@ -3333,12 +3343,21 @@ a.wy-home:focus-visible {
     white-space: normal;
   }
 
-  .wy-preview-detail {
-    display: none;
+  /* A ROW'S ROUTE ARROW TAKES A LINE OF ITS OWN, above its icon (M3 story 4). The column has
+     no width to spare beside the icon and count — their wrap, above, is measured to the pixel
+     — and an arrow beside them would narrow the glance and move both. On its own line the
+     glance keeps the column's whole width, so every rule above holds as it did; the arrow
+     lines up with the icon (the wings' margin), and the row's full sentence names the route. */
+  .wy-wave-preview-list .wy-preview-entry {
+    flex-wrap: wrap;
   }
 
-  /* The column has no room for a route in words: the arrow stays (M3 story 4). */
-  .wy-preview-route-name {
+  .wy-wave-preview-list .wy-preview-arrow {
+    flex-basis: 100%;
+    margin-inline: 0.15em 0;
+  }
+
+  .wy-preview-detail {
     display: none;
   }
 
@@ -3413,6 +3432,22 @@ a.wy-home:focus-visible {
     --wy-rail-w: calc(min(9rem, 28vw) + var(--wy-safe-right));
 
     grid-template-columns: minmax(0, 1fr) var(--wy-rail-w);
+  }
+
+  /* THE BOARD PAYS THE TOP AND BOTTOM INSETS here (M3 story 4). The crossing board sets an
+     entrance into its top row and an exit into its bottom one, and in Compact `.wy-main` runs
+     the screen's full height, so on a device with system bars both sat under them. The board's
+     box steps in from each bar, and the letterbox projection fits the grid inside what is
+     left; with no inset both terms are 0 and nothing moves. The banner, while it shows, sits
+     below the board and pays the bottom inset itself (`.wy-banner` above), so the board pays
+     it only while the banner is hidden — the banner precedes `.wy-main` in the DOM
+     (`shell.ts`). `crossing-board.spec.ts` measures all four openings inside the safe area. */
+  .wy-board {
+    top: var(--wy-safe-top);
+  }
+
+  .wy-banner[hidden] ~ .wy-main .wy-board {
+    bottom: var(--wy-safe-bottom);
   }
 
   /* The Rail PAYS THE TOP INSET here, and only here (#153, owner ruling arm 3 + "inset and

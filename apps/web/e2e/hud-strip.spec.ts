@@ -1419,8 +1419,8 @@ async function stripRowsRead(
 
 /** What each phase's strip reads aloud: wave 1 before Start, wave 2 once Start claims wave 1. */
 const SPOKEN = {
-  'pre-start': ['10 × Creep — ground, armor 0, leak cost 1, no immunities'],
-  started: ['16 × Swarm Creep — ground, armor 0, leak cost 1, no immunities'],
+  'pre-start': ['10 × Creep — west to east, ground, armor 0, leak cost 1, no immunities'],
+  started: ['16 × Swarm Creep — west to east, ground, armor 0, leak cost 1, no immunities'],
 } as const;
 
 // The column's track is vw-capped and does not grow with the text, so a one-line row ran its

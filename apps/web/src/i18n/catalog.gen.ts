@@ -22,7 +22,9 @@ export const EN = {
   "action.up": "Move up",
   "app.home": "Wynding — home",
   "app.title": "Wynding",
-  "board.aria": "Game board. Arm a tower from the tower rail or its hotkey, then place it: with a mouse, click a cell; by touch, press to show the offset ghost, drag to adjust, then release; or with the keyboard, move the cursor with {move} and press {confirm}. Press {sell} to sell the selected tower.",
+  "board.aria": "Game board: {board}. Arm a tower from the tower rail or its hotkey, then place it: with a mouse, click a cell; by touch, press to show the offset ghost, drag to adjust, then release; or with the keyboard, move the cursor with {move} and press {confirm}. Press {sell} to sell the selected tower.",
+  "board.crossing-medium.name": "Crossing",
+  "board.unknown.name": "{id}",
   "card.need": "need {need}",
   "card.unaffordable": "Not enough Bounty: {need} more needed.",
   "controls.callWave": "Call wave",
@@ -277,7 +279,9 @@ export interface MessageParams {
   "action.up": Record<never, never>;
   "app.home": Record<never, never>;
   "app.title": Record<never, never>;
-  "board.aria": { "move": string | number; "confirm": string | number; "sell": string | number };
+  "board.aria": { "board": string | number; "move": string | number; "confirm": string | number; "sell": string | number };
+  "board.crossing-medium.name": Record<never, never>;
+  "board.unknown.name": { "id": string | number };
   "card.need": { "need": string | number };
   "card.unaffordable": { "need": string | number };
   "controls.callWave": Record<never, never>;

@@ -494,8 +494,10 @@ describe('overlay — the wave preview surface (M2-S2, PLAN.md P3 steps 16-17/19
     const sentence =
       '10 × Creep — west to east, air, armor 4 (subtracted from each direct hit; damage over time ignores it), leak cost 1, no immunities';
     expect(full.textContent).toBe(sentence);
-    // icon, count, the route (its arrow and its words), name, clause
-    expect(glance.textContent).toBe('×\u200b10→west to eastCreepair · armor −4 direct');
+    // icon, count, the route in words, name, clause — the route's arrow leads the row, beside
+    // the glance (M3 story 4)
+    expect(glance.textContent).toBe('×\u200b10west to eastCreepair · armor −4 direct');
+    expect(row.querySelector('.wy-preview-arrow')!.getAttribute('aria-hidden')).toBe('true');
     // #181: the same sentence is the visible row's tooltip — on the aria-hidden glance, never
     // the row, where a `title` would become an accessible name or description and have
     // assistive tech read the sentence a second time.
@@ -1241,6 +1243,14 @@ describe('overlay — Card/Panel/live region (PLAN.md P2)', () => {
     document.dispatchEvent(new KeyboardEvent('keydown', { code: 'Digit2' }));
     expect(actions).toEqual([]);
     overlay.destroy();
+  });
+
+  it('the board aria-label leads with the board’s display name — "Crossing" — and falls back to its id (M3 story 4)', () => {
+    const { shell } = setup();
+    expect(shell.board.getAttribute('aria-label')).toMatch(/^Game board: Crossing\. Arm a tower/);
+    shell.root.remove();
+    const other = setup(undefined, undefined, { board: { ...BOARD, id: 'field-01' } });
+    expect(other.shell.board.getAttribute('aria-label')).toMatch(/^Game board: field-01\. /);
   });
 
   it('the board aria-label names the actual bound keys and refreshes on rebind', () => {
@@ -4073,13 +4083,9 @@ describe('overlay — the wave strip (#181 L1)', () => {
       expect([...glance.children].map((c) => c.getAttribute('class'))).toEqual([
         'wy-creep-icon',
         'wy-preview-count',
-        'wy-preview-route',
       ]);
     }
-    expect(glances.map((g) => g.textContent)).toEqual([
-      '×\u200b8→west to east',
-      '×\u200b6→west to east',
-    ]);
+    expect(glances.map((g) => g.textContent)).toEqual(['×\u200b8', '×\u200b6']);
     // The deviation is still in each row's full sentence — the strip drops nothing for AT.
     expect(shell.preview.list.querySelectorAll('.wy-preview-full')[1]!.textContent).toContain(
       'armor 2',
@@ -4108,13 +4114,13 @@ describe('overlay — the wave strip (#181 L1)', () => {
       [
         'a single entry with notes',
         [entry({ armor: 2 })],
-        '×\u200b10→west to eastCreeparmor −2 direct',
+        '×\u200b10west to eastCreeparmor −2 direct',
       ],
-      ['a single entry without notes', [entry()], '×\u200b10→west to eastCreep'],
+      ['a single entry without notes', [entry()], '×\u200b10west to eastCreep'],
       [
         'a multi-entry wave',
         [entry({ count: 8 }), entry({ creepId: 'fast', count: 6 })],
-        '×\u200b8→west to east',
+        '×\u200b8',
       ],
     ];
     for (const [label, entries, glanceText] of shapes) {
@@ -4540,20 +4546,24 @@ describe('overlay — routes, hit points and the wave counter on the crossing bo
     expect(fullOf(rows(shell)[0]!)).toMatch(/^1 × Boss — boss, west to east, ground, /);
   });
 
-  it('shows each stream’s route in its glance: the arrow the board draws on its entrance and exit, then the walls in words', () => {
+  it('leads each row with its route’s arrow — the one the board draws on its entrance and exit — and gives a lone stream its route in words too', () => {
     const { overlay, shell } = setup();
     show(overlay, [entry({ count: 12 }), north({ creepId: 'swarm', count: 6 })]);
-    const routes = rows(shell).map((li) => li.querySelector('.wy-preview-route')!);
-    expect(routes.map((r) => r.querySelector('.wy-preview-arrow')!.textContent)).toEqual([
-      '→',
-      '↓',
+    const arrows = rows(shell).map((li) => li.querySelector('.wy-preview-arrow')!);
+    expect(arrows.map((a) => a.textContent)).toEqual(['→', '↓']);
+    for (const a of arrows) {
+      expect(a.getAttribute('aria-hidden')).toBe('true'); // the sentence already names it
+      expect(a.nextElementSibling!.className).toBe('wy-preview-glance'); // it leads the row
+    }
+    // A multi-entry line is read by shape and count: no words, the arrows carry the routes.
+    expect(shell.preview.list.querySelector('.wy-preview-route-name')).toBeNull();
+    // A lone stream has room: the route in words leads its detail, before the name.
+    show(overlay, [north({ creepId: 'swarm', count: 6 })], { waveNumber: 6 });
+    const detail = shell.preview.list.querySelector('.wy-preview-detail')!;
+    expect([...detail.children].map((c) => [c.className, c.textContent])).toEqual([
+      ['wy-preview-route-name', 'north to south'],
+      ['wy-preview-name', 'Swarm Creep'],
     ]);
-    expect(routes.map((r) => r.querySelector('.wy-preview-route-name')!.textContent)).toEqual([
-      'west to east',
-      'north to south',
-    ]);
-    // Presentation only: the glance is aria-hidden, the route already in each full sentence.
-    for (const r of routes) expect(r.closest('[aria-hidden="true"]')).not.toBeNull();
   });
 
   it('aggregates per (creep, route): the same creep from two entrances is two rows, two routes', () => {

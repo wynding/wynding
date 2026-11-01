@@ -727,11 +727,26 @@ export function createOverlay(
   // sell are single bindings; an unbound action falls back to `settings.unbound` (via
   // `codeLabel`). Set here — overlay owns the Shell's dynamic content, like the Card hotkey
   // badge — and refreshed on every rebind below.
+  //
+  // It leads with the board's display name (M3 story 4: "Crossing", owner ruling 2026-11-01) —
+  // an i18n string keyed by content id like a creep's, with the id itself as the fallback for
+  // a board this build has no name for.
+  const BOARD_NAME: Readonly<Partial<Record<string, () => string>>> = Object.assign(
+    Object.create(null) as Record<string, () => string>,
+    { 'crossing-medium': () => t('board.crossing-medium.name') },
+  );
+  const boardName = (): string =>
+    BOARD_NAME[board.id]?.() ?? t('board.unknown.name', { id: board.id });
   function refreshBoardAria(): void {
     const move = (['up', 'down', 'left', 'right'] as const).map(codeLabel).join(' / ');
     shell.board.setAttribute(
       'aria-label',
-      t('board.aria', { move, confirm: codeLabel('confirm'), sell: codeLabel('sell') }),
+      t('board.aria', {
+        board: boardName(),
+        move,
+        confirm: codeLabel('confirm'),
+        sell: codeLabel('sell'),
+      }),
     );
   }
   refreshBoardAria();
@@ -2305,25 +2320,15 @@ export function createOverlay(
     count.className = 'wy-preview-count';
     count.textContent = parts.count;
     glance.append(creepIcon(doc, entry, palette), count);
-    // The route (M3 story 4): its arrow always, its words where the layout has room for them —
-    // Compact's column drops them (`ui.css`), leaving the arrow, with the words in the row's
-    // full sentence (m3.md's fallback, m2.md's ruling-3-narrowed pattern).
-    const route = doc.createElement('span');
-    route.className = 'wy-preview-route';
-    if (parts.arrow !== '') {
-      const arrow = doc.createElement('span');
-      arrow.className = 'wy-preview-arrow';
-      arrow.textContent = parts.arrow;
-      route.append(arrow);
-    }
-    const routeName = doc.createElement('span');
-    routeName.className = 'wy-preview-route-name';
-    routeName.textContent = parts.route;
-    route.append(routeName);
-    glance.append(route);
     if (single) {
       const detail = doc.createElement('span');
       detail.className = 'wy-preview-detail';
+      // The route in words leads the detail (M3 story 4), so where the strip is short of room
+      // it is the last of the three to wrap away; the row's arrow stays either way.
+      const route = doc.createElement('span');
+      route.className = 'wy-preview-route-name';
+      route.textContent = parts.route;
+      detail.append(route);
       const name = doc.createElement('span');
       name.className = 'wy-preview-name';
       name.textContent = parts.name;
@@ -2341,8 +2346,8 @@ export function createOverlay(
 
   /** The strings one glance is written from — the single source for `buildEntryGlance` and the
    *  locale sentinel's `previewEntryGlanceText`, so the two cannot drift (a drift makes every
-   *  HUD refresh rebuild the list and reset a scrolled strip). `name` and `clause` are empty
-   *  unless the wave has a single entry; `clause` is also empty when the entry deviates in
+   *  HUD refresh rebuild the list and reset a scrolled strip). `route`, `name` and `clause` are
+   *  empty unless the wave has a single entry; `clause` is also empty when the entry deviates in
    *  nothing. The join separator is punctuation between already-translated fragments, not
    *  copy — the same posture the immunities list has always taken with its `', '`. */
   function glanceParts(
@@ -2350,15 +2355,13 @@ export function createOverlay(
     single: boolean,
   ): {
     readonly count: string;
-    readonly arrow: string;
     readonly route: string;
     readonly name: string;
     readonly clause: string;
   } {
     return {
       count: countText(entry.count),
-      arrow: routeArrow(entry),
-      route: routeText(entry),
+      route: single ? routeText(entry) : '',
       name: single ? creepName(entry.creepId) : '',
       clause: single ? previewEntryNotes(entry).join(' · ') : '',
     };
@@ -2387,8 +2390,8 @@ export function createOverlay(
   /** The text `buildEntryGlance` writes, in document order — the locale sentinel's half of the
    *  row comparison (the icon carries no text). */
   function previewEntryGlanceText(entry: PreviewEntryVM, single: boolean): string {
-    const { count, arrow, route, name, clause } = glanceParts(entry, single);
-    return count + arrow + route + name + clause;
+    const { count, route, name, clause } = glanceParts(entry, single);
+    return count + route + name + clause;
   }
 
   /** The scroll form's cue (`ui.css`): each edge with entries past it fades, because the
@@ -2524,7 +2527,9 @@ export function createOverlay(
     const expectedFirstRow =
       firstEntry === undefined
         ? null
-        : previewEntryFull(firstEntry) + previewEntryGlanceText(firstEntry, single);
+        : previewEntryFull(firstEntry) +
+          routeArrow(firstEntry) +
+          previewEntryGlanceText(firstEntry, single);
     const firstRowCurrent = previewEl.list.firstElementChild?.textContent ?? null;
     if (
       key === lastPreviewKey &&
@@ -2563,7 +2568,20 @@ export function createOverlay(
       const full = doc.createElement('span');
       full.className = 'wy-preview-full';
       full.textContent = sentence;
-      li.append(full, buildEntryGlance(entry, single, sentence));
+      li.append(full);
+      // The route's arrow leads the row (M3 story 4): the heading the board draws on this
+      // stream's entrance and exit. Its own aria-hidden node, outside the glance, so the
+      // glance's layout — Compact's icon-above-count wrap — is the one it has always had,
+      // only narrower. The words are the full sentence's, and the single-entry detail's.
+      const arrowText = routeArrow(entry);
+      if (arrowText !== '') {
+        const arrow = doc.createElement('span');
+        arrow.className = 'wy-preview-arrow';
+        arrow.setAttribute('aria-hidden', 'true');
+        arrow.textContent = arrowText;
+        li.append(arrow);
+      }
+      li.append(buildEntryGlance(entry, single, sentence));
       previewEl.list.appendChild(li);
     }
     syncStripScroll();

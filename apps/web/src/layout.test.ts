@@ -430,6 +430,9 @@ describe('layout — the countdown dial, the hud floor, and hidden text’s cont
     expect(ruleBody(uncommented, '.wy-preview-entry')).toContain('position: relative;');
     expect(ruleBody(uncommented, '.wy-chip-full')).toContain('position: absolute;');
     expect(ruleBody(uncommented, '.wy-preview-full')).toContain('position: absolute;');
+    // And the wave's hit-point clause (M3), against its own paragraph.
+    expect(ruleBody(uncommented, '.wy-wave-preview-hp')).toContain('position: relative;');
+    expect(ruleBody(uncommented, '.wy-preview-hp-full')).toContain('position: absolute;');
   });
 
   it('the narrow strip’s tightenings out-rank the rules they refine', () => {
@@ -546,7 +549,11 @@ describe('layout — the safe-area seam (#136)', () => {
     // `--wy-rail-padding-bottom` and its `padding-right` (2); then the Compact fork — `.wy-banner`
     // bottom (1), `.wy-status` top/left/bottom (3), and `.wy-rail`'s named
     // `--wy-rail-padding-top` and `scroll-padding-top` (2) — sixteen.
-    expect(seen, 'expected the sixteen axis-named sites that read an inset').toBe(16);
+    //
+    // 16 → 18 (M3 story 4): the Compact `.wy-board` pays the top inset (`top`) and, while the
+    // banner is hidden, the bottom one (`bottom`) — the crossing board's north entrance and
+    // south exit sit in its top and bottom rows. Two bare offsets, matched and axis-checked.
+    expect(seen, 'expected the eighteen axis-named sites that read an inset').toBe(18);
   });
 
   it('the three guards together account for every token read', () => {
@@ -562,8 +569,9 @@ describe('layout — the safe-area seam (#136)', () => {
     // Standard Dock added one, its `bottom`). Asserting the
     // partition means a NEW read cannot land in the gap between the guards: it either matches
     // one of them or fails this. Each guard's own count pins its share; this pins the whole.
+    // 21 → 23 (M3 story 4): the Compact board's two inset offsets, counted by the guard above.
     const reads = uncommented.match(/var\(--wy-safe-(?:top|right|bottom|left)\)/g) ?? [];
-    expect(reads).toHaveLength(21);
+    expect(reads).toHaveLength(23);
   });
 
   it('vertical bounds read a VERTICAL axis token', () => {

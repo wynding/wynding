@@ -280,7 +280,7 @@ test.describe('Compact layout (PLAN.md P1 / two-layouts contract)', () => {
     const entries = preview.locator('li');
     await expect(entries).toHaveCount(1); // the shipped bundle's single creep kind
     await expect(preview.locator('.wy-preview-full').first()).toHaveText(
-      '10 × Creep — ground, armor 0, leak cost 1, no immunities',
+      '10 × Creep — west to east, ground, armor 0, leak cost 1, no immunities',
     );
     const glance = preview.locator('.wy-preview-glance').first();
     await expect(glance.locator('svg.wy-creep-icon')).toBeVisible();
@@ -374,10 +374,10 @@ test.describe('Compact layout (PLAN.md P1 / two-layouts contract)', () => {
     // pause by design, so nothing measured changes.
     await expect(entries).toHaveCount(4);
     await expect(preview.locator('.wy-preview-full')).toHaveText([
-      '10 × Swarm Creep — ground, armor 0, leak cost 1, no immunities',
-      '6 × Fast Creep — ground, armor 0, leak cost 1, no immunities',
-      '4 × Armored Creep — ground, armor 6 (subtracted from each direct hit; damage over time ignores it), leak cost 1, no immunities',
-      '4 × Flying Creep — air, armor 0, leak cost 1, no immunities',
+      '10 × Swarm Creep — north to south, ground, armor 0, leak cost 1, no immunities',
+      '6 × Fast Creep — west to east, ground, armor 0, leak cost 1, no immunities',
+      '4 × Armored Creep — north to south, ground, armor 6 (subtracted from each direct hit; damage over time ignores it), leak cost 1, no immunities',
+      '4 × Flying Creep — west to east, air, armor 0, leak cost 1, no immunities',
     ]);
     // The arc's densest wave, in the form a player actually reads it (#181): each row is the
     // creep's own board art and its count — the shapes tell the four kinds apart (the
