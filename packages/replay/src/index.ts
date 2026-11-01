@@ -60,12 +60,12 @@ export function currentRulesetHash(bundle: Ruleset): string {
 // the replay loop after only the public, forgeable simVersion/rulesetHash checks, so
 // without bounds a caller could submit millions of ticks (or inputs per tick) to burn
 // CPU until timeout on every request — an unauthenticated compute-exhaustion vector.
-/** Max ticks in a replay log (30 min at 20 Hz), and the hard ceiling the re-simulation
- *  may run to (log + empty catch-up to terminal) — THE SAME constant `compileRuleset`
- *  bounds a bundle's baseline run against — imported, not duplicated, so the two can
- *  never drift into a compiles-but-times-out gap. A ruleset-derived ceiling formula
- *  would only ever saturate to this cap (adversarial build/sell juggling dominates),
- *  so the constant is the honest bound. */
+/** Max ticks in a replay log (one hour at 20 Hz since sv17, 30 min before it), and the
+ *  hard ceiling the re-simulation may run to (log + empty catch-up to terminal) — THE
+ *  SAME constant `compileRuleset` bounds a bundle's baseline run against — imported, not
+ *  duplicated, so the two can never drift into a compiles-but-times-out gap. A
+ *  ruleset-derived ceiling formula would only ever saturate to this cap (adversarial
+ *  build/sell juggling dominates), so the constant is the honest bound. */
 const MAX_TICKS = MAX_MATCH_TICKS;
 /** Max inputs applied on a single tick — far above any legitimate command burst. */
 export const MAX_INPUTS_PER_TICK = 64;
@@ -74,6 +74,21 @@ export const MAX_INPUTS_PER_TICK = 64;
  * that reaches the maze-invariant check runs a full grid-wide Dijkstra, and a rejected
  * placement is a free no-op (no bounty spent), so the economy cannot rate-limit
  * repeats — without this cap an attacker could pack minutes of CPU into one replay.
+ *
+ * 1,000 still admits legitimate play at M3's 30-wave length (re-derived at sv17, M3
+ * story 2), because a command that COMMITS is never free: a placement costs at least 5
+ * (`basic`), and a sold tower refunds ⌊¾⌋ of its cost, so every place-then-sell nets at
+ * least 2. A run whose whole income is at most I and that keeps H towers (standing, or
+ * consumed like a mine) can therefore commit at most I − 4H tower commands. M3's
+ * first-pass arc pays at most I = 1,423 (80 starting + 1,084 kills + 102 clear bonuses +
+ * 157 early calls, `docs/milestones/m3.md`), so a run passes 1,000 only by keeping
+ * fewer than 106 towers and spending most of its income on flips: a 60-tower build
+ * would need about 16 sell-and-rebuild flips every wave. A full board (≤ 143 towers),
+ * rebuilding its whole mix once (≤ 286 more) and a flip every wave (60) come to under
+ * 500. The shipped client logs only commands its own preview accepts, so the free no-ops
+ * this cap exists for do not come from play. If the balance pass raises I well past
+ * 1,423, re-derive here. Raising the cap is not free: `combat.ts`'s `MAX_DOT_RECORDS`
+ * derivation rests on it (issue #77's HAZARD) and would have to move with it.
  */
 const MAX_TOTAL_TOWER_COMMANDS = 1_000;
 

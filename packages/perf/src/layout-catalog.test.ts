@@ -21,6 +21,7 @@ import {
   computeDistanceField,
   shortestPath,
   DIAG_LEN,
+  MAX_MATCH_TICKS,
   type CompiledRuleset,
   type TowerValidityView,
 } from '@wynding/sim';
@@ -494,7 +495,7 @@ describe('the impossibilities that forced the amendment (pinned, not re-argued)'
 });
 
 describe('the catalog bundle’s compile-time gate arithmetic', () => {
-  it('pins latestSpawnTick + maxTraversalTicks = 35,773 <= 36,000 at the ¾ slow floor', () => {
+  it('pins latestSpawnTick + maxTraversalTicks = 35,773 <= 72,000 at the ¾ slow floor', () => {
     const wave = compiled.waves[0]!;
     const spawns = wave.spawns;
     const latestSpawnTick = wave.countdownTicks + spawns[spawns.length - 1]!.offsetTicks;
@@ -513,13 +514,19 @@ describe('the catalog bundle’s compile-time gate arithmetic', () => {
     const maxTraversalTicks = Math.ceil((cells * DIAG_LEN) / minEffSpeedFp);
     expect(maxTraversalTicks).toBe(32_178);
     expect(latestSpawnTick + maxTraversalTicks).toBe(35_773);
-    expect(latestSpawnTick + maxTraversalTicks).toBeLessThanOrEqual(36_000);
+    expect(latestSpawnTick + maxTraversalTicks).toBeLessThanOrEqual(MAX_MATCH_TICKS);
+    expect(MAX_MATCH_TICKS).toBe(72_000);
   });
 
-  it('the shipped ¼ floor would NOT compile — the ¾ floor is what makes this bundle legal', () => {
+  it('the shipped ¼ floor would not have compiled under sv16’s 36,000 — that is why the floor is ¾ — and does under sv17’s 72,000', () => {
+    // The floor stays ¾: the committed replay and the pinned window were recorded with it.
+    // `packages/content/src/catalog.test.ts` compiles the ¼ variant and its cap boundary.
     const quarterFloorEff = Math.max(Math.floor((23 * 128) / 256), Math.ceil((23 * 1) / 4));
     expect(quarterFloorEff).toBe(11);
-    expect(3_595 + Math.ceil(579_200 / quarterFloorEff)).toBeGreaterThan(36_000);
+    const quarterBound = 3_595 + Math.ceil(579_200 / quarterFloorEff);
+    expect(quarterBound).toBe(56_250);
+    expect(quarterBound).toBeGreaterThan(36_000);
+    expect(quarterBound).toBeLessThanOrEqual(MAX_MATCH_TICKS);
   });
 
   it('the AoE scan gate clears: MAX_TOWERS (1000) x 812 scheduled spawns = 812,000 <= 2,000,000', () => {

@@ -3,7 +3,7 @@
 // (ADR 0006 anti-cheat spine).
 
 import { describe, it, expect } from 'vitest';
-import { SIM_VERSION, type SimInput } from '@wynding/sim';
+import { SIM_VERSION, MAX_MATCH_TICKS, type SimInput } from '@wynding/sim';
 import { getBundledRuleset, defaultBoardId } from '@wynding/content';
 import type { Ruleset, RulesetBoard } from '@wynding/types';
 import {
@@ -47,7 +47,7 @@ describe('replay validate() — terminal re-simulation + score', () => {
     // branch and `packages/content`'s registry invariant are where the two are told apart.
     expect(first.stars).toBe(0);
     expect(first.score).toBe(0);
-    expect((first.ticks ?? 0) < 36_000).toBe(true); // terminated well before the ceiling
+    expect((first.ticks ?? 0) < MAX_MATCH_TICKS).toBe(true); // terminated well before the ceiling
   });
 
   it('exposes a 64-hex content-derived ruleset hash', () => {
@@ -102,13 +102,22 @@ describe('replay validate() — envelope structural validation', () => {
 });
 
 describe('replay validate() — re-simulation budget caps', () => {
-  it('rejects a replay whose tick count exceeds the budget', () => {
+  it('rejects a replay whose tick count exceeds the budget — 72,001 since sv17, and not 72,000', () => {
+    expect(MAX_MATCH_TICKS).toBe(72_000);
     const r = validate(
-      makeReplay({ tickInputs: Array.from({ length: 36_001 }, () => []) }),
+      makeReplay({ tickInputs: Array.from({ length: 72_001 }, () => []) }),
       m1Ruleset,
     );
     expect(r.ok).toBe(false);
-    expect(r.reason).toContain('too many ticks');
+    expect(r.reason).toBe('too many ticks: 72001 exceeds limit 72000');
+    // One tick shorter passes the length check. It is still rejected — this undefended
+    // log runs on long after the run ends — but as padding, not for its length.
+    const atCap = validate(
+      makeReplay({ tickInputs: Array.from({ length: 72_000 }, () => []) }),
+      m1Ruleset,
+    );
+    expect(atCap.ok).toBe(false);
+    expect(atCap.reason).toMatch(/^tick \d+ is logged past match termination$/);
   });
 
   it('rejects a replay with too many inputs on a single tick', () => {

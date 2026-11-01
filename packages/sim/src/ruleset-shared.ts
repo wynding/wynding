@@ -97,8 +97,19 @@ export class RulesetError extends Error {
  *  implementations must agree on the score they hand back, so a build that grades a
  *  stored sv15 replay by sv16 rules would answer a question it was never asked. The
  *  capability profile is again unchanged — which bundles compile is identical either
- *  side of the bump. */
-export const SIM_VERSION = 16;
+ *  side of the bump.
+ *
+ *  M3 story 2 bumps 16 → 17 — the RUN-LENGTH CAP. `MAX_MATCH_TICKS` doubles from 36,000
+ *  to 72,000 (`ruleset.ts`), so a 30-wave arc compiles. Like sv16, `step` is
+ *  byte-identical: every hash, every trace and the determinism goldens stand. What moves
+ *  is the edge of what is legal, on both sides of the replay contract: a bundle whose
+ *  hands-off schedule plus worst-case walk lands between 36,001 and 72,000 ticks now
+ *  compiles, and a replay that terminates in that range now validates where sv16 timed it
+ *  out. By the code's own precedent (`AOE_SCAN_CEILING`), changing which bundles compile
+ *  is a behaviour change, and an sv16 validator would reject the very replays sv17
+ *  accepts. The capability profile's fields are unchanged; the tick cap is not one of
+ *  them. */
+export const SIM_VERSION = 17;
 
 /** Canonical immunity order — `slow` before `stun` (decision: "one hash form"). */
 const IMMUNITY_ORDER = ['slow', 'stun'] as const;

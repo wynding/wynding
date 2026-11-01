@@ -203,15 +203,15 @@ describe('the compile-bound arithmetic, pinned as named numbers (PLAN step 16)',
     expect(totalScheduledSpawns).toBe(304);
   });
 
-  it('total bound = latestSpawnTick + traversal = 16027, comfortably under MAX_MATCH_TICKS (36000)', () => {
+  it('total bound = latestSpawnTick + traversal = 16027, comfortably under MAX_MATCH_TICKS (72000)', () => {
     // Derived from the same bundle-read terms the tests above pin, not re-typed as
     // `1900 + 14127`: re-typing left this test green under a bundle mutation that turned
     // its siblings red, which is the one thing a bound like this must not do.
     const total = latestSpawnTick + traversal;
     expect(total).toBe(16027);
-    expect(MAX_MATCH_TICKS).toBe(36_000);
+    expect(MAX_MATCH_TICKS).toBe(72_000);
     expect(total).toBeLessThan(MAX_MATCH_TICKS);
-    expect(MAX_MATCH_TICKS - total).toBe(19_973); // the stated headroom
+    expect(MAX_MATCH_TICKS - total).toBe(55_973); // the stated headroom (19,973 under sv16's 36,000)
   });
 
   // The bundle must actually compile under this bound — a passing arithmetic pin

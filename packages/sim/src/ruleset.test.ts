@@ -183,7 +183,7 @@ describe('compileRuleset — tower catalog domains', () => {
     rejects((b) => (b.towerCatalog[0]!.attack!.travelTicks = 30)); // >= cadence → >1 impact in flight
   });
 
-  it('rejects a burst effect form unsupported at simVersion 16 (valid schema, capability-gated: allowedBurstForms)', () => {
+  it('rejects a burst effect form unsupported at simVersion 17 (valid schema, capability-gated: allowedBurstForms)', () => {
     // Before M2-S9, 'burst' wasn't in `allowedEffectKinds` at all, so ANY burst
     // bundle tripped that gate first. Since sv13 'burst' joins `allowedEffectKinds`
     // (capability.ts's header comment — it now defers to the schema, exactly the
@@ -201,7 +201,7 @@ describe('compileRuleset — tower catalog domains', () => {
     // precisely why the profile's own `allowedBurstForms` ceiling has to reject it.
     b.towerCatalog[0]!.effects = [{ kind: 'burst', form: 'single', damage: 10 }];
     expect(() => compileRuleset(b as Ruleset, 'test')).toThrow(
-      "burst effect form 'single' unsupported at simVersion 16",
+      "burst effect form 'single' unsupported at simVersion 17",
     );
   });
 
@@ -453,7 +453,7 @@ describe('compileRuleset — wave domains', () => {
   });
 
   it('rejects a baseline run that cannot terminate within the tick budget', () => {
-    rejects((b) => (b.boards[0]!.waves[0]!.countdownTicks = 40_000)); // launch alone > the 36k ceiling
+    rejects((b) => (b.boards[0]!.waves[0]!.countdownTicks = 80_000)); // launch alone > the 72k ceiling
   });
 
   // A second wave, a second entry, a nonzero clearBonus, and a nonzero entry
@@ -462,14 +462,14 @@ describe('compileRuleset — wave domains', () => {
   // describe block below rather than pinned here as rejections.
 
   it('rejects a wave whose index skips past the tick budget when SUMMED across waves', () => {
-    // Bound-gate regression (step 4): each individual wave stays under the 36k
+    // Bound-gate regression (step 4): each individual wave stays under the 72k
     // ceiling on its own, but the SUM across all waves must still fit — a
     // per-wave-only check would wrongly accept this.
     rejects((b) => {
       const w0 = b.boards[0]!.waves[0]!;
       b.boards[0]!.waves = [
-        { ...w0, index: 0, countdownTicks: 20_000 },
-        { ...w0, index: 1, countdownTicks: 20_000 },
+        { ...w0, index: 0, countdownTicks: 40_000 },
+        { ...w0, index: 1, countdownTicks: 40_000 },
       ];
     });
   });

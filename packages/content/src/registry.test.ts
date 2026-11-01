@@ -434,14 +434,15 @@ describe('the compile-bound arithmetic, pinned as named numbers (M2-S5a P5, mirr
 
   // Re-pinned M2-S11 P4 (measured): 30470 → 31070, entirely from `latestSpawnTick`'s
   // own +600 above; `traversal` is unmoved (P4 touched neither the board nor the slow
-  // floor nor the slowest creep's speed). Headroom under MAX_MATCH_TICKS: 4930.
-  it('total bound = latestSpawnTick + traversal = 31070, comfortably under MAX_MATCH_TICKS (36000)', () => {
+  // floor nor the slowest creep's speed). Headroom under MAX_MATCH_TICKS: 4930 at
+  // sv16's 36,000, 40,930 since sv17's 72,000 (M3 story 2) — the bound itself is unmoved.
+  it('total bound = latestSpawnTick + traversal = 31070, comfortably under MAX_MATCH_TICKS (72000)', () => {
     // Derived from the same bundle-read terms the tests above pin, not re-typed as
     // `3440 + 27030` — the same reason stress.test.ts's own pin does this.
     const total = latestSpawnTick + traversal;
     console.log('registry.test.ts: total bound =', total, 'MAX_MATCH_TICKS =', MAX_MATCH_TICKS);
     expect(total).toBe(31_070);
-    expect(MAX_MATCH_TICKS).toBe(36_000);
+    expect(MAX_MATCH_TICKS).toBe(72_000);
     expect(total).toBeLessThan(MAX_MATCH_TICKS);
   });
 

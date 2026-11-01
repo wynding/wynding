@@ -49,7 +49,7 @@ must also bound _dimensions_, **before** re-simulation:
 
 - reject if `tickInputs.length` exceeds the board's **maximum match length**;
   _(SUPERSEDED 2026-08-12 — shipped as the deliberate CONSTANT `MAX_TICKS =
-MAX_MATCH_TICKS` (36,000 ticks — the value lives in `packages/sim/src/ruleset.ts`,
+MAX_MATCH_TICKS` (72,000 ticks since sv17, M3 story 2; 36,000 before it — the value lives in `packages/sim/src/ruleset.ts`,
   imported by the validator in `packages/replay`), not a ruleset-derived formula:
   the validator's own comment records the reasoning — "a ruleset-derived ceiling
   formula would only ever saturate to this cap (adversarial build/sell juggling

@@ -257,8 +257,14 @@ const MAX_SCHEDULED_SPAWNS = 10_000;
  *  bundle whose baseline run (launch + spawn + slowest full traversal) can't reach a
  *  terminal state within it, and the replay validator re-simulates to exactly this
  *  ceiling — so replay imports THIS constant (rather than duplicating the literal) and
- *  the two can never drift into a compiles-but-times-out gap. */
-export const MAX_MATCH_TICKS = 36_000;
+ *  the two can never drift into a compiles-but-times-out gap.
+ *
+ *  72,000 ticks — one hour of game time at 20 Hz — since sv17 (M3 story 2), up from
+ *  36,000. A 30-wave arc's hands-off schedule plus the worst-case walk on M3's
+ *  28 × 24 board (17,790 + 27,030 = 44,820, `docs/milestones/m3.md`) does not fit
+ *  under 36,000. Moving it changes which bundles compile and which replays validate,
+ *  so it moved with its own `simVersion` bump, the `AOE_SCAN_CEILING` precedent below. */
+export const MAX_MATCH_TICKS = 72_000;
 
 /**
  * Compile-time ceiling on AoE scan-work (M2-S4a, step 7 — Codex R1-4/R1-5): per-tick

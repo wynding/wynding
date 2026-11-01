@@ -780,9 +780,10 @@ describe('9/14. chain-lock is permitted (Rob, 2026-08-04): two stun towers, offs
     // ruleset's own single generated wave, so `waveResolved[0]` can never become
     // true while it survives (aliveByWave[0] stays > 0 forever) — the match can
     // never reach 'won' regardless of what that other wave does. Its own single
-    // spawn is pushed to the tail of the tick budget (countdownTicks 30,000 — the
-    // largest this board's compile-time bound gate accepts alongside the board's
-    // own traversal-ticks term) so it plays no role either way: even a leak from
+    // spawn is pushed late into the tick budget (countdownTicks 30,000 — under the
+    // 36,000 cap this was the largest round figure the board's compile-time bound
+    // gate accepted beside its own traversal-ticks term; sv17's 72,000 accepts it
+    // with more room) so it plays no role either way: even a leak from
     // it costs at most one life against the default starting 10, never 'lost'.
     const bundle = testBundle(LANE, {
       extraTowers: [T_STUN_BLANK],
@@ -811,8 +812,9 @@ describe('9/14. chain-lock is permitted (Rob, 2026-08-04): two stun towers, offs
     expect(isTerminalPhase(s.phase)).toBe(false);
     expect(s.phase).toBe('running');
     // An explicit budget, not vitest's 5s default for short tests: this case steps the whole
-    // MAX_MATCH_TICKS match by design (~0.5s bare, ~1s under v8 coverage locally), and a CI
-    // runner executing every package's suite in parallel pushed it past 5s once (PR #169).
+    // MAX_MATCH_TICKS match by design (~0.5s bare, ~1s under v8 coverage locally at sv16's
+    // 36,000 ticks; sv17's 72,000 doubles that, ~2s measured bare), and a CI runner
+    // executing every package's suite in parallel pushed it past 5s once (PR #169).
     // The assertions are unchanged; only the wall-clock allowance fits the work.
   }, 30_000);
 });
@@ -1037,7 +1039,7 @@ describe('13. a bundle carrying a stun tower still compiles (bound gate not regr
   // the exact boundary in O(log n) compiles.
   function boundary(withStun: boolean): number {
     let lo = 1; // countdownTicks must be a positive int (schema)
-    let hi = 40_000; // > MAX_MATCH_TICKS (36_000) with slack — known to reject
+    let hi = 80_000; // > MAX_MATCH_TICKS (72_000) with slack — known to reject
     if (!compiles(withStun, lo)) throw new Error('probe lower bound unexpectedly rejects');
     if (compiles(withStun, hi)) throw new Error('probe upper bound unexpectedly compiles');
     while (hi - lo > 1) {

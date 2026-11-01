@@ -1,9 +1,10 @@
 // capability.test.ts — the per-simVersion capability profile (M2-S1, widened at
 // M2-S2 to sv6, M2-S3 to sv7, M2-S4a to sv8, M2-S5a to sv9, M2-S6 to sv10, M2-S7 to
 // sv11, M2-S8 to sv12, M2-S9 to sv13, M2-S10 to sv14, #70 to sv15 — the first
-// bump that widens nothing — and #25 to sv16, which widens nothing either and does not
-// even change a tick rule, only the terminal grading contract): the simVersion-16
-// profile's exact shape, an
+// bump that widens nothing — #25 to sv16, which widens nothing either and does not
+// even change a tick rule, only the terminal grading contract — and M3 story 2 to sv17,
+// whose run-length cap lives outside the profile): the simVersion-17 profile's exact
+// shape, an
 // unknown-simVersion throw, and — since the profile itself is inert data gated only
 // inside `compileRuleset` — accept-at-boundary / reject-beyond-boundary coverage for
 // every dimension still narrower than the schema, exercised through `compileRuleset`
@@ -131,8 +132,8 @@ describe('capabilityProfile', () => {
     expect(capabilityProfile(SIM_VERSION).maxAoeRadiusFp).toBeLessThanOrEqual(MAX_BLAST_RADIUS_FP);
   });
 
-  it('simVersion 16 carries sv15’s profile verbatim — a grading-only bump — still deferring wave/economy/catalog-size/immunity/domain/role axes to the schema', () => {
-    expect(capabilityProfile(16)).toEqual({
+  it('simVersion 17 carries sv16’s profile verbatim — a run-length-cap bump — still deferring wave/economy/catalog-size/immunity/domain/role axes to the schema', () => {
+    expect(capabilityProfile(17)).toEqual({
       maxTowerCatalogSize: 64,
       maxWavesPerBoard: 64,
       maxEntriesPerWave: 16,
@@ -157,11 +158,12 @@ describe('capabilityProfile', () => {
       maxBurstTravelTicks: 8,
     });
     // Every prior version is deleted with each bump (G11, capability.ts's header).
-    // sv15 is the same case sv14 was: its CONTENTS are what the assertion above just
-    // pinned, so it did not go for misdescribing bundle legality — it went because
-    // v16 GRADES a terminal state differently (a win floors at ≥ 1 star, a loss scores
-    // 0), and a live sv15 entry would advertise semantics this build no longer honours.
-    // It throws like any other unknown version.
+    // sv16 is the same case sv15 was: its CONTENTS are what the assertion above just
+    // pinned, so it did not go for misdescribing any axis — it went because v17's
+    // run-length cap (`MAX_MATCH_TICKS` 72,000) compiles bundles and validates replays
+    // v16 rejected, and a live sv16 entry would advertise semantics this build no longer
+    // honours. It throws like any other unknown version, as sv15 does.
+    expect(() => capabilityProfile(16)).toThrow(RulesetError);
     expect(() => capabilityProfile(15)).toThrow(RulesetError);
   });
 
@@ -289,7 +291,7 @@ describe('capability gate — accept at boundary, reject beyond, per dimension',
       // schema-valid on its own for the capability gate to be what fires.
       delete b.towerCatalog[0]!.attack!.cadenceTicks;
       b.towerCatalog[0]!.effects = [{ kind: 'burst', form: 'single', damage: 10 }];
-    }, "burst effect form 'single' unsupported at simVersion 16");
+    }, "burst effect form 'single' unsupported at simVersion 17");
   });
 
   it('maxBurstTravelTicks: exactly 8 accepted, 9 rejected (M2-S9)', () => {
@@ -307,7 +309,7 @@ describe('capability gate — accept at boundary, reject beyond, per dimension',
       b.towerCatalog[0]!.effects = [{ kind: 'burst', form: 'aoe', damage: 45, radiusFp: 640 }];
     };
     compiles(burstBundle(8));
-    rejects(burstBundle(9), "tower 'basic' burst travelTicks 9 exceeds 8 at simVersion 16");
+    rejects(burstBundle(9), "tower 'basic' burst travelTicks 9 exceeds 8 at simVersion 17");
     // Scoped to BURST bundles only: a cadenced tower may still travel further, bounded
     // by its own cadence exactly as before. Deleting the `e.kind === 'burst'` leg of the
     // enforcement site would turn this case red.
@@ -329,7 +331,7 @@ describe('capability gate — accept at boundary, reject beyond, per dimension',
     rejects((b) => {
       delete b.towerCatalog[0]!.attack;
       b.towerCatalog[0]!.effects = [{ kind: 'support', damageMulFp: 1025 }];
-    }, "tower 'basic' support damageMulFp 1025 exceeds 1024 at simVersion 16");
+    }, "tower 'basic' support damageMulFp 1025 exceeds 1024 at simVersion 17");
   });
 
   it('maxDotDurationTicks: exactly 100,000 accepted, 100,001 rejected', () => {
@@ -349,7 +351,7 @@ describe('capability gate — accept at boundary, reject beyond, per dimension',
         { kind: 'direct', form: 'single', damage: 10 },
         { kind: 'dot', damagePerTick: 5, cadenceTicks: 10, durationTicks: 100_001 },
       ];
-    }, "tower 'basic' dot durationTicks 100001 exceeds 100000 at simVersion 16");
+    }, "tower 'basic' dot durationTicks 100001 exceeds 100000 at simVersion 17");
   });
 
   it('MAX_DOT_RECORDS budgets (ratio + 1) per source, so compiled content can reach the rail but never exceed it', () => {
@@ -386,7 +388,7 @@ describe('capability gate — accept at boundary, reject beyond, per dimension',
         { kind: 'direct', form: 'single', damage: 10 },
         { kind: 'dot', damagePerTick: 5, cadenceTicks: 10, durationTicks: 241 },
       ];
-    }, "tower 'basic' dot durationTicks 241 exceeds 240 (8× its 30-tick attack cadence) at simVersion 16");
+    }, "tower 'basic' dot durationTicks 241 exceeds 240 (8× its 30-tick attack cadence) at simVersion 17");
   });
 
   // M2-S5a P8 (CodeRabbit, PR #78) — not a `capabilityProfile` field (the profile has
@@ -409,7 +411,7 @@ describe('capability gate — accept at boundary, reject beyond, per dimension',
         { kind: 'direct', form: 'aoe', damage: 8, radiusFp: 300 },
         { kind: 'dot', damagePerTick: 5, cadenceTicks: 10, durationTicks: 60 },
       ];
-    }, "tower 'basic' combines an aoe direct effect with a dot effect, unsupported at simVersion 16");
+    }, "tower 'basic' combines an aoe direct effect with a dot effect, unsupported at simVersion 17");
   });
 
   it("allowedDirectForms: 'single' accepted, 'aoe' also accepted — no reject case exists (see header comment)", () => {
@@ -452,7 +454,7 @@ describe('capability gate — accept at boundary, reject beyond, per dimension',
     compiles((b) => (b.creepCatalog[0]!.armor = 16)); // exactly the ceiling — accepted
     rejects(
       (b) => (b.creepCatalog[0]!.armor = 17),
-      "creep 'normal' armor 17 exceeds 16 at simVersion 16",
+      "creep 'normal' armor 17 exceeds 16 at simVersion 17",
     );
   });
 
@@ -464,7 +466,7 @@ describe('capability gate — accept at boundary, reject beyond, per dimension',
     compiles((b) => (b.creepCatalog[0]!.leakCost = 16)); // exactly the ceiling — accepted
     rejects(
       (b) => (b.creepCatalog[0]!.leakCost = 17),
-      "creep 'normal' leakCost 17 exceeds 16 at simVersion 16",
+      "creep 'normal' leakCost 17 exceeds 16 at simVersion 17",
     );
   });
 
@@ -564,7 +566,7 @@ describe('board gates — air-domain size ceiling vs. axis-alignment, deliberate
     const b = bundleWithSpec(OVERSIZED, { withAirCreep: true, flies: false, creepSpeedFp: 1000 });
     expect(() => compileRuleset(b as Ruleset, 'test')).toThrow(RulesetError);
     expect(() => compileRuleset(b as Ruleset, 'test')).toThrow(
-      `widthTiles ${MAX_AIR_BOARD_SIDE_TILES + 1} exceeds ${MAX_AIR_BOARD_SIDE_TILES} at simVersion 16 (the catalog contains an air creep)`,
+      `widthTiles ${MAX_AIR_BOARD_SIDE_TILES + 1} exceeds ${MAX_AIR_BOARD_SIDE_TILES} at simVersion 17 (the catalog contains an air creep)`,
     );
   });
 
@@ -586,7 +588,7 @@ describe('board gates — air-domain size ceiling vs. axis-alignment, deliberate
     });
     expect(() => compileRuleset(b as Ruleset, 'test')).toThrow(RulesetError);
     expect(() => compileRuleset(b as Ruleset, 'test')).toThrow(
-      `heightTiles ${MAX_AIR_BOARD_SIDE_TILES + 1} exceeds ${MAX_AIR_BOARD_SIDE_TILES} at simVersion 16 (the catalog contains an air creep)`,
+      `heightTiles ${MAX_AIR_BOARD_SIDE_TILES + 1} exceeds ${MAX_AIR_BOARD_SIDE_TILES} at simVersion 17 (the catalog contains an air creep)`,
     );
   });
 

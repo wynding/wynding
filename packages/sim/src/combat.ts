@@ -231,7 +231,8 @@ export interface DotRecord {
  * nothing about DoT. Raise it to allow longer matches — a change touching nothing in this
  * package — and a replay could mint that many sources and silently drop applications, with
  * no test failing. It cannot be imported here without the layering back-edge AGENTS.md
- * blocks, the same caveat issue #77 records.
+ * blocks, the same caveat issue #77 records. sv17 (M3 story 2) doubled `MAX_MATCH_TICKS`
+ * and kept the cap at 1,000; the reason is recorded beside it, so this derivation stands.
  *
  * Cost evidence, and the limits of that evidence: `packages/perf/src/dot-bench.ts`.
  *
