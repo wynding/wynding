@@ -16,6 +16,7 @@ import {
 import { getBundledRuleset } from './registry';
 import { FIELD_UNITS_PER_CELL, remainingFraction, runReferenceBuild } from './balance-run';
 import { runBuildScript, type ScriptStep } from './script-runner';
+import { compileReferenceBuild, drawGrid, type ReferenceBuild } from './reference-build';
 import { WINNER_A } from './showcase-builds';
 
 const ruleset = compileRuleset(getBundledRuleset('wynding-core'), 'field-01');
@@ -153,6 +154,24 @@ describe('the instrumented reference-build run', () => {
     expect(early.lastPlacementWave).toBe(-1);
     expect(early.waves[0]!.placed).toBe(0);
     expect(early.waves[0]!.towers).toBe(1);
+  });
+
+  it('a mine re-armed after the last new tower leaves the board-full wave where that tower went down', () => {
+    // Both towers go down before wave 1; the mine fires on tick 586 and is re-armed on 587,
+    // in wave 1's window. The re-arm takes no new room, so the board filled before wave 1.
+    const build: ReferenceBuild = {
+      id: 'rearm',
+      summary: 'a mine, a basic, the mine again',
+      grid: drawGrid(ruleset, [
+        [10, 12, 'm'],
+        [2, 2, 'b'],
+      ]),
+      order: 'm10,12 b2,2 m10,12',
+    };
+    const run = runReferenceBuild(ruleset, SEED, compileReferenceBuild(build, ruleset));
+    expect(run.stepsDone).toBe(3);
+    expect(run.waves[0]!.placed).toBe(1);
+    expect(run.lastPlacementWave).toBe(-1);
   });
 
   it('a held wave’s row, exactly: closest approach, lives, towers, placed, unspent, peak', () => {

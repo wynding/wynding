@@ -82,6 +82,9 @@ export interface BuildRun {
   /** Script steps the sim accepted, of `stepCount`. */
   readonly stepsDone: number;
   readonly stepCount: number;
+  /** The step left at the cursor was sent and rejected by the sim — the runner's
+   *  `stalled`: blocked, rather than queued behind its tick or its bounty. */
+  readonly stalled: boolean;
   /** Bounty spent per tower id, every accepted placement at its catalog cost (a sold
    *  tower's spend stays counted — M2's measure, which had no sells). */
   readonly spendById: Readonly<Record<string, number>>;
@@ -91,8 +94,9 @@ export interface BuildRun {
   readonly sells: readonly SellRecord[];
   /** The most creeps alive at once over the whole run, counted as `WaveProfile`'s is. */
   readonly peakAlive: number;
-  /** The wave whose window held the last accepted placement: `-1` if it came before
-   *  wave 1 launched, `null` if nothing was ever placed. */
+  /** The wave whose window held the last placement on an anchor never built on before —
+   *  where the board filled, so a re-arm or a juggle re-placement doesn't move it: `-1`
+   *  if it came before wave 1 launched, `null` if nothing was ever placed. */
   readonly lastPlacementWave: number | null;
   /** One row per launched wave, in wave order. */
   readonly waves: readonly WaveProfile[];
@@ -166,6 +170,7 @@ export function runReferenceBuild(
   const rows: Mutable<WaveProfile>[] = [];
   const known = new Map<number, { readonly creepId: string; readonly wave: number }>();
   const standing = new Map<string, string>();
+  const builtOn = new Set<string>();
   const spendById: Record<string, number> = {};
   const leaks: LeakRecord[] = [];
   const sells: SellRecord[] = [];
@@ -176,7 +181,7 @@ export function runReferenceBuild(
   let tickBefore = 0;
   let aliveBefore = 0;
 
-  const { state, placedCount } = runBuildScript(ruleset, seed, plan, {
+  const { state, placedCount, stalled } = runBuildScript(ruleset, seed, plan, {
     collectEvents: true,
     beforeStep: (state) => {
       tickBefore = state.tick;
@@ -220,11 +225,17 @@ export function runReferenceBuild(
       kills += killed.length;
 
       if (placed !== undefined) {
+        const key = `${placed.col},${placed.row}`;
         const cost = ruleset.towerById[placed.towerId]!.cost;
         spendById[placed.towerId] = (spendById[placed.towerId] ?? 0) + cost;
         spend += cost;
-        standing.set(`${placed.col},${placed.row}`, placed.towerId);
-        lastPlacementWave = state.waveCursor - 1;
+        standing.set(key, placed.towerId);
+        // Board-full is "no new tower fits": a re-arm or a juggle re-placement takes no
+        // new room, so only a first placement on its anchor moves it.
+        if (!builtOn.has(key)) {
+          builtOn.add(key);
+          lastPlacementWave = state.waveCursor - 1;
+        }
         if (window !== undefined) window.placed++;
       }
       if (sold !== undefined) {
@@ -270,6 +281,7 @@ export function runReferenceBuild(
     state,
     stepsDone: placedCount,
     stepCount: plan.length,
+    stalled,
     spendById,
     spend,
     kills,

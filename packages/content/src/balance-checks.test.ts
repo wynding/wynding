@@ -33,6 +33,7 @@ function fakeRun(
     state: { ...initial, ...state },
     stepsDone: 0,
     stepCount: 0,
+    stalled: false,
     spendById: {},
     spend: 0,
     kills: 0,
@@ -109,6 +110,38 @@ describe('every step ran', () => {
         fakeRun({ stepsDone: 2, stepCount: 3 }, { phase: 'running', tick: 36000 }),
       ),
     ).toEqual(['stuck: ran 2 of its 3 steps', 'stuck: still running at tick 36000, the cap']);
+  });
+
+  it('a lost run may leave steps queued, but not a step the sim rejected', () => {
+    const queued = fakeRun({ stepsDone: 2, stepCount: 3, stalled: false }, { phase: 'lost' });
+    expect(checkAllStepsRan('loser', queued)).toEqual([]);
+    const blocked = fakeRun({ stepsDone: 2, stepCount: 3, stalled: true }, { phase: 'lost' });
+    expect(checkAllStepsRan('loser', blocked)).toEqual([
+      'loser: step 3 was rejected by the sim and never ran',
+    ]);
+  });
+
+  it('end to end — a loser dying with a step queued passes; one dying behind a rejected step fails', () => {
+    const run = (order: string, towers: readonly (readonly [number, number, string])[]) =>
+      runReferenceBuild(
+        ruleset,
+        0x5eed,
+        compileReferenceBuild(
+          { id: 'loser', summary: 'a loser', grid: drawGrid(ruleset, towers), order },
+          ruleset,
+        ),
+      );
+    // The basic waits for tick 40,000; wave 1 ends the run long before.
+    const queued = run('b2,2@40000', [[2, 2, 'b']]);
+    expect([queued.state.phase, queued.stepsDone, queued.stalled]).toEqual(['lost', 0, false]);
+    expect(checkAllStepsRan('queued', queued)).toEqual([]);
+    // A mine far off the path never fires, so re-arming it finds its anchor taken: rejected,
+    // and retried every tick until the run is lost.
+    const blocked = run('m2,2 m2,2', [[2, 2, 'm']]);
+    expect([blocked.state.phase, blocked.stepsDone, blocked.stalled]).toEqual(['lost', 1, true]);
+    expect(checkAllStepsRan('blocked', blocked)).toEqual([
+      'blocked: step 2 was rejected by the sim and never ran',
+    ]);
   });
 });
 

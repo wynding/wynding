@@ -28,7 +28,8 @@
 // (one letter per cell) and is out of this format's scope until a build needs it. A
 // `burst` tower (`mine`) is the exception to "not standing": it removes itself when it
 // detonates, which the order can't see, so placing one again RE-ARMS it — the runner
-// retries the placement each tick until the spent mine's cells are clear.
+// retries the placement each tick until the spent mine's cells are clear — and for the
+// same reason it can't be sold: by the time the sell falls due it may be gone.
 //
 // `compileReferenceBuild` turns the strings into the runner's plan (`script-runner.ts`),
 // checking the drawing against the board's own cell classes so a grid drawn one row or
@@ -191,14 +192,17 @@ export function compileReferenceBuild(
       );
     }
     const timing = tickText === undefined ? {} : { notBeforeTick: Number(tickText) };
+    const burst = ruleset.towerById[drawn]!.attack?.mode === 'burst';
     if (sell === '-') {
+      if (burst) {
+        reject(build, `order step '${token}' sells a ${drawn}, which may already have detonated`);
+      }
       if (!standing.has(key))
         reject(build, `order step '${token}' sells a tower that is not standing`);
       standing.delete(key);
       steps.push({ kind: 'sell', col, row, ...timing } satisfies Sell);
     } else {
-      const rearm = ruleset.towerById[drawn]!.attack?.mode === 'burst';
-      if (standing.has(key) && !rearm)
+      if (standing.has(key) && !burst)
         reject(build, `order step '${token}' places a tower that is already standing`);
       standing.add(key);
       everPlaced.add(key);

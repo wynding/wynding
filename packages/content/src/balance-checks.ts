@@ -59,11 +59,19 @@ export function checkDistinctness(
   return violations;
 }
 
-/** Every step of the plan ran and the run reached a result. A step the sim never accepted
- *  means the build measured is not the build drawn, and a run still `running` stopped at
- *  the tick cap (`MAX_MATCH_TICKS`) without ending. */
+/** The plan ran as drawn and the run reached a result. A won run (or one still `running`,
+ *  stopped at the tick cap, `MAX_MATCH_TICKS`) must have run every step: a step never
+ *  accepted means the build measured is not the build drawn. A LOST run may end with steps
+ *  still queued behind their tick or their bounty — that is losing, not a stall — so it
+ *  fails only if the step at its cursor was blocked: sent, and rejected by the sim. */
 export function checkAllStepsRan(id: string, run: BuildRun): string[] {
   const violations: string[] = [];
+  if (run.state.phase === 'lost') {
+    if (run.stalled) {
+      violations.push(`${id}: step ${run.stepsDone + 1} was rejected by the sim and never ran`);
+    }
+    return violations;
+  }
   if (run.stepsDone < run.stepCount) {
     violations.push(`${id}: ran ${run.stepsDone} of its ${run.stepCount} steps`);
   }

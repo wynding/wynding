@@ -171,6 +171,12 @@ describe('the grid reference-build format', () => {
       ['a sell of a tower not standing', one, '-b2,10 b2,10', /sells a tower that is not standing/],
       ['a place of a tower already standing', one, 'b2,10 b2,10', /already standing/],
       [
+        'a sell of a mine',
+        draw([[10, 12, 'm']]),
+        'm10,12 -m10,12@900',
+        /order step '-m10,12@900' sells a mine, which may already have detonated/,
+      ],
+      [
         'a drawn tower never placed',
         draw([
           [2, 10, 'b'],

@@ -105,6 +105,9 @@ export interface ScriptRunResult {
    *  the build that actually stood on the board (`story-showcase.test.ts`'s
    *  `BuildResult.placedCount`). */
   readonly placedCount: number;
+  /** The step at the cursor when the run ended was sent and REJECTED by the sim at least
+   *  once — blocked, not merely waiting for its tick or its bounty. */
+  readonly stalled: boolean;
 }
 
 /** The input for a placement step this tick, or `null` while it waits for its tick or
@@ -157,6 +160,7 @@ export function runBuildScript(
 ): ScriptRunResult {
   let state: SimState = createInitialState(seed, ruleset);
   let cursor = 0;
+  let rejectedAtCursor = false;
 
   for (let t = 0; t < MAX_MATCH_TICKS && state.phase === 'running'; t++) {
     const inputs: SimInput[] = [];
@@ -180,10 +184,13 @@ export function runBuildScript(
       if (next.kind === 'sell') sold = next;
       else placed = next;
       cursor++;
+      rejectedAtCursor = false;
+    } else if (inputs.length > 0) {
+      rejectedAtCursor = true;
     }
 
     observer?.afterStep?.(state, ruleset, inputs, placed, { sold, events });
   }
 
-  return { state, placedCount: cursor };
+  return { state, placedCount: cursor, stalled: rejectedAtCursor };
 }
