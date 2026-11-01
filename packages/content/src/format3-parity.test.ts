@@ -24,7 +24,7 @@
 
 import { describe, it, expect } from 'vitest';
 import { compileRuleset, hashSimState, deriveScore, deriveStars } from '@wynding/sim';
-import { getBundledRuleset, defaultBoardId } from './registry';
+import { getM2Fixture, M2_BOARD_ID } from './m2-fixture';
 import { WINNER_A } from './showcase-builds';
 import { runBuildScript } from './script-runner';
 import { fnv1a, withoutDestination } from './test-digest';
@@ -47,7 +47,7 @@ const FORMAT2_REFERENCE = {
 
 describe('M3 story 3 — format 3 parity: field-01 reproduces the format-2 run of the M2 golden replay', () => {
   it('the bundle under test IS format 3, one entrance → exit pair, every hpPercent 100', () => {
-    const bundle = getBundledRuleset();
+    const bundle = getM2Fixture();
     expect(bundle.formatVersion).toBe(3);
     const board = bundle.boards[0]!;
     expect(board.entrances.map((e) => e.id)).toEqual(['west']);
@@ -57,8 +57,8 @@ describe('M3 story 3 — format 3 parity: field-01 reproduces the format-2 run o
   });
 
   it('matches the format-2 run tick for tick: every pre-existing state field, the outcome, the score and the final tick', () => {
-    const bundle = getBundledRuleset();
-    const ruleset = compileRuleset(bundle, defaultBoardId(bundle));
+    const bundle = getM2Fixture();
+    const ruleset = compileRuleset(bundle, M2_BOARD_ID);
     const trace: string[] = [];
     const { state } = runBuildScript(ruleset, SCENARIO_SEED, WINNER_A, {
       afterStep: (s) => {

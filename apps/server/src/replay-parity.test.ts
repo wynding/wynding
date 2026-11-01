@@ -22,6 +22,13 @@
 // `tsc -p tsconfig.json` run) to compile cleanly despite `rootDir: "src"`, since
 // `apps/server/src` and `apps/server/dist` sit at the same depth under `apps/server`,
 // so the relative path resolves identically from either.
+//
+// M3 story 4: the handler validates against the SHIPPED bundle only, which is now the
+// crossing board, so every leg here replays WINNER_A — M2's build — on the crossing board's
+// placeholder schedule (M2's ten waves, five streams moved north). It still wins there with
+// every creep stopped; the guards in each leg (won, lost, a score that moved) are what keep
+// it honest, and they fail by name once a retuned schedule outgrows M2's build. The prose
+// below about which slices win or lose was measured on M2's `field-01`.
 
 import { describe, it, expect } from 'vitest';
 import {

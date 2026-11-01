@@ -1,5 +1,9 @@
 // story-support.test.ts — the M2-S8 pinned support-aura measurement (PLAN.md §P7).
 //
+// M3 story 4: this file runs the FROZEN M2 bundle (`m2-fixture.ts` — `field-01` and M2's ten
+// waves), not the shipped one, which is now the crossing board. "Shipped" in the prose below
+// means as M2 shipped it; every pinned value is unchanged.
+//
 // LOCATION NOTE, same reasoning as `story-armored-wave.test.ts`'s own header: this file
 // lives beside `parity.test.ts` (not in `packages/sim`, which cannot import
 // `@wynding/content`) so every scenario below runs the REAL shipped `wynding-core`
@@ -44,7 +48,7 @@ import {
  *  test's convenience would make a private shape public. This spelling also cannot drift
  *  — it IS the shape the sim stores. */
 type EffectPrimitive = SimState['impacts'][number]['effects'][number];
-import { getBundledRuleset, defaultBoardId } from './registry';
+import { getM2Fixture, M2_BOARD_ID } from './m2-fixture';
 import { waveIndexForCreep, waveLaunchTickObserved } from './wave-lookup';
 
 /** Fixed seed — same convention as parity.test.ts / story-armored-wave.test.ts. */
@@ -88,8 +92,8 @@ function runScene(
    *  can produce. Mirrors `render.test.ts`'s own `s.creeps.creepId[0] = 'fast'` posture. */
   forge: readonly { readonly tick: number; readonly apply: (state: SimState) => void }[] = [],
 ): SceneResult {
-  const bundle = getBundledRuleset();
-  const ruleset = compileRuleset(bundle, defaultBoardId(bundle));
+  const bundle = getM2Fixture();
+  const ruleset = compileRuleset(bundle, M2_BOARD_ID);
   let state: SimState = createInitialState(SCENARIO_SEED, ruleset);
   const shouldContinue: (tick: number, state: SimState) => boolean =
     typeof untilTick === 'number' ? (tick) => tick < untilTick : untilTick;
@@ -417,8 +421,8 @@ describe('M2-S8 — the `beacon` support aura, measured against the shipped bund
       anchor,
       towerId: 'basic',
     }));
-    const bundle = getBundledRuleset();
-    const ruleset = compileRuleset(bundle, defaultBoardId(bundle));
+    const bundle = getM2Fixture();
+    const ruleset = compileRuleset(bundle, M2_BOARD_ID);
     const armoredWaveIndex = waveIndexForCreep(ruleset, 'armored');
     // Run 600 ticks past the `armored` wave's OWN OBSERVED launch transition (located by
     // creep id, never a hardcoded index; S11 P2) — the same margin the prior static

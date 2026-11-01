@@ -1,0 +1,307 @@
+{
+  "formatVersion": 3,
+  "rulesetId": "wynding-core",
+  "version": 1,
+  "creepCatalog": [
+    {
+      "id": "normal",
+      "hp": 20,
+      "speedFp": 26,
+      "armor": 0,
+      "domain": "ground",
+      "immunities": [],
+      "leakCost": 1,
+      "bounty": 1
+    },
+    {
+      "id": "fast",
+      "hp": 16,
+      "speedFp": 44,
+      "armor": 0,
+      "domain": "ground",
+      "immunities": [],
+      "leakCost": 1,
+      "bounty": 2
+    },
+    {
+      "id": "swarm",
+      "hp": 7,
+      "speedFp": 30,
+      "armor": 0,
+      "domain": "ground",
+      "immunities": [],
+      "leakCost": 1,
+      "bounty": 1
+    },
+    {
+      "id": "armored",
+      "hp": 36,
+      "speedFp": 22,
+      "armor": 6,
+      "domain": "ground",
+      "immunities": [],
+      "leakCost": 1,
+      "bounty": 3
+    },
+    {
+      "id": "resolute",
+      "hp": 20,
+      "speedFp": 44,
+      "armor": 0,
+      "domain": "ground",
+      "immunities": ["slow"],
+      "leakCost": 1,
+      "bounty": 2
+    },
+    {
+      "id": "flying",
+      "hp": 18,
+      "speedFp": 30,
+      "armor": 0,
+      "domain": "air",
+      "immunities": [],
+      "leakCost": 1,
+      "bounty": 2
+    },
+    {
+      "id": "armored-flyer",
+      "hp": 30,
+      "speedFp": 26,
+      "armor": 5,
+      "domain": "air",
+      "immunities": [],
+      "leakCost": 1,
+      "bounty": 3
+    },
+    {
+      "id": "boss",
+      "hp": 400,
+      "speedFp": 18,
+      "armor": 8,
+      "domain": "ground",
+      "immunities": ["stun"],
+      "role": "boss",
+      "leakCost": 3,
+      "bounty": 25
+    }
+  ],
+  "towerCatalog": [
+    {
+      "id": "basic",
+      "cost": 5,
+      "attack": {
+        "domain": "ground",
+        "rangeFp": 1024,
+        "cadenceTicks": 30,
+        "travelTicks": 4
+      },
+      "effects": [{ "kind": "direct", "form": "single", "damage": 10 }]
+    },
+    {
+      "id": "slow",
+      "cost": 8,
+      "attack": {
+        "domain": "both",
+        "rangeFp": 1024,
+        "cadenceTicks": 30,
+        "travelTicks": 2
+      },
+      "effects": [
+        { "kind": "direct", "form": "single", "damage": 2 },
+        { "kind": "slow", "mulFp": 128, "durationTicks": 40 }
+      ]
+    },
+    {
+      "id": "splash",
+      "cost": 12,
+      "attack": {
+        "domain": "ground",
+        "rangeFp": 1024,
+        "cadenceTicks": 60,
+        "travelTicks": 8
+      },
+      "effects": [{ "kind": "direct", "form": "aoe", "damage": 8, "radiusFp": 384 }]
+    },
+    {
+      "id": "venom",
+      "cost": 9,
+      "attack": {
+        "domain": "ground",
+        "rangeFp": 1024,
+        "cadenceTicks": 30,
+        "travelTicks": 2
+      },
+      "effects": [
+        { "kind": "direct", "form": "single", "damage": 2 },
+        { "kind": "dot", "damagePerTick": 4, "cadenceTicks": 10, "durationTicks": 60 }
+      ]
+    },
+    {
+      "id": "stun",
+      "cost": 10,
+      "attack": {
+        "domain": "ground",
+        "rangeFp": 768,
+        "cadenceTicks": 40,
+        "travelTicks": 2
+      },
+      "effects": [
+        { "kind": "direct", "form": "single", "damage": 4 },
+        { "kind": "stun", "chanceNum": 64, "durationTicks": 20 }
+      ]
+    },
+    {
+      "id": "antiair",
+      "cost": 7,
+      "attack": {
+        "domain": "air",
+        "rangeFp": 1280,
+        "cadenceTicks": 15,
+        "travelTicks": 2
+      },
+      "effects": [{ "kind": "direct", "form": "single", "damage": 8 }]
+    },
+    {
+      "id": "beacon",
+      "cost": 15,
+      "effects": [{ "kind": "support", "damageMulFp": 384 }]
+    },
+    {
+      "id": "mine",
+      "cost": 6,
+      "attack": { "domain": "ground", "rangeFp": 576, "travelTicks": 1 },
+      "effects": [{ "kind": "burst", "form": "aoe", "damage": 45, "radiusFp": 640 }]
+    },
+    {
+      "id": "frost-splash",
+      "cost": 16,
+      "attack": {
+        "domain": "ground",
+        "rangeFp": 1024,
+        "cadenceTicks": 60,
+        "travelTicks": 8
+      },
+      "effects": [
+        { "kind": "direct", "form": "aoe", "damage": 6, "radiusFp": 384 },
+        { "kind": "slow", "mulFp": 179, "durationTicks": 30 }
+      ]
+    }
+  ],
+  "balance": {
+    "startingLives": 10,
+    "startingBounty": 80,
+    "refundNum": 3,
+    "refundDen": 4,
+    "slowFloorNum": 1,
+    "slowFloorDen": 4,
+    "earlyCallBountyDivisor": 50
+  },
+  "scoring": {
+    "survivalMul": 50,
+    "starThresholds": [1, 6, 9],
+    "earlyCallScoreDivisor": 50
+  },
+  "boards": [
+    {
+      "id": "field-01",
+      "widthTiles": 28,
+      "heightTiles": 24,
+      "entrances": [{ "id": "west", "cell": { "col": 0, "row": 11 }, "destination": ["east"] }],
+      "exits": [{ "id": "east", "cell": { "col": 27, "row": 11 } }],
+      "waves": [
+        {
+          "index": 0,
+          "countdownTicks": 500,
+          "clearBonus": 4,
+          "hpPercent": 100,
+          "entries": [{ "creepId": "normal", "entrance": "west", "count": 10, "spacingTicks": 20 }]
+        },
+        {
+          "index": 1,
+          "countdownTicks": 300,
+          "clearBonus": 4,
+          "hpPercent": 100,
+          "entries": [{ "creepId": "swarm", "entrance": "west", "count": 16, "spacingTicks": 5 }]
+        },
+        {
+          "index": 2,
+          "countdownTicks": 300,
+          "clearBonus": 5,
+          "hpPercent": 100,
+          "entries": [{ "creepId": "fast", "entrance": "west", "count": 8, "spacingTicks": 15 }]
+        },
+        {
+          "index": 3,
+          "countdownTicks": 300,
+          "clearBonus": 5,
+          "hpPercent": 100,
+          "entries": [{ "creepId": "armored", "entrance": "west", "count": 6, "spacingTicks": 25 }]
+        },
+        {
+          "index": 4,
+          "countdownTicks": 300,
+          "clearBonus": 6,
+          "hpPercent": 100,
+          "entries": [
+            { "creepId": "normal", "entrance": "west", "count": 12, "spacingTicks": 12 },
+            { "creepId": "swarm", "entrance": "west", "count": 6, "spacingTicks": 5 }
+          ]
+        },
+        {
+          "index": 5,
+          "countdownTicks": 300,
+          "clearBonus": 6,
+          "hpPercent": 100,
+          "entries": [{ "creepId": "flying", "entrance": "west", "count": 8, "spacingTicks": 15 }]
+        },
+        {
+          "index": 6,
+          "countdownTicks": 300,
+          "clearBonus": 7,
+          "hpPercent": 100,
+          "entries": [
+            { "creepId": "resolute", "entrance": "west", "count": 6, "spacingTicks": 15 },
+            { "creepId": "fast", "entrance": "west", "count": 6, "spacingTicks": 15 }
+          ]
+        },
+        {
+          "index": 7,
+          "countdownTicks": 300,
+          "clearBonus": 7,
+          "hpPercent": 100,
+          "entries": [
+            { "creepId": "armored-flyer", "entrance": "west", "count": 6, "spacingTicks": 20 }
+          ]
+        },
+        {
+          "index": 8,
+          "countdownTicks": 300,
+          "clearBonus": 8,
+          "hpPercent": 100,
+          "entries": [
+            { "creepId": "swarm", "entrance": "west", "count": 10, "spacingTicks": 6 },
+            { "creepId": "fast", "entrance": "west", "count": 6, "spacingTicks": 12 },
+            { "creepId": "armored", "entrance": "west", "count": 4, "spacingTicks": 20 },
+            { "creepId": "flying", "entrance": "west", "count": 4, "spacingTicks": 20 }
+          ]
+        },
+        {
+          "index": 9,
+          "countdownTicks": 400,
+          "clearBonus": 12,
+          "hpPercent": 100,
+          "entries": [
+            { "creepId": "boss", "entrance": "west", "count": 1, "spacingTicks": 20 },
+            {
+              "creepId": "normal",
+              "entrance": "west",
+              "count": 8,
+              "spacingTicks": 20,
+              "offsetTicks": 600
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}

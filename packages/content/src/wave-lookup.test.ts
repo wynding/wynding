@@ -8,7 +8,7 @@
 
 import { describe, it, expect } from 'vitest';
 import { compileRuleset, createInitialState } from '@wynding/sim';
-import { getBundledRuleset, defaultBoardId } from './registry';
+import { getM2Fixture, M2_BOARD_ID } from './m2-fixture';
 import {
   waveIndexForCreep,
   waveCountdownStartTick,
@@ -17,8 +17,8 @@ import {
   wallInputsFromObservedWave,
 } from './wave-lookup';
 
-const bundle = getBundledRuleset();
-const ruleset = compileRuleset(bundle, defaultBoardId(bundle));
+const bundle = getM2Fixture();
+const ruleset = compileRuleset(bundle, M2_BOARD_ID);
 const SEED = 0x5eed;
 
 describe('waveIndexForCreep', () => {

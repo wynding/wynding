@@ -1,6 +1,10 @@
 // story-swarm.test.ts — M2 Story 11 P4: the RE-RULED swarm-clear criterion, pinned in
 // BOTH directions against the shipped bundle.
 //
+// M3 story 4: this file runs the FROZEN M2 bundle (`m2-fixture.ts` — `field-01` and M2's ten
+// waves), not the shipped one, which is now the crossing board. "Shipped" in the prose below
+// means as M2 shipped it; every pinned value is unchanged.
+//
 // THE RULING (S11 ruling 8, dated 2026-08-08). The original criterion — "one `splash`
 // clears the swarm wave" — was withdrawn as WRONG, not as unmeetable: satisfying it needs
 // a `splash` cadence that also perturbs waves 2, 5 and 9, and a wave 2 that one tower
@@ -35,13 +39,13 @@ import {
   type SimInput,
   type SimState,
 } from '@wynding/sim';
-import { getBundledRuleset, defaultBoardId } from './registry';
+import { getM2Fixture, M2_BOARD_ID } from './m2-fixture';
 import { waveIndexForCreep } from './wave-lookup';
 
 const SCENARIO_SEED = 0x5eed;
 
-const bundle = getBundledRuleset();
-const ruleset = compileRuleset(bundle, defaultBoardId(bundle));
+const bundle = getM2Fixture();
+const ruleset = compileRuleset(bundle, M2_BOARD_ID);
 /** The swarm wave, LOCATED by creep id in the compiled schedule (ruling 1) — never an
  *  index literal, so this survives any future renumber unedited. */
 const SWARM_WAVE = waveIndexForCreep(ruleset, 'swarm');

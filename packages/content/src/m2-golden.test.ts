@@ -1,5 +1,9 @@
 // m2-golden.test.ts — M2 Story 11 P5: the M2 CLOSE-OUT determinism golden.
 //
+// M3 story 4: this file runs the FROZEN M2 bundle (`m2-fixture.ts` — `field-01` and M2's ten
+// waves), not the shipped one, which is now the crossing board. "Shipped" in the prose below
+// means as M2 shipped it; every pinned value is unchanged.
+//
 // A full WINNING run over the finished ten-wave arc, using WINNER A ("the poisoner",
 // `./showcase-builds.ts` — the same script `story-showcase.test.ts`'s P4 balance pass
 // plays, reused unduplicated) against the REAL shipped `wynding-core` bundle
@@ -31,7 +35,7 @@ import {
   type SimState,
   type CompiledRuleset,
 } from '@wynding/sim';
-import { getBundledRuleset, defaultBoardId } from './registry';
+import { getM2Fixture, M2_BOARD_ID } from './m2-fixture';
 import { waveIndexForCreep } from './wave-lookup';
 import { WINNER_A } from './showcase-builds';
 import { runBuildScript } from './script-runner';
@@ -57,8 +61,8 @@ interface GoldenRun {
 /** Run WINNER A's script to its terminal, collecting the per-tick hash trace (the
  *  `determinism.test.ts` pattern) and the mid-trace engagement probe's observations. */
 function runGolden(): GoldenRun {
-  const bundle = getBundledRuleset();
-  const ruleset = compileRuleset(bundle, defaultBoardId(bundle));
+  const bundle = getM2Fixture();
+  const ruleset = compileRuleset(bundle, M2_BOARD_ID);
   const bossWaveIndex = waveIndexForCreep(ruleset, 'boss');
   const trace: string[] = [];
 

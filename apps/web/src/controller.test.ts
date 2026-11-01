@@ -19,6 +19,12 @@ import { inProcessVerifier, type Verifier } from './verifier';
 // cannot drift onto a different build than the one the content suite proves wins.
 import { WINNER_A } from '../../../packages/content/src/showcase-builds';
 import { runBuildScript } from '../../../packages/content/src/script-runner';
+// The frozen M2 bundle (M3 story 4), by the same relative path: never shipped, so never a
+// package export. A test laid out for M2's one lane runs there, through the controller's
+// content seam.
+import { getM2Fixture, M2_BOARD_ID } from '../../../packages/content/src/m2-fixture';
+
+const M2_CONTENT = { bundle: getM2Fixture(), boardId: M2_BOARD_ID } as const;
 
 const TICK = 50; // MS_PER_TICK
 
@@ -1144,8 +1150,10 @@ describe('controller — Tracer lifetime via fired StepEvents (#32)', () => {
     // `packages/render/src/tower-fire.ts` takes each shot in once by its launch tick alone,
     // keeping no record of each, and relies on this. Eight basic towers either side of the
     // lane fire together on many ticks; frames come at 60 Hz, with a 130 ms catch-up every 7th,
-    // so many frames list shots fired on two or more ticks at once.
-    const c = createController(1);
+    // so many frames list shots fired on two or more ticks at once. On the frozen M2 board
+    // (M3 story 4): its one lane is what the eight towers are laid along, and the floors
+    // below were measured there.
+    const c = createController(1, M2_CONTENT);
     startAndCall(c);
     for (const row of [8, 12]) {
       for (const col of [2, 4, 6, 8]) {
@@ -2111,6 +2119,8 @@ describe('controller — run stats for the results panel (#181 H2)', () => {
   /** The seed WINNER_A is tuned against (`packages/content/src/m2-golden.test.ts`'s
    *  `SCENARIO_SEED`, restated by `apps/server`'s replay-parity test for the same reason). */
   const SCENARIO_SEED = 0x5eed;
+  // WINNER_A is M2's showcase build, so these runs play the frozen M2 board it was built for
+  // (M3 story 4) — the controller through its content seam, the tally on the same bundle.
 
   interface Tally {
     readonly phase: string;
@@ -2128,8 +2138,7 @@ describe('controller — run stats for the results panel (#181 H2)', () => {
    *  once its launch tick is stamped. Towers built are the placements the runner saw
    *  accepted — the showcase build never sells, and none of its towers is a mine. */
   function tally(plan: readonly ScriptedPlacement[]): Tally {
-    const bundle = getBundledRuleset();
-    const ruleset = compileRuleset(bundle, defaultBoardId(bundle));
+    const ruleset = compileRuleset(M2_CONTENT.bundle, M2_CONTENT.boardId);
     const waveOf = new Map<number, number>();
     let prevIds: number[] = [];
     let prevKinds: string[] = [];
@@ -2197,7 +2206,7 @@ describe('controller — run stats for the results panel (#181 H2)', () => {
         },
       });
 
-      const c = createController(SCENARIO_SEED);
+      const c = createController(SCENARIO_SEED, M2_CONTENT);
       expect(playScript(c, WINNER_A)).toBe(40);
       // The controller replayed the content runner's run tick for tick — the same outcome on
       // the same tick — so the account above is an account of THIS run.
@@ -2228,7 +2237,7 @@ describe('controller — run stats for the results panel (#181 H2)', () => {
         },
       });
 
-      const c = createController(SCENARIO_SEED);
+      const c = createController(SCENARIO_SEED, M2_CONTENT);
       expect(playScript(c, plan)).toBe(12);
       expect(c.hud().phase).toBe('lost');
       expect(c.frame().curVm.tick).toBe(expected.finalTick);
