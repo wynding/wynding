@@ -71,9 +71,10 @@
 //     would ship unseen, and so would any JSON or other non-script file shipped code imported —
 //     none is imported today, and data carries no behaviour, but it is a gap, not a guarantee. Nor
 //     is harness support code outside the directory covered: `apps/web/src/scripted-run.ts`
-//     (test support the results harness shares with `controller.test.ts`) and
-//     `packages/content/src/showcase-builds.ts` (which that harness reaches by relative path)
-//     carry no hook and no fake transport, and nothing here would see shipped code import them. The
+//     (test support the results harness shares with `controller.test.ts`),
+//     `packages/content/src/showcase-builds.ts` and `packages/replay/src/test-support.ts` (which
+//     that harness reaches by relative path, the second for its 30-wave run) carry no hook and no
+//     fake transport, and nothing here would see shipped code import them. The
 //     markers are reached from the module's top-level side effects, so any graph that imports the
 //     module keeps them. A refactor that moves a marker behind a call shipped code never makes lets
 //     Rollup drop it, and the module could then ship unseen — the same limit as `stats.ts` above.

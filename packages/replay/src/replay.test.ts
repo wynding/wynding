@@ -3,7 +3,17 @@
 // (ADR 0006 anti-cheat spine).
 
 import { describe, it, expect } from 'vitest';
-import { SIM_VERSION, MAX_MATCH_TICKS, type SimInput } from '@wynding/sim';
+import {
+  compileRuleset,
+  createInitialState,
+  hashSimState,
+  isTerminalPhase,
+  step,
+  SIM_VERSION,
+  MAX_MATCH_TICKS,
+  MAX_TOTAL_TOWER_COMMANDS,
+  type SimInput,
+} from '@wynding/sim';
 import { getBundledRuleset, defaultBoardId } from '@wynding/content';
 import type { Ruleset, RulesetBoard } from '@wynding/types';
 import {
@@ -13,6 +23,7 @@ import {
   COMPILE_CACHE_MAX,
   type Replay,
 } from './index';
+import { DEFENSE_PLAN } from './test-support';
 
 const m1Ruleset = getBundledRuleset();
 const M1_BOARD_ID = defaultBoardId(m1Ruleset);
@@ -127,17 +138,78 @@ describe('replay validate() — re-simulation budget caps', () => {
     expect(r.reason).toContain('too many inputs');
   });
 
-  it('rejects a replay whose total tower commands exceed the budget', () => {
+  it('rejects a replay whose total tower commands exceed the budget — 2,001 since sv17', () => {
+    expect(MAX_TOTAL_TOWER_COMMANDS).toBe(2_000);
     const build: SimInput[] = [
       { kind: 'placeTower', anchor: { col: 1, row: 1 }, towerId: 'basic' },
     ];
     const r = validate(
-      makeReplay({ tickInputs: Array.from({ length: 1_001 }, () => build) }),
+      makeReplay({ tickInputs: Array.from({ length: 2_001 }, () => build) }),
       m1Ruleset,
     );
     expect(r.ok).toBe(false);
-    expect(r.reason).toContain('too many tower commands');
+    expect(r.reason).toBe('too many tower commands: exceeds limit 2000');
   });
+
+  it('admits the juggling run 1,000 rejected: 40 kept basics and 481 sell-and-rebuild flips (QC, M3 story 2)', () => {
+    // The counterexample to sv16's 1,000: 40 + 2 × 481 = 1,002 tower commands, every one of
+    // them committed and paid for (40 × 5 + 481 × (5 − 3) = 1,162 bounty), on M2's own arc.
+    // The bundle starts with that much bounty and a long first countdown, so the whole
+    // script plays before a creep exists and nothing can block an anchor.
+    const base = getBundledRuleset();
+    const board = base.boards[0]!;
+    const bundle: Ruleset = {
+      ...base,
+      balance: { ...base.balance, startingBounty: 2_000, startingLives: 1_000 },
+      boards: [
+        {
+          ...board,
+          waves: board.waves.map((w, i) => (i === 0 ? { ...w, countdownTicks: 5_000 } : w)),
+        },
+      ],
+    };
+    const ruleset = compileRuleset(bundle, board.id);
+    const kept = DEFENSE_PLAN.slice(0, 40);
+    const flip = DEFENSE_PLAN[40]!;
+    let state = createInitialState(1, ruleset);
+    const tickInputs: SimInput[][] = [];
+    const play = (inputs: SimInput[]): void => {
+      tickInputs.push(inputs);
+      state = step(state, ruleset, inputs);
+    };
+    const place = (a: { col: number; row: number }): SimInput => ({
+      kind: 'placeTower',
+      anchor: { col: a.col, row: a.row },
+      towerId: 'basic',
+    });
+    for (const a of kept) play([place(a)]);
+    for (let i = 0; i < 481; i++) {
+      play([place(flip)]);
+      const at = state.towers.col.findIndex(
+        (c, k) => c === flip.col && state.towers.row[k] === flip.row,
+      );
+      play([{ kind: 'sellTower', tower: state.towers.id[at]! }]);
+    }
+    expect(state.waveCursor, 'the script ran before any wave launched').toBe(0);
+    expect(state.towers.id).toHaveLength(40); // every flip committed and was undone
+    expect(state.bounty).toBe(2_000 - 1_162);
+    while (!isTerminalPhase(state.phase)) play([]);
+
+    const commands = tickInputs.reduce((n, t) => n + t.length, 0);
+    expect(commands).toBe(1_002);
+    const r = validate(
+      {
+        seed: 1,
+        boardId: board.id,
+        rulesetHash: currentRulesetHash(bundle),
+        simVersion: SIM_VERSION,
+        tickInputs,
+      },
+      bundle,
+    );
+    expect(r.ok, r.reason).toBe(true);
+    expect(r.finalHash).toBe(hashSimState(state));
+  }, 30_000);
 });
 
 describe('replay validate() — command-union validation (ADR 0006 §4)', () => {

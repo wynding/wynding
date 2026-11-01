@@ -12,6 +12,13 @@
 // terminating it is the whole of cancellation: a verification the player walked away from
 // (Play again) stops spending a core at once rather than finishing for no one.
 //
+// A WORKER THAT NEVER ANSWERS MUST STILL END THE VERIFICATION. A load that stalls, or a host
+// scheme that swallows the request, fires no `error` event, and "Verifying…" would stand for
+// good. So the worker says it is ready the moment its module has loaded; no word within
+// {@link VERIFY_READY_TIMEOUT_MS} is a worker that could not start, and no answer within
+// {@link VERIFY_TIMEOUT_MS} of the press is one that took too long. Both reject with a
+// {@link VerifyError}, and both terminate the worker.
+//
 // The verifier is injected because jsdom has no `Worker`: unit tests verify in-process with
 // {@link inProcessVerifier}, and the shipped app — `main.ts`'s default — with
 // {@link workerVerifier} over {@link spawnVerifyWorker}.
@@ -25,9 +32,38 @@ export interface VerifyRequest {
   readonly bundle: Ruleset;
 }
 
+/** What the worker posts back: `ready` once, as its module finishes loading, then one
+ *  `result` per request. */
+export type VerifyWorkerMessage =
+  { readonly kind: 'ready' } | { readonly kind: 'result'; readonly result: ValidationResult };
+
+/** No `ready` within this long of the spawn: the worker could not start. Loading the worker's
+ *  one chunk takes well under a second; 15 s allows for a slow device and a cold cache. */
+export const VERIFY_READY_TIMEOUT_MS = 15_000;
+
+/** No answer within this long of the spawn: the verification took too long. A 30-wave run
+ *  verifies in about 5 s on ADR 0005's low-end profile, so this is a stall, not a slow phone. */
+export const VERIFY_TIMEOUT_MS = 120_000;
+
+/** Why a verification could not run at all. `main.ts` says which, in the player's language. */
+export type VerifyFailure = 'unavailable' | 'timeout' | 'unreadable';
+
+/** A verification that could not run: the worker could not start (`unavailable`), took too
+ *  long (`timeout`), or answered with something that was not an answer (`unreadable`). The
+ *  message carries what the browser said, when it said anything, for whoever debugs it. */
+export class VerifyError extends Error {
+  constructor(
+    readonly failure: VerifyFailure,
+    message: string,
+  ) {
+    super(message);
+    this.name = 'VerifyError';
+  }
+}
+
 /** Re-simulates `replay` against `bundle` and resolves with the validator's result. Rejects
- *  only when the verification could not run at all (a worker that failed, or one `signal`
- *  abandoned): a replay that does not validate RESOLVES, with `ok: false`. */
+ *  only when the verification could not run (a {@link VerifyError}) or `signal` abandoned it:
+ *  a replay that does not validate RESOLVES, with `ok: false`. */
 export type Verifier = (
   replay: Replay,
   bundle: Ruleset,
@@ -38,10 +74,12 @@ export type Verifier = (
 export const inProcessVerifier: Verifier = (replay, bundle) =>
   Promise.resolve(validate(replay, bundle));
 
-/** The main thread's side of a worker: as much of `Worker` as {@link workerVerifier} uses. */
+/** The main thread's side of a worker: as much of `Worker` as {@link workerVerifier} uses.
+ *  `onerror` takes a plain `Event`: a worker whose script fails to LOAD fires one with no
+ *  `message`, unlike the `ErrorEvent` of a throw inside it. */
 export interface VerifyWorkerPort {
-  onmessage: ((event: MessageEvent<ValidationResult>) => void) | null;
-  onerror: ((event: ErrorEvent) => void) | null;
+  onmessage: ((event: MessageEvent<unknown>) => void) | null;
+  onerror: ((event: Event) => void) | null;
   onmessageerror: ((event: MessageEvent) => void) | null;
   postMessage(request: VerifyRequest): void;
   terminate(): void;
@@ -50,12 +88,30 @@ export interface VerifyWorkerPort {
 /** The shipped worker. Vite emits `verify-worker.ts` as a chunk of its own because the
  *  `new URL(…, import.meta.url)` is written inside the `Worker` call; `type: 'module'` lets the
  *  dev server serve it as ES modules. jsdom has no `Worker`, so only the e2e Verify specs run
- *  this — in a browser, against the built app. */
+ *  this — in a browser, against the built app. Asserted to the port because the DOM lib types
+ *  `onerror`'s event as an `ErrorEvent`, and a script that fails to load fires a plain `Event`. */
 export function spawnVerifyWorker(): VerifyWorkerPort {
   return new Worker(new URL('./verify-worker.ts', import.meta.url), {
     type: 'module',
     name: 'wynding-verify',
-  });
+  }) as VerifyWorkerPort;
+}
+
+/** `data` as a message the worker sends, or null when it is not one. Checked rather than
+ *  trusted: an answer of the wrong shape must fail the verification, not pass for a result. */
+function readMessage(data: unknown): VerifyWorkerMessage | null {
+  if (typeof data !== 'object' || data === null) return null;
+  const { kind, result } = data as { kind?: unknown; result?: unknown };
+  if (kind === 'ready') return { kind };
+  if (
+    kind === 'result' &&
+    typeof result === 'object' &&
+    result !== null &&
+    typeof (result as { ok?: unknown }).ok === 'boolean'
+  ) {
+    return { kind, result: result as ValidationResult };
+  }
+  return null;
 }
 
 /** A {@link Verifier} that runs each verification in a worker of its own from `spawn`. */
@@ -66,35 +122,67 @@ export function workerVerifier(spawn: () => VerifyWorkerPort): Verifier {
         reject(abandoned(signal));
         return;
       }
-      const worker = spawn();
+      let worker: VerifyWorkerPort;
+      try {
+        worker = spawn();
+      } catch (error) {
+        reject(
+          new VerifyError('unavailable', describe(error, 'the verify worker could not start')),
+        );
+        return;
+      }
+      const readyTimer = setTimeout(() => {
+        fail(new VerifyError('unavailable', 'the verify worker did not start in time'));
+      }, VERIFY_READY_TIMEOUT_MS);
+      const answerTimer = setTimeout(() => {
+        fail(new VerifyError('timeout', 'the verify worker did not answer in time'));
+      }, VERIFY_TIMEOUT_MS);
       const onAbort = (): void => {
-        finish();
-        reject(abandoned(signal!));
+        fail(abandoned(signal!));
       };
       function finish(): void {
+        clearTimeout(readyTimer);
+        clearTimeout(answerTimer);
         worker.onmessage = null;
         worker.onerror = null;
         worker.onmessageerror = null;
         signal?.removeEventListener('abort', onAbort);
         worker.terminate();
       }
-      worker.onmessage = (event) => {
+      function fail(reason: unknown): void {
         finish();
-        resolve(event.data);
+        reject(reason);
+      }
+      worker.onmessage = (event) => {
+        const message = readMessage(event.data);
+        if (message === null) {
+          fail(
+            new VerifyError('unreadable', 'the verify worker sent something that is not an answer'),
+          );
+        } else if (message.kind === 'ready') {
+          clearTimeout(readyTimer);
+        } else {
+          finish();
+          resolve(message.result);
+        }
       };
       worker.onerror = (event) => {
         // Handled here, so the browser does not also report it as an uncaught error.
         event.preventDefault();
-        finish();
-        reject(new Error(event.message === '' ? 'the verify worker failed' : event.message));
+        fail(new VerifyError('unavailable', describe(event, 'the verify worker failed')));
       };
       worker.onmessageerror = () => {
-        finish();
-        reject(new Error('the verify worker’s answer could not be read'));
+        fail(new VerifyError('unreadable', 'the verify worker’s answer could not be read'));
       };
       signal?.addEventListener('abort', onAbort);
       worker.postMessage({ replay, bundle });
     });
+}
+
+/** What an error or error event says about itself, or `fallback` when it says nothing. */
+function describe(source: unknown, fallback: string): string {
+  const message = (source as { message?: unknown } | null)?.message;
+  return typeof message === 'string' && message !== '' ? message : fallback;
 }
 
 /** Why an abandoned verification rejected: the signal's own reason when it carries one. */

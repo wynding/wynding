@@ -1,8 +1,8 @@
 import { describe, it, expect, vi, afterEach } from 'vitest';
-import { validate, type ValidationResult } from '@wynding/replay';
+import { validate } from '@wynding/replay';
 import { getBundledRuleset } from '@wynding/content';
 import { createController } from './controller';
-import type { VerifyRequest } from './verifier';
+import type { VerifyRequest, VerifyWorkerMessage } from './verifier';
 
 afterEach(() => {
   vi.unstubAllGlobals();
@@ -10,16 +10,17 @@ afterEach(() => {
 });
 
 describe('verify-worker — the worker’s side of Verify (M3 story 2)', () => {
-  it('answers each posted request with validate()’s result over that replay and bundle', async () => {
+  it('says ready as it loads, then answers each posted request with validate()’s result', async () => {
     // The module binds itself to its global scope on import, as it does in a worker.
-    const posted: ValidationResult[] = [];
+    const posted: VerifyWorkerMessage[] = [];
     const scope: {
       onmessage: ((event: MessageEvent<VerifyRequest>) => void) | null;
-      postMessage: (result: ValidationResult) => void;
-    } = { onmessage: null, postMessage: (result) => void posted.push(result) };
+      postMessage: (message: VerifyWorkerMessage) => void;
+    } = { onmessage: null, postMessage: (message) => void posted.push(message) };
     vi.stubGlobal('self', scope);
     await import('./verify-worker');
     expect(scope.onmessage).not.toBeNull();
+    expect(posted, 'ready before any request').toEqual([{ kind: 'ready' }]);
 
     const c = createController(7);
     c.start();
@@ -27,14 +28,17 @@ describe('verify-worker — the worker’s side of Verify (M3 story 2)', () => {
     const replay = c.buildReplay();
     const bundle = getBundledRuleset();
     scope.onmessage!(new MessageEvent('message', { data: { replay, bundle } }));
-    expect(posted).toEqual([validate(replay, bundle)]);
-    expect(posted[0]!.ok).toBe(true);
+    expect(posted[1]).toEqual({ kind: 'result', result: validate(replay, bundle) });
+    expect(posted[1]).toMatchObject({ result: { ok: true } });
 
     // A request the validator refuses is answered too: its refusal IS the answer.
     scope.onmessage!(
       new MessageEvent('message', { data: { replay: { ...replay, simVersion: 0 }, bundle } }),
     );
-    expect(posted[1]!.ok).toBe(false);
-    expect(posted[1]!.reason).toContain('sim version mismatch');
+    const refused = posted[2] as Extract<VerifyWorkerMessage, { kind: 'result' }>;
+    expect(refused.kind).toBe('result');
+    expect(refused.result.ok).toBe(false);
+    expect(refused.result.reason).toContain('sim version mismatch');
+    expect(posted).toHaveLength(3);
   });
 });

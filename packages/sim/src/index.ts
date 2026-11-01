@@ -1402,6 +1402,9 @@ export {
   MAX_DOT_CADENCE_TICKS,
   MAX_IN_FLIGHT_IMPACTS,
 } from './combat';
+// The replay validator's whole-match tower-command budget (M3 story 2): defined here
+// because `MAX_DOT_RECORDS` is derived from it, imported by `packages/replay`.
+export { MAX_TOTAL_TOWER_COMMANDS } from './ruleset-shared';
 // Ruleset bundle (M1 Story 5, re-encoded to v2 in M2-S1): compilation, the content
 // digest, and the boundary guard.
 export {

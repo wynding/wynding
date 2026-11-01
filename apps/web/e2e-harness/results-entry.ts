@@ -12,6 +12,10 @@
 // first frame, with the run's own numbers. Nothing is forced: the outcome, score, stars and
 // stats are the run's.
 //
+// `?run=long` plays the replay package's synthetic 30-wave run instead (`test-support.ts`: M3's
+// first-pass arc on M2's board and catalog, and its scripted defense), about four times the
+// ticks of the M2 win: the run whose Verify `verify.spec.ts` times.
+//
 // `&survey=1` adds an always-offered survey with a transport that accepts every send, so the
 // panel's Give feedback can be checked (and seen) beside Play again and Run data. `&text=200`
 // sets the e2e suite's text zoom (`compact.spec.ts`'s `:root { font-size: 200% }`) BEFORE the
@@ -30,6 +34,10 @@
 // frame under a pointer that was pressing the board: what the press guard's arming is for.
 // With it, `&endDelay=<ms>` plays that tick that long after the press, and `&endOnKey=1` plays it
 // on the first keydown instead.
+//
+// `&verifyOnMain=1` verifies on the page's own thread (`inProcessVerifier`) instead of in the
+// shipped worker: `verify.spec.ts`'s control, the frame gap a main-thread Verify of the same run
+// leaves, which the worker's must stay well under.
 //
 // `&stop=step` and `&stop=draw` open the dialog's STOPPED form instead (#191): the run is played
 // to wave 3 and left live, then from the app's tenth frame a sim step throws (`step`), or every
@@ -55,14 +63,21 @@
 import Phaser from 'phaser';
 import { createApp, rafScheduler } from '../src/main';
 import { createController } from '../src/controller';
+import { inProcessVerifier } from '../src/verifier';
 import { playScript } from '../src/scripted-run';
 import type { Controller } from '../src/controller';
 import { MS_PER_TICK } from '@wynding/sim';
+import { getBundledRuleset } from '@wynding/content';
 import type { SurveyAsk, SurveyTransport } from '../src/survey';
 import { mount } from '@wynding/render/scene';
 // Reached by relative path, as `apps/server`'s replay-parity test does: the content
 // package's `exports` map has no subpath for its test support, and this harness never ships.
 import { WINNER_A } from '../../../packages/content/src/showcase-builds';
+import {
+  DEFENSE_PLAN,
+  THIRTY_WAVE_BOARD_ID,
+  thirtyWaveBundle,
+} from '../../../packages/replay/src/test-support';
 
 /** The seed WINNER_A is tuned against (`packages/content/src/m2-golden.test.ts`). */
 const SCENARIO_SEED = 0x5eed;
@@ -73,7 +88,8 @@ if (params.get('text') === '200') {
   zoom.textContent = ':root { font-size: 200% }';
   document.head.append(zoom);
 }
-const plan = params.get('run') === 'loss' ? WINNER_A.slice(0, 12) : WINNER_A;
+const long = params.get('run') === 'long';
+const plan = long ? DEFENSE_PLAN : params.get('run') === 'loss' ? WINNER_A.slice(0, 12) : WINNER_A;
 
 let offered = true;
 const surveyAsk: SurveyAsk = {
@@ -299,11 +315,17 @@ createApp(document, root, {
     if (stop === 'step' || stop === 'draw') return stoppingRun(seed, stop);
     if (armRenderBreak !== null || stop === 'boot') return stoppingRun(seed, 'render');
     if (params.get('endOnPress') === '1') return endingOnPress(seed);
-    const controller = createController(seed);
+    const controller = long
+      ? createController(seed, {
+          bundle: thirtyWaveBundle(getBundledRuleset()),
+          boardId: THIRTY_WAVE_BOARD_ID,
+        })
+      : createController(seed);
     playScript(controller, plan);
     // The message is also `check:build-layering`'s marker for this module: rename it there too.
     if (!controller.isTerminal()) throw new Error('results harness: the scripted run did not end');
     return controller;
   },
   ...(params.get('survey') === '1' ? { surveyTransport, surveyAsk } : {}),
+  ...(params.get('verifyOnMain') === '1' ? { verifier: inProcessVerifier } : {}),
 });

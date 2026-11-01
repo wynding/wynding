@@ -136,10 +136,11 @@ describe('the pending-buffer cap (#99 note 3)', () => {
     Array.from({ length: n }, (): SimInput => ({ kind: 'callWaveEarly' }));
 
   it('caps against the bound that actually governs a PER-TICK buffer', () => {
-    // Not the run-wide `MAX_TOTAL_TOWER_COMMANDS` (1,000) #99 note 3 named: this buffer is
-    // the controller's per-tick one, which `effectiveCap()` bounds by MAX_INPUTS_PER_TICK.
-    // A cap 15x looser than the thing it bounds can never bind, and would have waved a
-    // corrupted 999-entry buffer through while claiming to be bounded.
+    // Not the run-wide `MAX_TOTAL_TOWER_COMMANDS` (2,000 since sv17) #99 note 3 named: this
+    // buffer is the controller's per-tick one, which `effectiveCap()` bounds by
+    // MAX_INPUTS_PER_TICK. A cap about 30x looser than the thing it bounds can never bind,
+    // and would have waved a corrupted 1,999-entry buffer through while claiming to be
+    // bounded.
     const built = buildPlaytrace(source({ pendingInputs: fill(MAX_INPUTS_PER_TICK + 25) }));
     expect(built.pendingInputs).toHaveLength(MAX_INPUTS_PER_TICK);
   });

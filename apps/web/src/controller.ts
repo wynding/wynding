@@ -748,9 +748,9 @@ export function createController(
     // DoT applications silently become no-ops.
     // Shipping the only instrument for detecting it switched off would mean the first
     // report is a player saying poison sometimes stops working, with nothing to look at.
-    // Unreachable today (the cap is 9,000 against real peaks in the low hundreds), so
-    // this is a tripwire for a future story that widens a DoT duration, not a live
-    // concern. `impactPoints`/`fired` stay as they were; the counter is a scalar and
+    // Unreachable today (the cap is 18,000 since sv17 against real peaks in the low
+    // hundreds), so this is a tripwire for a future story that widens a DoT duration, not
+    // a live concern. `impactPoints`/`fired` stay as they were; the counter is a scalar and
     // costs an increment only on the drop path.
     // Combat feedback (visual pass C1/C2, #181) asks the step what it did rather than working it
     // out from the states either side (`combat-events.ts`): the creeps it killed (`killed`) and

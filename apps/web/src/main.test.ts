@@ -55,7 +55,7 @@ import {
   type Scheduler,
 } from './main';
 import { createController, type Controller } from './controller';
-import { inProcessVerifier, type Verifier } from './verifier';
+import { inProcessVerifier, VerifyError, type Verifier } from './verifier';
 import { MAX_RECENT_AGE_MS } from './playtrace';
 import { validateSurveyPayload, type SurveyPayload } from '@wynding/feedback';
 import { type SurveyAsk, type SurveySendResult, type SurveyTransport } from './survey';
@@ -3087,10 +3087,12 @@ describe('main — hardware Back never exits out from under work (#138)', () => 
 });
 
 describe('main — the playtrace capture and its export actions (#133)', () => {
-  /** An app wired with an inspectable delivery and a pinned `runId` mint. */
+  /** An app wired with an inspectable delivery and a pinned `runId` mint. `wrap` lets a test
+   *  stand in for one of the controller's methods. */
   function playtraceApp(
     runIds: string[] = ['run-1', 'run-2', 'run-3'],
     verifier: Verifier = inProcessVerifier,
+    wrap: (controller: Controller) => Controller = (controller) => controller,
   ) {
     const root = document.createElement('div');
     document.body.appendChild(root);
@@ -3114,6 +3116,7 @@ describe('main — the playtrace capture and its export actions (#133)', () => {
       seed: 1,
       mintRunId: () => runIds[minted++] ?? `run-overflow-${String(minted)}`,
       verifier,
+      controllerFactory: (seed) => wrap(createController(seed)),
       playtraceDelivery: {
         copy: async (text: string) => {
           const queued = copyGateQueue.shift();
@@ -3349,15 +3352,45 @@ describe('main — the playtrace capture and its export actions (#133)', () => {
     expect(held.calls).toHaveLength(2);
   });
 
-  it('a verification that cannot run says it failed, with the reason', async () => {
+  it('a verification that cannot run says it failed, and why, in the player’s language', async () => {
     const held = heldVerifier();
     const h = playtraceApp(undefined, held.verifier);
     h.resolve();
+    // DEV logs what the browser said, for whoever debugs it; the region says it plainly.
+    const warned = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    const cases: [Error, string][] = [
+      [new VerifyError('unavailable', 'Failed to load'), 'the verifier could not start'],
+      [new VerifyError('timeout', 'did not answer'), 'it took too long'],
+      [new VerifyError('unreadable', 'not an answer'), "the verifier's answer could not be read"],
+      [new Error('anything else'), 'something went wrong'],
+    ];
+    for (const [i, [error, reason]] of cases.entries()) {
+      h.resultsButton('Verify this run').click(); // the last one settled: this one is fresh
+      expect(held.calls).toHaveLength(i + 1);
+      held.calls[i]!.fail(error);
+      await vi.waitFor(() => expect(h.status()).toBe(`Verification failed: ${reason}`));
+    }
+    expect(warned).toHaveBeenCalledTimes(cases.length);
+    warned.mockRestore();
+  });
+
+  it('a throw while reading the answer is announced as a failure, never left at "Verifying"', async () => {
+    const warned = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    const h = playtraceApp(undefined, inProcessVerifier, (controller) => ({
+      ...controller,
+      verifyRun: async () =>
+        ({
+          ok: true,
+          get matchedLive(): boolean {
+            throw new Error('unreadable answer');
+          },
+        }) as never,
+    }));
+    h.resolve();
     h.resultsButton('Verify this run').click();
-    held.calls[0]!.fail(new Error('the verify worker failed'));
-    await vi.waitFor(() =>
-      expect(h.status()).toBe('Verification failed: the verify worker failed'),
-    );
+    await vi.waitFor(() => expect(h.status()).toBe('Verification failed: something went wrong'));
+    expect(warned).toHaveBeenCalledOnce();
+    warned.mockRestore();
   });
 
   it('Play again stops a verification still running, and its answer never reaches the next run', async () => {
@@ -3369,7 +3402,7 @@ describe('main — the playtrace capture and its export actions (#133)', () => {
     expect(first.signal?.aborted).toBe(false);
     h.resultsButton('Play again').click();
     expect(first.signal?.aborted, 'the worker is told to stop').toBe(true);
-    first.fail(new Error('aborted')); // what an abandoned worker verifier does
+    first.fail(first.signal!.reason as Error); // what an abandoned worker verifier does
     h.resolve(); // the next run's dialog
     await Promise.resolve();
     expect(h.status(), 'nothing from the last run lands here').toBe('');
@@ -3378,13 +3411,42 @@ describe('main — the playtrace capture and its export actions (#133)', () => {
     expect(held.calls).toHaveLength(2);
   });
 
-  it('destroy() stops a verification still running', () => {
+  it('a late answer from an abandoned verification changes nothing, and the running one stays joined', async () => {
+    const held = heldVerifier();
+    const h = playtraceApp(undefined, held.verifier);
+    h.resolve();
+    h.resultsButton('Verify this run').click(); // call 1
+    h.resultsButton('Play again').click();
+    h.resolve();
+    h.resultsButton('Verify this run').click(); // call 2, the next run's
+    expect(held.calls).toHaveLength(2);
+    // Call 1 answers anyway, late, as a worker that finished before its terminate landed would.
+    held.calls[0]!.answer();
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(h.status(), 'the abandoned answer wrote nothing').toBe('Verifying this run…');
+    // Its settling did not unhook call 2: a third press still joins it.
+    h.resultsButton('Verify this run').click();
+    expect(held.calls, 'joined call 2, started nothing').toHaveLength(2);
+    held.calls[1]!.answer();
+    await vi.waitFor(() =>
+      expect(h.status()).toBe('Verified: replay re-simulated to the same outcome.'),
+    );
+  });
+
+  it('destroy() stops a verification still running, and its rejection writes nothing', async () => {
     const held = heldVerifier();
     const h = playtraceApp(undefined, held.verifier);
     h.resolve();
     h.resultsButton('Verify this run').click();
     h.app.destroy();
-    expect(held.calls[0]!.signal?.aborted).toBe(true);
+    const { signal, fail } = held.calls[0]!;
+    expect(signal?.aborted).toBe(true);
+    const warned = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    fail(signal!.reason as Error); // what the worker verifier does when its signal aborts
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(h.status(), 'nothing written into the torn-down dialog').toBe('Verifying this run…');
+    expect(warned, 'an abandonment is not logged as a failure').not.toHaveBeenCalled();
+    warned.mockRestore();
   });
 
   it('says a refused clipboard FAILED rather than looking like a press that did nothing', async () => {

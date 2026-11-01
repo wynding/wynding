@@ -67,7 +67,7 @@ import type { Ruleset } from '@wynding/types';
 import { capabilityProfile } from './capability';
 import { MAX_IMPACT_EFFECTS, MAX_BLAST_RADIUS_FP, MAX_DOT_RECORDS } from './combat';
 import { MAX_TOWERS } from './tower';
-import { MAX_DOT_DURATION_CADENCE_RATIO } from './ruleset-shared';
+import { MAX_DOT_DURATION_CADENCE_RATIO, MAX_TOTAL_TOWER_COMMANDS } from './ruleset-shared';
 import { compileRuleset, MAX_AIR_BOARD_SIDE_TILES, RulesetError } from './ruleset';
 import { SIM_VERSION } from './index';
 import { testBundle } from './test-support';
@@ -366,7 +366,15 @@ describe('capability gate — accept at boundary, reject beyond, per dimension',
     // `+ 1`: impacts resolve in step (1) but expiry runs in step (6), so on the tick a
     // source's oldest record expires, the newly-landing shot still sees it — the peak is
     // `ratio + 1` for that one tick, and that is when capacity is tested (Codex P2).
-    expect(MAX_DOT_RECORDS).toBe((MAX_DOT_DURATION_CADENCE_RATIO + 1) * MAX_TOWERS);
+    // ...times the SOURCE count, which is the replay validator's tower-command budget —
+    // every source is a minted tower id, and minting one takes a `placeTower` — not
+    // `MAX_TOWERS`, since a sold source's records keep ticking. Imported, so the budget and
+    // the rail move together (issue #77's hazard, closed at sv17). Through sv16 the budget
+    // equalled MAX_TOWERS (1,000) by coincidence; it is 2,000 now, and the rail 18,000.
+    expect(MAX_DOT_RECORDS).toBe((MAX_DOT_DURATION_CADENCE_RATIO + 1) * MAX_TOTAL_TOWER_COMMANDS);
+    expect(MAX_TOTAL_TOWER_COMMANDS).toBe(2_000);
+    expect(MAX_TOTAL_TOWER_COMMANDS).toBeGreaterThan(MAX_TOWERS);
+    expect(MAX_DOT_RECORDS).toBe(18_000);
   });
 
   it('maxDotDurationCadenceRatio: a DoT may last 8x its tower fire cadence, not 9x (Codex P2, PR #78)', () => {

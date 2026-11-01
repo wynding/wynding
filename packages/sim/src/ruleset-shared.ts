@@ -107,8 +107,12 @@ export class RulesetError extends Error {
  *  compiles, and a replay that terminates in that range now validates where sv16 timed it
  *  out. By the code's own precedent (`AOE_SCAN_CEILING`), changing which bundles compile
  *  is a behaviour change, and an sv16 validator would reject the very replays sv17
- *  accepts. The capability profile's fields are unchanged; the tick cap is not one of
- *  them. */
+ *  accepts. Two bounds move with it for the same run: the replay's tower-command budget
+ *  doubles to 2,000 (`MAX_TOTAL_TOWER_COMMANDS`, below — it moved here from
+ *  `packages/replay` so the next bound can be computed from it), and `MAX_DOT_RECORDS`
+ *  (`combat.ts`), derived from that budget, doubles to 18,000; a table that never fills
+ *  simulates exactly as before. The capability profile's fields are unchanged; none of
+ *  the three is one of them. */
 export const SIM_VERSION = 17;
 
 /** Canonical immunity order — `slow` before `stun` (decision: "one hash form"). */
@@ -172,3 +176,30 @@ export function effectiveSpeedFp(
  *  makes the derivation true rather than aspirational, and `capability.test.ts` pins the
  *  gate and the rail together. */
 export const MAX_DOT_DURATION_CADENCE_RATIO = 8;
+
+/**
+ * The replay validator's budget of tower commands (`placeTower` + `sellTower`) across a
+ * whole match. `packages/replay` enforces it, and it lives HERE, not there, because
+ * `combat.ts`'s `MAX_DOT_RECORDS` rests on it (issue #77): every DoT source is a minted
+ * tower id, and minting one takes a `placeTower`. `packages/sim` cannot import from
+ * `packages/replay` without the layering back-edge AGENTS.md blocks, so the validator
+ * imports this one — the `MAX_MATCH_TICKS` arrangement — and the two can no longer move
+ * apart with no test failing.
+ *
+ * Its first job is CPU: every `placeTower` that reaches the maze-invariant check runs a
+ * full-board search, and a rejected placement is a free no-op, so the economy cannot
+ * rate-limit repeats.
+ *
+ * 2,000 since sv17 (M3 story 2; 1,000 before), derived from what legitimate play can
+ * issue. A command that COMMITS is never free at the shipped catalog's prices: a placement
+ * costs at least 5 (`basic`), and a sold tower refunds ⌊¾⌋ of its cost, so a
+ * sell-and-rebuild flip — two commands — nets at least 2. A run whose whole income is I
+ * and that keeps H towers (standing, or consumed like a mine) therefore commits at most
+ * H + (I − 5H) = I − 4H tower commands, and never more than I. M3's first-pass I is
+ * 1,423 (80 starting + 1,084 kills + 102 clear bonuses + 157 early calls,
+ * `docs/milestones/m3.md`), and 1,000 did not cover it: 40 kept `basic`s and 481 flips are
+ * 1,002 commands. 2,000 leaves the balance pass room to raise I by about 40%; if it goes
+ * past 2,000, re-derive. The shipped client logs only commands its own preview accepts,
+ * so the free no-ops the CPU half guards against do not come from play.
+ */
+export const MAX_TOTAL_TOWER_COMMANDS = 2_000;

@@ -19,6 +19,7 @@ import {
   RulesetError,
   SIM_VERSION,
   MAX_MATCH_TICKS,
+  MAX_TOTAL_TOWER_COMMANDS,
   type SimInput,
   type CompiledRuleset,
 } from '@wynding/sim';
@@ -69,28 +70,10 @@ export function currentRulesetHash(bundle: Ruleset): string {
 const MAX_TICKS = MAX_MATCH_TICKS;
 /** Max inputs applied on a single tick — far above any legitimate command burst. */
 export const MAX_INPUTS_PER_TICK = 64;
-/**
- * Max tower commands (placeTower/sellTower) across the whole match. Each placeTower
- * that reaches the maze-invariant check runs a full grid-wide Dijkstra, and a rejected
- * placement is a free no-op (no bounty spent), so the economy cannot rate-limit
- * repeats — without this cap an attacker could pack minutes of CPU into one replay.
- *
- * 1,000 still admits legitimate play at M3's 30-wave length (re-derived at sv17, M3
- * story 2), because a command that COMMITS is never free: a placement costs at least 5
- * (`basic`), and a sold tower refunds ⌊¾⌋ of its cost, so every place-then-sell nets at
- * least 2. A run whose whole income is at most I and that keeps H towers (standing, or
- * consumed like a mine) can therefore commit at most I − 4H tower commands. M3's
- * first-pass arc pays at most I = 1,423 (80 starting + 1,084 kills + 102 clear bonuses +
- * 157 early calls, `docs/milestones/m3.md`), so a run passes 1,000 only by keeping
- * fewer than 106 towers and spending most of its income on flips: a 60-tower build
- * would need about 16 sell-and-rebuild flips every wave. A full board (≤ 143 towers),
- * rebuilding its whole mix once (≤ 286 more) and a flip every wave (60) come to under
- * 500. The shipped client logs only commands its own preview accepts, so the free no-ops
- * this cap exists for do not come from play. If the balance pass raises I well past
- * 1,423, re-derive here. Raising the cap is not free: `combat.ts`'s `MAX_DOT_RECORDS`
- * derivation rests on it (issue #77's HAZARD) and would have to move with it.
- */
-const MAX_TOTAL_TOWER_COMMANDS = 1_000;
+// Max tower commands (placeTower/sellTower) across the whole match: `MAX_TOTAL_TOWER_COMMANDS`,
+// imported from `@wynding/sim` beside `MAX_MATCH_TICKS`. It lives there because the sim's
+// DoT-record rail is derived from it (issue #77); its derivation from what legitimate play
+// can issue, and its CPU motivation, are recorded at its definition (`ruleset-shared.ts`).
 
 /** A 64-char lowercase-hex SHA-256 digest. */
 const SHA256_HEX = /^[0-9a-f]{64}$/;

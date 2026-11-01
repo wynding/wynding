@@ -1,10 +1,20 @@
 // run-length.test.ts — the run-length cap at sv17 (M3 story 2): `MAX_MATCH_TICKS` 72,000,
 // read by both the compile gate (`compileRuleset`) and this package's validator, proven
 // together on a synthetic 30-wave arc (`test-support.ts`) — the first schedule in the repo
-// that the sv16 cap of 36,000 could not hold.
+// that the sv16 cap of 36,000 could not hold — and the validator's ceiling enforced at
+// the far end, where a run that never ends is rejected as a timeout.
 
 import { describe, it, expect } from 'vitest';
-import { compileRuleset, DIAG_LEN, MAX_MATCH_TICKS, RulesetError, SIM_VERSION } from '@wynding/sim';
+import {
+  compileRuleset,
+  createInitialState,
+  step,
+  DIAG_LEN,
+  MAX_MATCH_TICKS,
+  RulesetError,
+  SIM_VERSION,
+  type SimInput,
+} from '@wynding/sim';
 import { getBundledRuleset } from '@wynding/content';
 import type { Ruleset } from '@wynding/types';
 import { validate, currentRulesetHash } from './index';
@@ -96,6 +106,34 @@ describe('the synthetic 30-wave arc compiles at sv17 and would not have at sv16'
   }, 30_000);
 });
 
+describe('the scripted defense plan is well formed — all 56 entries, without simulating', () => {
+  // The suites below play only its first sixteen entries; the Verify wall-time measurement
+  // plays all of them. So the rest are checked here by shape: a bad entry would be skipped
+  // silently by `playScript`, shrinking the workload without failing anything.
+  it('every anchor’s 2 × 2 footprint is on the board, off the entrance and exit, and overlaps no other; every tower is in the catalog and affordable from the start', () => {
+    const board = thirtyWaveBundle(M2).boards[0]!;
+    expect(DEFENSE_PLAN).toHaveLength(56);
+    const taken = new Set<string>();
+    for (const { col, row, towerId } of DEFENSE_PLAN) {
+      for (const [c, r] of [
+        [col, row],
+        [col + 1, row],
+        [col, row + 1],
+        [col + 1, row + 1],
+      ] as const) {
+        expect(c >= 0 && c < board.widthTiles && r >= 0 && r < board.heightTiles).toBe(true);
+        expect(`${c},${r}`).not.toBe(`${board.entrance.col},${board.entrance.row}`);
+        expect(`${c},${r}`).not.toBe(`${board.exit.col},${board.exit.row}`);
+        expect(taken.has(`${c},${r}`), `cell ${c},${r} is taken twice`).toBe(false);
+        taken.add(`${c},${r}`);
+      }
+      const tower = M2.towerCatalog.find((t) => t.id === towerId);
+      expect(tower, towerId).toBeDefined();
+      expect(tower!.cost).toBeLessThanOrEqual(M2.balance.startingBounty);
+    }
+  });
+});
+
 describe('a played 30-wave run validates, and so does one that ends past 36,000 ticks', () => {
   // Sized for a test suite: a sixteen-tower slice of the scripted defense, and a hands-off
   // run for the long one. The whole 56-tower plan is what the Verify wall-time measurement
@@ -128,5 +166,117 @@ describe('a played 30-wave run validates, and so does one that ends past 36,000 
     expect(result.ok).toBe(true);
     expect(result.finalHash).toBe(run.liveFinalHash);
     expect(result.ticks).toBe(ticks);
+  }, 60_000);
+});
+
+describe('the validator’s catch-up ceiling', () => {
+  it('a log that never reaches a terminal state by MAX_MATCH_TICKS is a timeout, not a hang', () => {
+    // The one nonterminal state play can reach (M2-S6, chain-lock is permitted): two
+    // always-stun towers, placed 20 ticks apart over a creep whose armor blanks their
+    // damage, hold it forever — so its wave never resolves and the run never ends. The log
+    // stops once the lock holds; the validator drives empty ticks to its ceiling and
+    // rejects the replay there. `packages/sim`'s story-stun test 14 proves the lock over
+    // the sim alone, on an injected creep; this one plays it from a real spawn through a
+    // real log, so the rejection branch itself runs.
+    const bundle: Ruleset = {
+      formatVersion: 2,
+      rulesetId: 'stun-lock',
+      version: 1,
+      creepCatalog: [
+        {
+          id: 'blanked',
+          hp: 200,
+          speedFp: 22,
+          armor: 6,
+          domain: 'ground',
+          immunities: [],
+          leakCost: 1,
+          bounty: 1,
+        },
+      ],
+      towerCatalog: [
+        {
+          id: 'stun-blank',
+          cost: 10,
+          attack: { domain: 'ground', rangeFp: 1024, cadenceTicks: 40, travelTicks: 2 },
+          effects: [
+            { kind: 'direct', form: 'single', damage: 4 },
+            { kind: 'stun', chanceNum: 256, durationTicks: 20 },
+          ],
+        },
+      ],
+      balance: {
+        startingLives: 10,
+        startingBounty: 80,
+        refundNum: 3,
+        refundDen: 4,
+        slowFloorNum: 1,
+        slowFloorDen: 4,
+        earlyCallBountyDivisor: 0,
+      },
+      scoring: { survivalMul: 25, starThresholds: [1, 6, 9], earlyCallScoreDivisor: 0 },
+      boards: [
+        {
+          id: 'lane',
+          widthTiles: 14,
+          heightTiles: 14,
+          entrance: { col: 0, row: 6 },
+          exit: { col: 13, row: 6 },
+          waves: [
+            {
+              index: 0,
+              countdownTicks: 5,
+              clearBonus: 0,
+              entries: [{ creepId: 'blanked', count: 1, spacingTicks: 20 }],
+            },
+          ],
+        },
+      ],
+    };
+    const ruleset = compileRuleset(bundle, 'lane');
+    let state = createInitialState(1, ruleset);
+    const tickInputs: SimInput[][] = [];
+    let lockedAt: { col: number; row: number; tick: number } | null = null;
+    for (let t = 0; t < 400; t++) {
+      const inputs: SimInput[] = [];
+      const head = state.creeps.headCol[0];
+      if (lockedAt === null && head !== undefined && head >= 5) {
+        // Above the creep's row now, below it 20 ticks later: both in range, neither on it.
+        lockedAt = { col: head, row: state.creeps.headRow[0]!, tick: t };
+        inputs.push({
+          kind: 'placeTower',
+          anchor: { col: head, row: lockedAt.row - 2 },
+          towerId: 'stun-blank',
+        });
+      } else if (lockedAt !== null && t === lockedAt.tick + 20) {
+        inputs.push({
+          kind: 'placeTower',
+          anchor: { col: lockedAt.col, row: lockedAt.row + 2 },
+          towerId: 'stun-blank',
+        });
+      }
+      tickInputs.push(inputs);
+      state = step(state, ruleset, inputs);
+    }
+    // The lock holds: both towers stand, and the creep is alive, unhurt and stunned.
+    expect(state.towers.id).toHaveLength(2);
+    expect(state.creeps.hp[0]).toBe(200);
+    expect(state.creeps.stunUntilTick[0]).toBeGreaterThanOrEqual(state.tick);
+    expect(state.phase).toBe('running');
+
+    const r = validate(
+      {
+        seed: 1,
+        boardId: 'lane',
+        rulesetHash: currentRulesetHash(bundle),
+        simVersion: SIM_VERSION,
+        tickInputs,
+      },
+      bundle,
+    );
+    expect(r).toEqual({
+      ok: false,
+      reason: `replay did not terminate within ${MAX_MATCH_TICKS} ticks (timeout)`,
+    });
   }, 60_000);
 });

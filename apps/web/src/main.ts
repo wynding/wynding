@@ -16,7 +16,7 @@ import {
   type Controller,
   type VerifyResult,
 } from './controller';
-import { spawnVerifyWorker, workerVerifier, type Verifier } from './verifier';
+import { spawnVerifyWorker, VerifyError, workerVerifier, type Verifier } from './verifier';
 import { createOverlay, type UiAction } from './overlay';
 import { createShell, HOME_HREF } from './shell';
 import { attachInput, type InputHandle } from './input';
@@ -806,6 +806,20 @@ export function createApp(doc: Document, root: HTMLElement, deps: AppDeps): AppH
     verifying?.abort.abort();
     verifying = null;
   }
+  /** Why a verification could not run, in the player's language (ADR 0004). */
+  function verifyFailureReason(error: unknown): string {
+    if (error instanceof VerifyError) {
+      switch (error.failure) {
+        case 'unavailable':
+          return t('verify.reason.unavailable');
+        case 'timeout':
+          return t('verify.reason.timeout');
+        case 'unreadable':
+          return t('verify.reason.unreadable');
+      }
+    }
+    return t('verify.reason.unknown');
+  }
 
   function exportPlaytrace(destination: 'clipboard' | 'file'): void {
     // The claim is taken AFTER the work that can throw. Taken before, a failure in
@@ -1194,20 +1208,22 @@ export function createApp(doc: Document, root: HTMLElement, deps: AppDeps): AppH
         // Play again still silences it (#133's one-current-request rule).
         const announce = claimResultsStatus();
         announce(t('verify.running'));
-        runVerify().then(
-          (r) => {
-            if (!r.ok) announce(t('verify.fail', { reason: r.reason ?? '' }));
-            else if (r.matchedLive === false) announce(t('verify.mismatch'));
-            else announce(t('verify.ok'));
-          },
-          // The verification could not run at all (the worker failed, or Play again stopped
-          // it — and then this claim is stale and writes nothing). The reason is the message.
-          (error: unknown) => {
-            announce(
-              t('verify.fail', { reason: error instanceof Error ? error.message : String(error) }),
-            );
-          },
-        );
+        void runVerify()
+          .then((r) => {
+            if (!r.ok) return t('verify.fail', { reason: r.reason ?? '' });
+            return r.matchedLive === false ? t('verify.mismatch') : t('verify.ok');
+          })
+          // The verification could not run at all, or reading its answer threw: either way
+          // the region says it failed rather than leaving "Verifying" up. A verification Play
+          // again or teardown abandoned lands here too, and its claim is stale by then
+          // (`abandonResultsStatus`), so it writes nothing.
+          .catch((error: unknown) => {
+            if (import.meta.env.DEV && !isAbandonment(error)) {
+              console.warn('Verify could not run:', error);
+            }
+            return t('verify.fail', { reason: verifyFailureReason(error) });
+          })
+          .then(announce);
         break;
       }
       case 'copyPlaytrace':
@@ -1417,7 +1433,9 @@ export function createApp(doc: Document, root: HTMLElement, deps: AppDeps): AppH
     destroy(): void {
       cancel();
       unsubscribe();
-      abandonVerify(); // a verification still running stops its worker
+      // A verification still running stops its worker, and its rejection, stale now, writes
+      // nothing into the overlay being torn down.
+      abandonResultsStatus();
       // The Dock footprint (#152): observer, scroll listener, pending frame, and every property and
       // class it wrote — cleared by its owner.
       dockResizeObserver?.disconnect();
@@ -1453,6 +1471,12 @@ export function createApp(doc: Document, root: HTMLElement, deps: AppDeps): AppH
       rotate.remove();
     },
   };
+}
+
+/** A verification `abandonVerify` stopped: its signal was aborted with no reason of its own,
+ *  which rejects with an `AbortError`. Nothing went wrong, so there is nothing to log. */
+function isAbandonment(error: unknown): boolean {
+  return (error as { name?: unknown } | null)?.name === 'AbortError';
 }
 
 /** The app's ONE storage adapter, module-scoped (Story 11 P3): the install banner's
