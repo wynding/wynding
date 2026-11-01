@@ -55,6 +55,8 @@ const ARMORED_FLYER = ruleset.waves.findIndex((w) =>
 describe('distinctness (M2’s rule)', () => {
   it('orders ids by spend, ties broken on the id', () => {
     expect(idsBySpend({ venom: 9, basic: 30, antiair: 30 })).toEqual(['antiair', 'basic', 'venom']);
+    // By code unit, not the host locale: a locale-aware compare would put `a` first.
+    expect(idsBySpend({ a: 1, B: 1 })).toEqual(['B', 'a']);
   });
 
   it('passes builds with disjoint top-two ids that each carry at least 25% of their own spend', () => {

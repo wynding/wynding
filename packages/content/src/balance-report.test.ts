@@ -136,6 +136,13 @@ describe('the report’s small rules', () => {
     expect(strongest([juggler, loser], ruleset)).toBeNull();
   });
 
+  it('breaks a tie on lives by the higher score', () => {
+    const lower = entry('lower', { phase: 'won', lives: 8, cumulativeKillBounty: 300 });
+    const higher = entry('higher', { phase: 'won', lives: 8, cumulativeKillBounty: 340 });
+    expect(strongest([lower, higher], ruleset)?.build.id).toBe('higher');
+    expect(strongest([higher, lower], ruleset)?.build.id).toBe('higher');
+  });
+
   it('prints a near miss as <0.01, never as the 0.00 the legend keeps for a leak', () => {
     expect([0, 0.004, 0.005, 0.5].map(closestText)).toEqual(['0.00', '<0.01', '0.01', '0.50']);
   });
