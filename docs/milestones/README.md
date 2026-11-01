@@ -22,6 +22,9 @@ and keep terminology consistent with [../CONTEXT.md](../CONTEXT.md).
 - [M2 — Breadth](m2.md) — the combat vocabulary completes: 9 towers / 8 creeps / a 10-wave
   showcase arc with live wave-clear + early-call bonuses, wave preview, and air + anti-air,
   on M1's board.
+- [M3 — The full tuned campaign](m3.md) — the complete 30-wave run on the crossing board (two
+  entrance → exit pairs), with per-wave creep HP growth, 20 lives, and a balance checker that
+  makes "tuned" checkable.
 
 ## Required: the completeness boundary
 

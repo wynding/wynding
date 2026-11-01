@@ -57,10 +57,15 @@ difficulty tier, score, star grade**) are added to the glossary in this change.
 
 ### 1. Board, grid & the maze invariant
 
-- The **board** is a fine grid of cells with one or more creep **entrances** and a single
-  **exit**. It starts empty; the player shapes the route by building. On a multi-entrance board,
-  **each scheduled spawn names the entrance it enters from** — part of the wave schedule in the
-  content ruleset (ADR 0007).
+- The **board** is a fine grid of cells with one or more creep **entrances** and one or more
+  **exits**. It starts empty; the player shapes the route by building. **Each scheduled spawn
+  names the entrance it enters from** — part of the wave schedule in the content ruleset (ADR
+  0007).
+- **The board assigns each entrance a destination — a non-empty set of exits** (ADR 0015). A
+  creep takes its entrance's destination at spawn, walks toward the nearest exit in it, and leaks
+  only there; to every other creep an exit is an ordinary walkable cell. Phase 1's default board
+  pairs each entrance with one exit. _(Amended 2026-10-31 — ADR 0015, the M3 grill: this line
+  read "one or more creep entrances and a single exit".)_
 - Cells fall into three classes: **buildable-open** (a tower may be placed),
   **walkable-unbuildable** (creeps cross, towers cannot go — reserved for entrances/exit
   aprons and future scenery), and **blocked** (no tower may be placed and no **ground** creep may
@@ -71,9 +76,10 @@ difficulty tier, score, star grade**) are added to the glossary in this change.
   **both** orthogonally-adjacent cells are walkable; it is **closed** if either side cell is
   non-walkable — a tower _or_ a blocked cell, regardless of which — so a creep cannot slip through
   a corner pinch. (Diagonal steps cost more path-distance than orthogonal ones; see Determinism.)
-- **The maze invariant (hard rule):** the exit must remain reachable **from every entrance
-  and from every live ground creep's current cell.** A build action that would violate this —
-  sealing the exit, walling off an entrance, or trapping a creep in a pocket — is **rejected**
+- **The maze invariant (hard rule):** every entrance must still reach an exit in **its own
+  destination**, and **every live ground creep** must still reach an exit in its own destination
+  from its current cell. A build action that would violate this —
+  sealing an exit, walling off an entrance, or trapping a creep in a pocket — is **rejected**
   before it applies. The player can lengthen the path arbitrarily but can never eliminate it.
 
 ### 2. Loop rhythm — continuous real-time
@@ -107,7 +113,7 @@ difficulty tier, score, star grade**) are added to the glossary in this change.
   adjacent to a ground creep, never on it_ — and (b) satisfies the maze invariant.
 - **Dynamic re-pathing:** the instant the maze changes — a placement, a sell, or **any other
   change to tower geometry** (e.g. a burst tower consuming itself) — **every ground creep
-  re-routes** toward the exit along the new shortest path. This is the signature skill — the
+  re-routes** toward its destination along the new shortest path. This is the signature skill — the
   player herds and redirects the live wave by building and selling.
 - **Selling** is always legal and instant: removing a tower only opens space, so it can never
   violate the maze invariant. The freed bounty is immediately spendable and creeps re-path that
@@ -143,8 +149,8 @@ difficulty tier, score, star grade**) are added to the glossary in this change.
   impact point is the target's position extrapolated forward **along its current route at its
   fire-time effective speed** (around corners, not a straight velocity vector; the fire-time speed
   is held constant over the shot's travel, so a speed change in flight is one of the lead-miss
-  cases below); if the lead would run past the exit (the creep leaks
-  before the shot lands), the impact point is **clamped to the exit** at the route's end. Long
+  cases below); if the lead would run past the creep's exit (the creep leaks
+  before the shot lands), the impact point is **clamped to that exit** at the route's end. Long
   shots are less reliable _by design_: only a
   state change in flight (re-path, slow, stun, death, leak) makes a lead miss, and that is the
   counterplay, not a bug.
@@ -154,7 +160,7 @@ difficulty tier, score, star grade**) are added to the glossary in this change.
   point-distance test, measured from its fixed impact point. (Exact boundary rounding is a
   determinism-gated detail fixed with the combat sim.)
 - **Targeting is sticky.** A tower acquires the creep that is **"first"** — the one with the
-  **smallest remaining path-distance to the exit** (the weighted route distance from the
+  **smallest remaining path-distance to its own destination** (the weighted route distance from the
   Determinism section — _not_ a raw step count, which diverges once diagonal steps cost more; the
   creep most about to leak; ties break to the lower creep id) — and **holds that target until it
   dies, leaks, or leaves range**, then
@@ -195,7 +201,7 @@ difficulty tier, score, star grade**) are added to the glossary in this change.
 
 ### 5. Creeps
 
-- A creep walks from an entrance toward the exit. Creeps are **fine-grid points that may
+- A creep walks from its entrance toward its destination. Creeps are **fine-grid points that may
   overlap freely** — there is no creep-creep collision, which is what makes splash and juggling
   read correctly. A creep "occupies" the cell containing its point (this is what the
   never-build-on-a-creep rule tests against).
@@ -205,10 +211,12 @@ difficulty tier, score, star grade**) are added to the glossary in this change.
   - **domain** — **ground** or **air**,
   - **effect-immunity flags** (e.g. immune to slow, immune to stun),
   - **role** — e.g. a **boss** (high durability; may cost more than one life on a leak).
-- **Flying creeps ignore board geometry:** they travel in a **straight line toward the exit**,
+- **Flying creeps ignore board geometry:** they travel in a **straight line toward their exit**,
   re-aimed from wherever they currently are rather than along a fixed entrance→exit ray (the two
-  coincide on any board whose entrance and exit are axis-aligned, which is the only kind that may
-  schedule flight), passing over towers, walls, **and blocked cells alike** — no ground cell class
+  coincide when the entrance and exit are axis-aligned; an entrance may schedule flight only when
+  its destination is **a single exit axis-aligned with it** — ADR 0015 leaves how a flyer would
+  choose among several exits to the first board that needs it), passing over towers, walls,
+  **and blocked cells alike** — no ground cell class
   affects them. Air is the deliberate counter to over-investing in geometry, answered only by air
   coverage (below).
 - **Damage & defense model — armor + immunity flags, no elements:**
@@ -247,7 +255,7 @@ difficulty tier, score, star grade**) are added to the glossary in this change.
 
 ### 7. Win, loss & scoring
 
-- **Lives** are the failure budget. Each creep that reaches the exit (a **leak**) costs **at
+- **Lives** are the failure budget. Each creep that reaches an exit in its destination (a **leak**) costs **at
   least one life** (a boss may cost more — a content knob). The run **ends in a loss when lives
   reach zero or below** — a multi-life boss leak may overshoot past zero.
 - **Win** = **all scheduled waves are exhausted and no creep remains alive on the board**, with
@@ -331,8 +339,8 @@ Difficulty runs on the single **Medium** reference curve.
 | --------- | --------------------------------------------------------------------------------------------------------------- |
 | **M1**    | The vertical slice above: 1 board / 1 tower / 1 creep / 1 wave, full loop mechanics, thin economy.              |
 | **M2**    | Breadth — more tower/creep types (incl. air + anti-air) and more waves; wave-clear + early-call bonuses active. |
-| **M3**    | A full, tuned wave progression — the complete run you can win or lose.                                          |
-| **M4**    | Depth — tower leveling and creep leveling; optionally player-selectable targeting priority.                     |
+| **M3**    | A full, tuned wave progression — the complete run you can win or lose; per-wave creep HP growth.                |
+| **M4**    | Depth — tower leveling and the rest of creep leveling; optionally player-selectable targeting priority.         |
 | **M5**    | Economy tuned to the content; the three difficulty tiers tuned; interest-on-savings decided.                    |
 
 ## Determinism impact
@@ -391,4 +399,6 @@ Genuinely open (edges for reviewers), plus the small defaults chosen while draft
   offset (1-cell offsets allowed) to enable tight interlocking mazes, rather than snapping to a
   coarse 2×2 lattice. Confirm when the build UX is designed.
 - **Creep leveling shape (M4)** — named as wave-indexed stat scaling in the wave schedule;
-  its curve is M4 tuning.
+  its curve is M4 tuning. _(Amended 2026-10-31 — the M3 grill: the **creep HP axis** lands at M3 as a
+  per-wave `hpPercent` in the schedule, fixed data rather than a reaction to play (m3.md); the
+  other axes and the tuned curve stay M4, with tower leveling.)_
