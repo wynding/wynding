@@ -33,7 +33,7 @@ entrance.**
 - **A ground creep follows the shortest path to the nearest exit in its destination.** Its
   flow-field is built outward from every exit in the set at once, which is the same calculation
   as today's single-exit field with more starting cells. The board keeps one flow-field per
-  distinct destination, rebuilt on every build or sell as today.
+  distinct destination, rebuilt on every maze change as today.
 - **A creep leaks only at an exit in its own destination;** to every other creep an exit cell is
   an ordinary walkable cell.
 - **The maze invariant is per destination:** every entrance must reach an exit in its own
@@ -63,12 +63,13 @@ not new mechanics.
   glossary gains **Entrance**, **Exit** and **Destination**.
 - `formatVersion` 3's board section carries entrance and exit lists and a destination per
   entrance; the destination becomes part of the content hash and so of every replay's identity.
-- Per-tick cost is unchanged: creeps read a flow-field as before. Build and sell rebuild one
+- Per-tick cost is unchanged: creeps read a flow-field as before. A maze change rebuilds one
   flow-field per distinct destination instead of one — two on M3's board.
 - Two questions stay open until a board needs them, and are named so nobody pins them by
   accident: **which exit wins when two in a destination are equally near**, and **how a flyer
   picks among several exits**. Both are decided by the first story whose board has a multi-exit
-  destination.
+  destination. Until then the capability profile accepts only one-exit destinations, so neither
+  can be answered by accident.
 - Custom boards (Phase 4) inherit "pick any exit" and "nearest exit" as data. Their editor, the
   exit-picking interface and the rules for what makes a player-made board valid get their own
   spec when that phase comes.

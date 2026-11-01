@@ -30,7 +30,7 @@ _Avoid_: end zone.
 **Destination**:
 The set of exits a creep may leak at, assigned by the board to the entrance it
 came from (ADR 0015). A ground creep walks to the nearest exit in its
-destination; "nearest exit" on a board is the set of all its exits.
+destination. A board that wants nearest-exit behaviour assigns the destination {all its exits}.
 _Avoid_: target exit (a tower's target is a creep).
 
 **Creep**:
