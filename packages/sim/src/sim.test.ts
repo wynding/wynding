@@ -120,6 +120,7 @@ describe('sim smoke', () => {
         slowMulFp: [0],
         slowUntilTick: [0],
         stunUntilTick: [0],
+        destination: [0],
       };
       corrupt(s.creeps);
       const out = step(s, RULESET, []);

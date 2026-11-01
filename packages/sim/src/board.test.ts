@@ -11,8 +11,8 @@ function fixtureSpec(): GridSpec {
   return {
     widthTiles: 5,
     heightTiles: 5,
-    entrance: { col: 0, row: 2 },
-    exit: { col: 4, row: 2 },
+    entrances: [{ col: 0, row: 2 }],
+    exits: [{ col: 4, row: 2 }],
   };
 }
 
@@ -69,20 +69,82 @@ describe('buildGrid — cell classification', () => {
   });
 });
 
-describe('buildGrid — freezes and clones entrance/exit', () => {
+describe('buildGrid — freezes and clones the entrance/exit lists', () => {
   it('returns frozen openings that do not alias the input spec', () => {
     const spec = fixtureSpec();
     const grid = buildGrid(spec);
 
-    expect(Object.isFrozen(grid.entrance)).toBe(true);
-    expect(Object.isFrozen(grid.exit)).toBe(true);
-    expect(grid.entrance).not.toBe(spec.entrance);
-    expect(grid.entrance).toEqual({ col: 0, row: 2 });
+    expect(Object.isFrozen(grid.entrances)).toBe(true);
+    expect(Object.isFrozen(grid.exits)).toBe(true);
+    expect(Object.isFrozen(grid.entrances[0])).toBe(true);
+    expect(Object.isFrozen(grid.exits[0])).toBe(true);
+    expect(grid.entrances).not.toBe(spec.entrances);
+    expect(grid.entrances[0]).not.toBe(spec.entrances[0]);
+    expect(grid.entrances).toEqual([{ col: 0, row: 2 }]);
+    expect(grid.exits).toEqual([{ col: 4, row: 2 }]);
 
     // Mutating the caller's spec object afterward must not change the grid.
-    (spec.entrance as { col: number }).col = 99;
-    expect(grid.entrance.col).toBe(0);
+    (spec.entrances[0] as { col: number }).col = 99;
+    (spec.entrances as Cell[]).push({ col: 2, row: 0 });
+    expect(grid.entrances).toEqual([{ col: 0, row: 2 }]);
     expect(grid.classAt({ col: 0, row: 2 })).toBe('walkable-unbuildable');
+  });
+});
+
+describe('buildGrid — several entrances and exits (format 3, ADR 0015)', () => {
+  // A 7×7 board with two crossing pairs: west (0,3) → east (6,3), north (3,0) → south (3,6).
+  const crossing: GridSpec = {
+    widthTiles: 7,
+    heightTiles: 7,
+    entrances: [
+      { col: 0, row: 3 },
+      { col: 3, row: 0 },
+    ],
+    exits: [
+      { col: 6, row: 3 },
+      { col: 3, row: 6 },
+    ],
+  };
+
+  it('opens every entrance and exit in the border, in list order', () => {
+    const grid = buildGrid(crossing);
+    expect(grid.entrances).toEqual(crossing.entrances);
+    expect(grid.exits).toEqual(crossing.exits);
+    for (const cell of [...crossing.entrances, ...crossing.exits]) {
+      expect(grid.classAt(cell)).toBe('walkable-unbuildable');
+      expect(grid.baseMask[cell.row * 7 + cell.col]).toBe(0);
+    }
+    expect(grid.classAt({ col: 2, row: 0 })).toBe('blocked'); // border beside an opening
+  });
+
+  it('rejects two openings on one cell, whichever lists they come from', () => {
+    const at = (list: 'entrances' | 'exits', cell: Cell): GridSpec => ({
+      ...crossing,
+      [list]: [...crossing[list], cell],
+    });
+    expect(() => buildGrid(at('entrances', { col: 0, row: 3 }))).toThrow(/coincide/); // entrance ↔ entrance
+    expect(() => buildGrid(at('exits', { col: 6, row: 3 }))).toThrow(/coincide/); // exit ↔ exit
+    expect(() => buildGrid(at('exits', { col: 3, row: 0 }))).toThrow(/coincide/); // entrance ↔ exit
+  });
+
+  it('rejects an empty or non-array opening list with a typed GridError', () => {
+    expect(() => buildGrid({ ...crossing, entrances: [] })).toThrow(GridError);
+    expect(() => buildGrid({ ...crossing, exits: [] })).toThrow(GridError);
+    expect(() =>
+      buildGrid({ ...crossing, exits: { col: 6, row: 3 } } as unknown as GridSpec),
+    ).toThrow(GridError);
+  });
+
+  it('checks every opening in a list, not only the first', () => {
+    expect(() =>
+      buildGrid({
+        ...crossing,
+        exits: [
+          { col: 6, row: 3 },
+          { col: 3, row: 3 },
+        ],
+      }),
+    ).toThrow(/border ring/);
   });
 });
 
@@ -104,16 +166,16 @@ describe('buildGrid — rejects malformed geometry (runtime validation)', () => 
   });
 
   it('rejects entrance/exit off the border ring or out of bounds', () => {
-    expect(bad({ entrance: { col: 2, row: 2 } })).toThrow(/border ring/); // interior
-    expect(bad({ exit: { col: 99, row: 2 } })).toThrow(/out of bounds/);
+    expect(bad({ entrances: [{ col: 2, row: 2 }] })).toThrow(/border ring/); // interior
+    expect(bad({ exits: [{ col: 99, row: 2 }] })).toThrow(/out of bounds/);
   });
 
   it('rejects non-integer entrance/exit coordinates', () => {
-    expect(bad({ entrance: { col: 0.5, row: 2 } })).toThrow(GridError);
+    expect(bad({ entrances: [{ col: 0.5, row: 2 }] })).toThrow(GridError);
   });
 
   it('rejects coincident entrance and exit', () => {
-    expect(bad({ exit: { col: 0, row: 2 } })).toThrow(/coincide/);
+    expect(bad({ exits: [{ col: 0, row: 2 }] })).toThrow(/coincide/);
   });
 
   it('rejects a null / non-object board document with a typed GridError', () => {
@@ -125,12 +187,15 @@ describe('buildGrid — rejects malformed geometry (runtime validation)', () => 
   });
 
   it('rejects a missing or null entrance/exit with a typed GridError (untyped loader path)', () => {
-    // What `JSON.parse` of a board missing the `exit` key, or a null cell, yields.
+    // What `JSON.parse` of a board missing the `exits` key, or a null cell, yields.
     // TypeScript callers can't reach this, but the validation-boundary contract
     // must still fail loudly with a GridError, not a raw TypeError.
-    const missingExit = { widthTiles: 5, heightTiles: 5, entrance: { col: 0, row: 2 } };
-    expect(() => buildGrid(missingExit as unknown as GridSpec)).toThrow(GridError);
-    expect(() => buildGrid({ ...fixtureSpec(), entrance: null } as unknown as GridSpec)).toThrow(
+    const missingExits = { widthTiles: 5, heightTiles: 5, entrances: [{ col: 0, row: 2 }] };
+    expect(() => buildGrid(missingExits as unknown as GridSpec)).toThrow(GridError);
+    expect(() => buildGrid({ ...fixtureSpec(), entrances: null } as unknown as GridSpec)).toThrow(
+      GridError,
+    );
+    expect(() => buildGrid({ ...fixtureSpec(), exits: [null] } as unknown as GridSpec)).toThrow(
       GridError,
     );
   });

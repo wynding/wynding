@@ -47,6 +47,7 @@ import {
   type CompiledRuleset,
 } from '@wynding/sim';
 import { getBundledRuleset, defaultBoardId } from './registry';
+import { withoutDestination } from './test-digest';
 import { waveIndexForCreep, wallInputsFromTick, wallInputsFromObservedWave } from './wave-lookup';
 
 /** Fixed seed — same convention as parity.test.ts. */
@@ -426,7 +427,12 @@ describe('wave 4 (the appended `armored` wave) — a pinned, scripted-build meas
       // wave 4's own clear bonus). No wave past it ever pays a clear bonus (each either
       // leaked or never finished resolving).
       expect(state.bounty).toBe(165);
-      expect(hashSimState(state)).toBe('bd6516b9');
+      // Re-pinned M3 story 3 (SIM_VERSION 17 → 18): the new `destination` creep column (ADR
+      // 0015) widens every creep's shape — a hash-only move, asserted below: the previous
+      // pin still holds under `withoutDestination`.
+      expect(hashSimState(state)).toBe('05c4a809');
+      // The pre-`destination`-column pin, under the projection that removes it.
+      expect(hashSimState(withoutDestination(state))).toBe('bd6516b9');
       // Re-pinned #25 (SIM_VERSION 15 → 16, measured): score 102 → 0. Lost score formula
       // since sv16 is ZERO — the kill bounty is forfeited with the early-call credit, so
       // the 102 pinned above lands in the wallet and nowhere in the grade. Nothing else
@@ -814,7 +820,12 @@ describe('a venom-heavy build (PLAN.md step 3) — same board, same seed, kinds 
       // `bounty` re-measured at 144 (+24 over the pre-S11 120: +18 kill bounty, +6 the new
       // wave 4's own clear bonus). No wave past it ever pays a clear bonus.
       expect(state.bounty).toBe(144);
-      expect(hashSimState(state)).toBe('53c1dae5');
+      // Re-pinned M3 story 3 (SIM_VERSION 17 → 18): the new `destination` creep column (ADR
+      // 0015) widens every creep's shape — a hash-only move, asserted below: the previous
+      // pin still holds under `withoutDestination`.
+      expect(hashSimState(state)).toBe('5ff81b41');
+      // The pre-`destination`-column pin, under the projection that removes it.
+      expect(hashSimState(withoutDestination(state))).toBe('53c1dae5');
       // Re-pinned #25 (SIM_VERSION 15 → 16, measured): score 101 → 0, the sv16 lost
       // branch. The 101 kill bounty pinned above is what it forfeits.
       expect(deriveScore(state, ruleset)).toBe(0);
@@ -1031,7 +1042,12 @@ describe('wave index 6 (`resolute` + `fast`) — a stun-holding build ahead of i
       // wave 4's own clear bonus) — no wave past it ever pays a clear bonus (same
       // reasoning as the other three tests in this file).
       expect(state.bounty).toBe(125);
-      expect(hashSimState(state)).toBe('95e90744');
+      // Re-pinned M3 story 3 (SIM_VERSION 17 → 18): the new `destination` creep column (ADR
+      // 0015) widens every creep's shape — a hash-only move, asserted below: the previous
+      // pin still holds under `withoutDestination`.
+      expect(hashSimState(state)).toBe('20729654');
+      // The pre-`destination`-column pin, under the projection that removes it.
+      expect(hashSimState(withoutDestination(state))).toBe('95e90744');
       // `cumulativeKillBounty` re-measured at 102 (+18 over the pre-S11 84), same
       // derivation as test 1. It is pinned HERE, on its own line, because the score
       // assertion below used to carry it and no longer can: re-pinned #25 (SIM_VERSION

@@ -93,8 +93,12 @@ function runGolden(): GoldenRun {
 // code, so a move here without one is a defect signal, never a re-pin) ---------------
 // Recompute with: pnpm --filter @wynding/content exec vitest run m2-golden
 const GOLDEN = {
-  finalHash: '34cb27bf',
-  traceDigest: 'bb093415',
+  // Re-pinned M3 story 3 (SIM_VERSION 17 → 18; was '34cb27bf' / 'bb093415'): the new
+  // `destination` creep column (ADR 0015) enters the world hash. The run itself is
+  // unchanged — `format3-parity.test.ts` holds the previous pair, measured with that
+  // column projected out, tick for tick — and the score and stars below do not move.
+  finalHash: '90a12ed3',
+  traceDigest: 'c61152e1',
   score: 711,
   stars: 3,
 } as const;

@@ -43,6 +43,7 @@ import {
 } from './balance-checks';
 import { balanceReport } from './balance-report';
 import { waveIndexForCreep } from './wave-lookup';
+import { withoutDestination } from './test-digest';
 
 const ruleset = compileRuleset(getBundledRuleset(M2_SHOWCASE.rulesetId), M2_SHOWCASE.boardId);
 const SEED = M2_SHOWCASE.seed;
@@ -100,8 +101,14 @@ describe('M3 story 1 — the balance checker, calibrated on M2', () => {
     'Winner A in grid form lands on the M2 determinism golden’s own final hash',
     { timeout: 120_000 },
     () => {
+      const { state } = measured(M2_WINNER_A.id);
       // `m2-golden.test.ts`'s `GOLDEN.finalHash` — the one M2 pin that holds a literal hash.
-      expect(hashSimState(measured(M2_WINNER_A.id).state)).toBe('34cb27bf');
+      // Re-pinned M3 story 3 (SIM_VERSION 17 → 18): the new `destination` creep column (ADR
+      // 0015) widens every creep's shape — a hash-only move, asserted below: the previous
+      // pin still holds under `withoutDestination`.
+      expect(hashSimState(state)).toBe('90a12ed3');
+      // The pre-`destination`-column pin, under the projection that removes it.
+      expect(hashSimState(withoutDestination(state))).toBe('34cb27bf');
     },
   );
 

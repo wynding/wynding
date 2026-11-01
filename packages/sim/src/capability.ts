@@ -14,7 +14,7 @@
 // `formatVersion` never bumps for this; only `simVersion` does, and each story that
 // adds behavior widens its own dimension(s) here alongside its `SIM_VERSION` bump.
 //
-// DIMENSIONS THAT DEFER TO THE SCHEMA at sv17 (a profile field wider than or equal
+// DIMENSIONS THAT DEFER TO THE SCHEMA at sv18 (a profile field wider than or equal
 // to the v2 schema's own ceiling on the same axis, so the schema wall rejects first
 // and this profile's own gate has no rejection witness of its own —
 // `capability.test.ts`'s header explains each): waves/entries/offsets/clearBonus/
@@ -143,37 +143,61 @@ export interface CapabilityProfile {
    *  a real rejection witness. Checked per tower (burst bundles only) in
    *  `checkCapabilityGlobal`. */
   readonly maxBurstTravelTicks: number;
+  /** Ceiling on how many exits ONE destination may hold (format 3, ADR 0015) — 1. The
+   *  format keeps a destination's set shape so "nearest exit" never needs a second
+   *  format change, but a multi-exit destination raises two questions ADR 0015
+   *  deliberately leaves to the first board that needs one — which exit wins when two
+   *  are equally near, and how a flyer picks among several — so this build rejects it
+   *  and answers neither by accident. Genuinely narrower than the schema's own 1..16, so
+   *  it carries a live rejection witness. Board-scoped, checked per entrance in
+   *  `checkCapabilityBoard`.
+   *
+   *  The number of entrances and exits is NOT capped here — the schema's own 1..16 per
+   *  list stands. Neither count costs anything a destination does not: an entrance adds
+   *  one O(1) reachability read per placement check, an exit adds a walkable border
+   *  cell. "Send this entrance to any exit" therefore stays content alone, as ADR 0015
+   *  promises, up to the destination ceiling below. */
+  readonly maxDestinationExits: number;
+  /** Ceiling on a board's DISTINCT destinations (M3, ADR 0015) — 4. This is the bound
+   *  that replaced every "one flow-field" assumption: the sim keeps one field per
+   *  distinct destination, so every maze change (a placement, a sell, a mine consuming
+   *  itself) rebuilds this many full-board Dijkstra fields instead of one, every
+   *  placement that reaches the maze invariant builds this many candidate fields, and
+   *  the field cache holds this many resident fields per board. 4 is a pair per border
+   *  side — M3's crossing board uses 2 — so the per-maze-change cost is at most 4× the
+   *  single-field cost every earlier perf measurement (ADR 0005) and the replay layer's
+   *  `MAX_TOTAL_TOWER_COMMANDS` budget were sized on. Genuinely narrower than the
+   *  schema's 16 entrances, so it carries a live rejection witness. Board-scoped,
+   *  checked in `checkCapabilityBoard`. */
+  readonly maxDestinationsPerBoard: number;
 }
 
-/** `SIM_VERSION` 17 (imported from `./ruleset-shared`, the dependency-free leaf):
- *  sv16's capability surface, field for field. No axis activates, no ceiling here moves,
- *  no witness changes hands — this entry is the sv16 profile's contents verbatim, and
- *  that is not an oversight. The bump (M3 story 2) moves bounds that live OUTSIDE the
- *  profile: `MAX_MATCH_TICKS` doubles to 72,000 (`ruleset.ts`), so a bundle whose
- *  hands-off schedule plus worst-case walk lands between 36,001 and 72,000 ticks now
- *  compiles and a replay that terminates in that range validates; and the replay
- *  validator's tower budgets (`ruleset-shared.ts`) become 2,000 commands, of which at most
- *  1,000 may be placements. Every bundle that compiled at sv16 still compiles, and `step`
- *  simulates bit-for-bit as it did: none of these is read by `step`, and the one runtime
- *  bound derived from them, `MAX_DOT_RECORDS`, is 9,000 either side.
+/** `SIM_VERSION` 18 (imported from `./ruleset-shared`, the dependency-free leaf; M3
+ *  story 3): sv17's capability surface plus two board-scoped DESTINATION ceilings (ADR
+ *  0015). `maxDestinationExits` 1 — a destination may name one exit only, so ADR 0015's
+ *  two open questions (which of two equally near exits wins, how a flyer picks among
+ *  several) stay unreachable rather than answered by accident. `maxDestinationsPerBoard`
+ *  4 — the bound that replaced every one-flow-field assumption (its own doc above). Both
+ *  are genuinely narrower than the format-3 schema's own 1..16 per list, so each carries
+ *  a live rejection witness. The entrance and exit COUNTS are no profile axis — the
+ *  schema's 1..16 stands — and neither is `hpPercent`: this build simulates creep HP
+ *  growth for every schema-legal value. The bounds sv17 moved, all outside the profile
+ *  (`MAX_MATCH_TICKS` 72,000 and the validator's tower budgets), stand as they are.
  *
- *  ONE PROFILE, NOT A HISTORY (G11): the sv16 profile is deleted with this bump. Like
- *  the sv15 entry before it, the deleted entry would still have described every axis
- *  accurately — and it goes anyway, because a profile's job is to describe what THIS
- *  build can correctly SIMULATE. v17 compiles and validates runs v16 rejected, so a live
- *  sv16 entry would stand as a claim that this build honours sv16 semantics; it does not.
- *  Replay's strict version equality already owns cross-version rejection, so there is
- *  nothing for a stale profile to serve.
+ *  ONE PROFILE, NOT A HISTORY (G11): the sv17 profile is deleted with this bump. A
+ *  profile describes what THIS build can correctly SIMULATE, and this build no longer
+ *  simulates sv17's contract — every creep row carries a destination the world hash
+ *  covers, so no sv17 replay's hashes reproduce here. Replay's strict version equality
+ *  already owns cross-version rejection, so there is nothing for a stale profile to
+ *  serve.
  *
- *  WITNESSES ARE UNCHANGED here — every ceiling genuinely narrower than the v2 schema
- *  (`maxArmor`, `maxLeakCost`, `maxDotDurationTicks`, `maxDotDurationCadenceRatio`,
- *  `maxSupportDamageMulFp`, `maxAoeRadiusFp`, `maxBurstTravelTicks`, `allowedBurstForms`)
- *  carries its live rejection witness across untouched, so unlike a widening bump this one
- *  needs no replacement witness at all. (The sv13 → sv14 handover that widened `allowedRoles` to the
- *  schema's own enum and retired `requiredLeakCost` is history, not a description of
- *  this profile.) */
+ *  WITNESSES: every ceiling genuinely narrower than the schema (`maxArmor`, `maxLeakCost`,
+ *  `maxDotDurationTicks`, `maxDotDurationCadenceRatio`, `maxSupportDamageMulFp`,
+ *  `maxAoeRadiusFp`, `maxBurstTravelTicks`, `allowedBurstForms`) carries its live
+ *  rejection witness across untouched, and the two new destination ceilings bring their
+ *  own. */
 const PROFILES: Readonly<Record<number, CapabilityProfile>> = {
-  17: {
+  18: {
     maxTowerCatalogSize: 64,
     maxWavesPerBoard: 64,
     maxEntriesPerWave: 16,
@@ -196,6 +220,8 @@ const PROFILES: Readonly<Record<number, CapabilityProfile>> = {
     maxSupportDamageMulFp: 1024,
     allowedBurstForms: ['aoe'],
     maxBurstTravelTicks: 8,
+    maxDestinationExits: 1,
+    maxDestinationsPerBoard: 4,
   },
 };
 

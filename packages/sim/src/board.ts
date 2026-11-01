@@ -10,9 +10,9 @@
 import type { Cell } from '@wynding/types';
 
 /**
- * The three cell classes (PRD 0001): the open buildable field, the two
- * walkable-but-unbuildable openings (entrance/exit), and permanent blocked
- * terrain (the border ring, minus the openings).
+ * The three cell classes (PRD 0001): the open buildable field, the
+ * walkable-but-unbuildable openings (every entrance and exit), and permanent
+ * blocked terrain (the border ring, minus the openings).
  */
 export type CellClass = 'buildable-open' | 'walkable-unbuildable' | 'blocked';
 
@@ -24,8 +24,10 @@ export type CellClass = 'buildable-open' | 'walkable-unbuildable' | 'blocked';
 export interface GridSpec {
   readonly widthTiles: number;
   readonly heightTiles: number;
-  readonly entrance: Cell;
-  readonly exit: Cell;
+  /** Every creep entrance, in board order (format 3, ADR 0015) — at least one. */
+  readonly entrances: readonly Cell[];
+  /** Every exit, in board order — at least one. */
+  readonly exits: readonly Cell[];
 }
 
 /**
@@ -42,13 +44,15 @@ export const CELL_CAP = 1 << 20;
 export interface Grid {
   readonly width: number;
   readonly height: number;
-  /** Frozen copy of the entrance opening (never aliases the caller's spec). */
-  readonly entrance: Cell;
-  /** Frozen copy of the exit opening (never aliases the caller's spec). */
-  readonly exit: Cell;
+  /** Frozen copies of the entrance openings, in spec order (never alias the caller's
+   *  spec). An entrance's INDEX here is its identity inside the sim — the compiled
+   *  spawn schedule and `BoardContext.entranceDestination` both key on it. */
+  readonly entrances: readonly Cell[];
+  /** Frozen copies of the exit openings, in spec order. */
+  readonly exits: readonly Cell[];
   /**
    * Row-major base terrain mask, one byte per cell: nonzero = permanently
-   * blocked (the border ring, minus the two openings). Read-only by convention.
+   * blocked (the border ring, minus every opening). Read-only by convention.
    * Pathfinding always consults this, so an injected `extraBlocked` can only
    * *add* blocks — it can never erase permanent terrain.
    */
@@ -154,13 +158,34 @@ function assertBorderCell(
   }
 }
 
+/** Validate one opening list (`entrances` or `exits`): a non-empty array of border
+ *  cells. Returns frozen plain-number snapshots, so nothing downstream ever reads the
+ *  caller's cell objects again. */
+function snapshotOpenings(
+  list: readonly Cell[] | null | undefined,
+  width: number,
+  height: number,
+  name: 'entrance' | 'exit',
+): readonly Cell[] {
+  if (!Array.isArray(list) || list.length === 0) {
+    throw new GridError(`${name}s must be a non-empty array of cells`);
+  }
+  return Object.freeze(
+    (list as readonly Cell[]).map((cell, i) => {
+      assertBorderCell(cell, width, height, `${name} ${i}`);
+      return Object.freeze({ col: cell.col, row: cell.row });
+    }),
+  );
+}
+
 /**
  * Build and validate a grid from a structural spec. Throws {@link GridError} if
  * the spec is not an object (e.g. a parsed `null` board document), its
  * dimensions are not positive safe integers, the cell count exceeds
- * {@link CELL_CAP}, or the entrance/exit are not distinct safe-integer cells on
- * the border ring. Entrance/exit are cloned and frozen so the returned grid can
- * never desync from the caller mutating its spec.
+ * {@link CELL_CAP}, either opening list is missing or empty, or any entrance or
+ * exit is not a safe-integer cell on the border ring or shares its cell with
+ * another opening. Openings are cloned and frozen so the returned grid can never
+ * desync from the caller mutating its spec.
  */
 export function buildGrid(spec: GridSpec): Grid {
   // Guard the whole document first: an untyped path (a future JSON/mod loader)
@@ -170,7 +195,7 @@ export function buildGrid(spec: GridSpec): Grid {
   if (doc === null || typeof doc !== 'object') {
     throw new GridError(`board spec must be an object, got ${String(doc)}`);
   }
-  const { widthTiles: width, heightTiles: height, entrance, exit } = spec;
+  const { widthTiles: width, heightTiles: height } = spec;
 
   assertPositiveSafeInt(width, 'widthTiles');
   assertPositiveSafeInt(height, 'heightTiles');
@@ -179,24 +204,25 @@ export function buildGrid(spec: GridSpec): Grid {
     throw new GridError(`board too large: ${cellCount} cells exceeds CELL_CAP ${CELL_CAP}`);
   }
 
-  assertBorderCell(entrance, width, height, 'entrance');
-  assertBorderCell(exit, width, height, 'exit');
+  // Snapshot the openings as plain numbers up front. Everything below (the mask,
+  // `classAt`) reads only these — never the caller's spec objects — so the grid can
+  // never desync from a spec the caller mutates after this returns.
+  const entrances = snapshotOpenings(spec.entrances, width, height, 'entrance');
+  const exits = snapshotOpenings(spec.exits, width, height, 'exit');
 
-  // Snapshot the opening coordinates as plain numbers up front. Everything below
-  // (the mask, `classAt`) reads only these — never the caller's spec objects — so
-  // the grid can never desync from a spec the caller mutates after this returns.
-  const entranceCol = entrance.col;
-  const entranceRow = entrance.row;
-  const exitCol = exit.col;
-  const exitRow = exit.row;
-  if (entranceCol === exitCol && entranceRow === exitRow) {
-    throw new GridError(`entrance and exit coincide at (${entranceCol},${entranceRow})`);
+  // Every opening owns its cell: two entrances, two exits, or an entrance and an exit
+  // on one cell would make "which opening is this?" ambiguous for spawning and leaking.
+  const openingIndex = new Set<number>();
+  for (const cell of [...entrances, ...exits]) {
+    const i = cell.row * width + cell.col;
+    if (openingIndex.has(i)) {
+      throw new GridError(`two openings coincide at (${cell.col},${cell.row})`);
+    }
+    openingIndex.add(i);
   }
+  const isOpening = (c: number, r: number): boolean => openingIndex.has(r * width + c);
 
-  const isOpening = (c: number, r: number): boolean =>
-    (c === entranceCol && r === entranceRow) || (c === exitCol && r === exitRow);
-
-  // Derive the base mask: the border ring is blocked, except the two openings.
+  // Derive the base mask: the border ring is blocked, except the openings.
   const baseMask = new Uint8Array(cellCount);
   for (let r = 0; r < height; r++) {
     for (let c = 0; c < width; c++) {
@@ -204,9 +230,6 @@ export function buildGrid(spec: GridSpec): Grid {
       if (border && !isOpening(c, r)) baseMask[r * width + c] = 1;
     }
   }
-
-  const frozenEntrance: Cell = Object.freeze({ col: entranceCol, row: entranceRow });
-  const frozenExit: Cell = Object.freeze({ col: exitCol, row: exitRow });
 
   // A valid cell has safe-integer coordinates inside the grid. Requiring integers
   // here (not just a range check) stops a fractional cell — e.g. from future JSON,
@@ -231,8 +254,8 @@ export function buildGrid(spec: GridSpec): Grid {
   const grid: Grid = {
     width,
     height,
-    entrance: frozenEntrance,
-    exit: frozenExit,
+    entrances,
+    exits,
     baseMask,
     classAt,
     inBounds,

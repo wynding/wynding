@@ -2,8 +2,9 @@
 // sv6, M2-S3 to sv7, M2-S4a to sv8, M2-S5a to sv9, M2-S6 to sv10, M2-S7 to sv11, M2-S8 to
 // sv12, M2-S9 to sv13, M2-S10 to sv14, #70 to sv15 — the first bump that widens nothing —
 // #25 to sv16, which widens nothing either and does not even change a tick rule, only the
-// terminal grading contract — and M3 story 2 to sv17, whose run-length cap and tower
-// budgets live outside the profile): the simVersion-17 profile's exact shape, an
+// terminal grading contract — M3 story 2 to sv17, whose run-length cap and tower budgets
+// live outside the profile — and M3 story 3 to sv18, which adds the two destination
+// ceilings): the simVersion-18 profile's exact shape, an
 // unknown-simVersion throw, and — since the profile itself is inert data gated only inside
 // `compileRuleset` — accept-at-boundary / reject-beyond-boundary coverage for every
 // dimension still narrower than the schema, exercised through `compileRuleset` against
@@ -134,8 +135,8 @@ describe('capabilityProfile', () => {
     expect(capabilityProfile(SIM_VERSION).maxAoeRadiusFp).toBeLessThanOrEqual(MAX_BLAST_RADIUS_FP);
   });
 
-  it('simVersion 17 carries sv16’s profile verbatim — a bump of the tick cap and the validator’s tower budgets, none of them a profile field — still deferring wave/economy/catalog-size/immunity/domain/role axes to the schema', () => {
-    expect(capabilityProfile(17)).toEqual({
+  it('simVersion 18 is sv17’s profile plus the two destination ceilings — still deferring wave/economy/catalog-size/immunity/domain/role axes to the schema', () => {
+    expect(capabilityProfile(18)).toEqual({
       maxTowerCatalogSize: 64,
       maxWavesPerBoard: 64,
       maxEntriesPerWave: 16,
@@ -158,13 +159,14 @@ describe('capabilityProfile', () => {
       maxSupportDamageMulFp: 1024,
       allowedBurstForms: ['aoe'],
       maxBurstTravelTicks: 8,
+      maxDestinationExits: 1,
+      maxDestinationsPerBoard: 4,
     });
-    // Every prior version is deleted with each bump (G11, capability.ts's header).
-    // sv16 is the same case sv15 was: its CONTENTS are what the assertion above just
-    // pinned, so it did not go for misdescribing any axis — it went because v17's
-    // run-length cap (`MAX_MATCH_TICKS` 72,000) and tower budgets compile bundles and
-    // validate replays v16 rejected, and a live sv16 entry would advertise semantics this
-    // build no longer honours. It throws like any other unknown version, as sv15 does.
+    // Every prior version is deleted with each bump (G11, capability.ts's header): sv17
+    // went because this build no longer simulates its contract (every creep row carries
+    // a destination the world hash covers). It throws like any other unknown version, as
+    // sv16 and sv15 do.
+    expect(() => capabilityProfile(17)).toThrow(RulesetError);
     expect(() => capabilityProfile(16)).toThrow(RulesetError);
     expect(() => capabilityProfile(15)).toThrow(RulesetError);
   });
@@ -211,8 +213,55 @@ describe('capability gate — accept at boundary, reject beyond, per dimension',
 
   it('maxEntriesPerWave defers to the schema ceiling (16) — a 2-entry wave compiles', () => {
     compiles((b) => {
-      b.boards[0]!.waves[0]!.entries.push({ creepId: 'normal', count: 1, spacingTicks: 5 });
+      b.boards[0]!.waves[0]!.entries.push({
+        creepId: 'normal',
+        entrance: 'in',
+        count: 1,
+        spacingTicks: 5,
+      });
     });
+  });
+
+  it('hpPercent is not a capability axis: this build simulates creep HP growth, so every schema-legal value compiles', () => {
+    compiles((b) => (b.boards[0]!.waves[0]!.hpPercent = 1));
+    compiles((b) => (b.boards[0]!.waves[0]!.hpPercent = 270));
+    compiles((b) => (b.boards[0]!.waves[0]!.hpPercent = 1_000_000)); // the schema's own ceiling
+  });
+
+  it('maxDestinationExits (M3, ADR 0015): a one-exit destination compiles, a two-exit one is rejected', () => {
+    // A second pair on the 9×5 board: entrance (0,3) → exit (8,3).
+    compiles((b) => {
+      b.boards[0]!.exits.push({ id: 'out2', cell: { col: 8, row: 3 } });
+      b.boards[0]!.entrances.push({ id: 'in2', cell: { col: 0, row: 3 }, destination: ['out2'] });
+    });
+    rejects((b) => {
+      b.boards[0]!.exits.push({ id: 'out2', cell: { col: 8, row: 3 } });
+      b.boards[0]!.entrances[0]!.destination = ['out', 'out2'];
+    }, "entrance 'in' destination has 2 exits, exceeds 1");
+  });
+
+  it('maxDestinationsPerBoard (M3): 4 distinct destinations compile, 5 are rejected — while entrance count itself is not capped', () => {
+    // A 12×12 board, entrances down the west border and exits down the east, entrance i
+    // bound for exit i (or, for the uncapped-entrances case, every entrance bound for one).
+    const pairs =
+      (n: number, sameExit = false) =>
+      (b: MutableRuleset) => {
+        b.boards[0]!.widthTiles = 12;
+        b.boards[0]!.heightTiles = 12;
+        b.boards[0]!.exits = Array.from({ length: n }, (_, i) => ({
+          id: `out${i}`,
+          cell: { col: 11, row: 1 + 2 * i },
+        }));
+        b.boards[0]!.entrances = Array.from({ length: n }, (_, i) => ({
+          id: `in${i}`,
+          cell: { col: 0, row: 1 + 2 * i },
+          destination: [sameExit ? 'out0' : `out${i}`],
+        }));
+        b.boards[0]!.waves[0]!.entries[0]!.entrance = 'in0';
+      };
+    compiles(pairs(4));
+    rejects(pairs(5), 'has 5 distinct destinations, exceeds 4');
+    compiles(pairs(5, true)); // five entrances, ONE destination — entrances are not the cost
   });
 
   it('maxOffsetTicks defers to the schema ceiling — a nonzero stream offset compiles', () => {
@@ -293,7 +342,7 @@ describe('capability gate — accept at boundary, reject beyond, per dimension',
       // schema-valid on its own for the capability gate to be what fires.
       delete b.towerCatalog[0]!.attack!.cadenceTicks;
       b.towerCatalog[0]!.effects = [{ kind: 'burst', form: 'single', damage: 10 }];
-    }, "burst effect form 'single' unsupported at simVersion 17");
+    }, "burst effect form 'single' unsupported at simVersion 18");
   });
 
   it('maxBurstTravelTicks: exactly 8 accepted, 9 rejected (M2-S9)', () => {
@@ -311,7 +360,7 @@ describe('capability gate — accept at boundary, reject beyond, per dimension',
       b.towerCatalog[0]!.effects = [{ kind: 'burst', form: 'aoe', damage: 45, radiusFp: 640 }];
     };
     compiles(burstBundle(8));
-    rejects(burstBundle(9), "tower 'basic' burst travelTicks 9 exceeds 8 at simVersion 17");
+    rejects(burstBundle(9), "tower 'basic' burst travelTicks 9 exceeds 8 at simVersion 18");
     // Scoped to BURST bundles only: a cadenced tower may still travel further, bounded
     // by its own cadence exactly as before. Deleting the `e.kind === 'burst'` leg of the
     // enforcement site would turn this case red.
@@ -333,7 +382,7 @@ describe('capability gate — accept at boundary, reject beyond, per dimension',
     rejects((b) => {
       delete b.towerCatalog[0]!.attack;
       b.towerCatalog[0]!.effects = [{ kind: 'support', damageMulFp: 1025 }];
-    }, "tower 'basic' support damageMulFp 1025 exceeds 1024 at simVersion 17");
+    }, "tower 'basic' support damageMulFp 1025 exceeds 1024 at simVersion 18");
   });
 
   it('maxDotDurationTicks: exactly 100,000 accepted, 100,001 rejected', () => {
@@ -353,7 +402,7 @@ describe('capability gate — accept at boundary, reject beyond, per dimension',
         { kind: 'direct', form: 'single', damage: 10 },
         { kind: 'dot', damagePerTick: 5, cadenceTicks: 10, durationTicks: 100_001 },
       ];
-    }, "tower 'basic' dot durationTicks 100001 exceeds 100000 at simVersion 17");
+    }, "tower 'basic' dot durationTicks 100001 exceeds 100000 at simVersion 18");
   });
 
   it('MAX_DOT_RECORDS budgets (ratio + 1) per source, so compiled content can reach the rail but never exceed it', () => {
@@ -399,7 +448,7 @@ describe('capability gate — accept at boundary, reject beyond, per dimension',
         { kind: 'direct', form: 'single', damage: 10 },
         { kind: 'dot', damagePerTick: 5, cadenceTicks: 10, durationTicks: 241 },
       ];
-    }, "tower 'basic' dot durationTicks 241 exceeds 240 (8× its 30-tick attack cadence) at simVersion 17");
+    }, "tower 'basic' dot durationTicks 241 exceeds 240 (8× its 30-tick attack cadence) at simVersion 18");
   });
 
   // M2-S5a P8 (CodeRabbit, PR #78) — not a `capabilityProfile` field (the profile has
@@ -422,7 +471,7 @@ describe('capability gate — accept at boundary, reject beyond, per dimension',
         { kind: 'direct', form: 'aoe', damage: 8, radiusFp: 300 },
         { kind: 'dot', damagePerTick: 5, cadenceTicks: 10, durationTicks: 60 },
       ];
-    }, "tower 'basic' combines an aoe direct effect with a dot effect, unsupported at simVersion 17");
+    }, "tower 'basic' combines an aoe direct effect with a dot effect, unsupported at simVersion 18");
   });
 
   it("allowedDirectForms: 'single' accepted, 'aoe' also accepted — no reject case exists (see header comment)", () => {
@@ -465,7 +514,7 @@ describe('capability gate — accept at boundary, reject beyond, per dimension',
     compiles((b) => (b.creepCatalog[0]!.armor = 16)); // exactly the ceiling — accepted
     rejects(
       (b) => (b.creepCatalog[0]!.armor = 17),
-      "creep 'normal' armor 17 exceeds 16 at simVersion 17",
+      "creep 'normal' armor 17 exceeds 16 at simVersion 18",
     );
   });
 
@@ -477,7 +526,7 @@ describe('capability gate — accept at boundary, reject beyond, per dimension',
     compiles((b) => (b.creepCatalog[0]!.leakCost = 16)); // exactly the ceiling — accepted
     rejects(
       (b) => (b.creepCatalog[0]!.leakCost = 17),
-      "creep 'normal' leakCost 17 exceeds 16 at simVersion 17",
+      "creep 'normal' leakCost 17 exceeds 16 at simVersion 18",
     );
   });
 
@@ -573,11 +622,57 @@ describe('board gates — air-domain size ceiling vs. axis-alignment, deliberate
     expect(() => compileRuleset(b as Ruleset, 'test')).not.toThrow();
   });
 
+  // M3 / ADR 0015: the air rule is PER ENTRANCE. On a board with an in-line pair and an
+  // out-of-line pair, air is legal from the in-line entrance and illegal from the other —
+  // and a multi-exit destination can never carry air, whatever its alignment.
+  function twoPairBoard(flyFrom: 'line' | 'skew' | 'none'): MutableRuleset {
+    const b = bundleWithSpec(
+      { widthTiles: 9, heightTiles: 9, entrance: { col: 0, row: 4 }, exit: { col: 8, row: 4 } },
+      { withAirCreep: true, flies: false },
+    );
+    b.boards[0]!.entrances = [
+      { id: 'line', cell: { col: 0, row: 4 }, destination: ['east'] },
+      { id: 'skew', cell: { col: 3, row: 0 }, destination: ['south'] },
+    ];
+    b.boards[0]!.exits = [
+      { id: 'east', cell: { col: 8, row: 4 } },
+      { id: 'south', cell: { col: 6, row: 8 } },
+    ];
+    const entry = b.boards[0]!.waves[0]!.entries[0]!;
+    entry.entrance = flyFrom === 'skew' ? 'skew' : 'line';
+    if (flyFrom !== 'none') entry.creepId = 'flyer';
+    return b;
+  }
+
+  it('air from an entrance whose one-exit destination is in line with it compiles, even beside an out-of-line pair', () => {
+    expect(() => compileRuleset(twoPairBoard('line') as Ruleset, 'test')).not.toThrow();
+    expect(() => compileRuleset(twoPairBoard('none') as Ruleset, 'test')).not.toThrow();
+  });
+
+  it('air from an entrance whose destination is out of line is rejected, naming the entrance', () => {
+    const b = twoPairBoard('skew');
+    expect(() => compileRuleset(b as Ruleset, 'test')).toThrow(
+      "entrance 'skew' (3,0) -> exit (6,8) is not axis-aligned",
+    );
+  });
+
+  it('air from an entrance with a multi-exit destination is rejected by the air rule itself', () => {
+    const b = twoPairBoard('line');
+    b.boards[0]!.entrances[0]!.destination = ['east', 'south'];
+    expect(() => compileRuleset(b as Ruleset, 'test')).toThrow(
+      "entrance 'line' flies an air creep but its destination has 2 exits",
+    );
+    // The same destination with no flyer scheduled there falls to the destination gate.
+    const ground = twoPairBoard('none');
+    ground.boards[0]!.entrances[0]!.destination = ['east', 'south'];
+    expect(() => compileRuleset(ground as Ruleset, 'test')).toThrow('destination has 2 exits');
+  });
+
   it('catalog has air, board schedule does NOT fly, oversized side — rejected', () => {
     const b = bundleWithSpec(OVERSIZED, { withAirCreep: true, flies: false, creepSpeedFp: 1000 });
     expect(() => compileRuleset(b as Ruleset, 'test')).toThrow(RulesetError);
     expect(() => compileRuleset(b as Ruleset, 'test')).toThrow(
-      `widthTiles ${MAX_AIR_BOARD_SIDE_TILES + 1} exceeds ${MAX_AIR_BOARD_SIDE_TILES} at simVersion 17 (the catalog contains an air creep)`,
+      `widthTiles ${MAX_AIR_BOARD_SIDE_TILES + 1} exceeds ${MAX_AIR_BOARD_SIDE_TILES} at simVersion 18 (the catalog contains an air creep)`,
     );
   });
 
@@ -599,7 +694,7 @@ describe('board gates — air-domain size ceiling vs. axis-alignment, deliberate
     });
     expect(() => compileRuleset(b as Ruleset, 'test')).toThrow(RulesetError);
     expect(() => compileRuleset(b as Ruleset, 'test')).toThrow(
-      `heightTiles ${MAX_AIR_BOARD_SIDE_TILES + 1} exceeds ${MAX_AIR_BOARD_SIDE_TILES} at simVersion 17 (the catalog contains an air creep)`,
+      `heightTiles ${MAX_AIR_BOARD_SIDE_TILES + 1} exceeds ${MAX_AIR_BOARD_SIDE_TILES} at simVersion 18 (the catalog contains an air creep)`,
     );
   });
 

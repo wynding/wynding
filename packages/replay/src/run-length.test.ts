@@ -56,7 +56,7 @@ function compileBound(bundle: Ruleset): { latestSpawn: number; walk: number } {
   return { latestSpawn, walk };
 }
 
-describe('the synthetic 30-wave arc compiles at sv17 and would not have at sv16', () => {
+describe('the synthetic 30-wave arc compiles under sv17’s cap (now sv18) and would not have at sv16', () => {
   const bundle = thirtyWaveBundle(M2);
 
   it('its bound is the spec’s 17,790 + 27,030 = 44,820: past 36,000, inside MAX_MATCH_TICKS', () => {
@@ -122,8 +122,9 @@ describe('the scripted defense plan is well formed — all 56 entries, without s
         [col + 1, row + 1],
       ] as const) {
         expect(c >= 0 && c < board.widthTiles && r >= 0 && r < board.heightTiles).toBe(true);
-        expect(`${c},${r}`).not.toBe(`${board.entrance.col},${board.entrance.row}`);
-        expect(`${c},${r}`).not.toBe(`${board.exit.col},${board.exit.row}`);
+        for (const { cell } of [...board.entrances, ...board.exits]) {
+          expect(`${c},${r}`).not.toBe(`${cell.col},${cell.row}`);
+        }
         expect(taken.has(`${c},${r}`), `cell ${c},${r} is taken twice`).toBe(false);
         taken.add(`${c},${r}`);
       }
@@ -185,7 +186,7 @@ describe('the validator’s catch-up ceiling', () => {
     // the sim alone, on an injected creep; this one plays it from a real spawn through a
     // real log, so the rejection branch itself runs.
     const bundle: Ruleset = {
-      formatVersion: 2,
+      formatVersion: 3,
       rulesetId: 'stun-lock',
       version: 1,
       creepCatalog: [
@@ -226,14 +227,15 @@ describe('the validator’s catch-up ceiling', () => {
           id: 'lane',
           widthTiles: 14,
           heightTiles: 14,
-          entrance: { col: 0, row: 6 },
-          exit: { col: 13, row: 6 },
+          entrances: [{ id: 'west', cell: { col: 0, row: 6 }, destination: ['east'] }],
+          exits: [{ id: 'east', cell: { col: 13, row: 6 } }],
           waves: [
             {
               index: 0,
               countdownTicks: 5,
               clearBonus: 0,
-              entries: [{ creepId: 'blanked', count: 1, spacingTicks: 20 }],
+              hpPercent: 100,
+              entries: [{ creepId: 'blanked', entrance: 'west', count: 1, spacingTicks: 20 }],
             },
           ],
         },

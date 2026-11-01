@@ -38,7 +38,7 @@ describe('getBundledRuleset (happy path + authored values)', () => {
 
   it('defaults to DEFAULT_RULESET_ID = wynding-core, version 1', () => {
     expect(DEFAULT_RULESET_ID).toBe('wynding-core');
-    expect(ruleset.formatVersion).toBe(2);
+    expect(ruleset.formatVersion).toBe(3);
     expect(ruleset.rulesetId).toBe('wynding-core');
     expect(ruleset.version).toBe(1);
   });
@@ -238,8 +238,15 @@ describe('getBundledRuleset (happy path + authored values)', () => {
     expect(defaultBoardId(ruleset)).toBe('field-01');
     expect(board.widthTiles).toBe(28);
     expect(board.heightTiles).toBe(24);
-    expect(board.entrance).toEqual({ col: 0, row: 11 });
-    expect(board.exit).toEqual({ col: 27, row: 11 });
+    // Format 3 (M3): one entrance → exit pair, every creep from `west` heading `east`.
+    expect(board.entrances).toEqual([
+      { id: 'west', cell: { col: 0, row: 11 }, destination: ['east'] },
+    ]);
+    expect(board.exits).toEqual([{ id: 'east', cell: { col: 27, row: 11 } }]);
+    for (const wave of board.waves) {
+      expect(wave.hpPercent).toBe(100);
+      for (const entry of wave.entries) expect(entry.entrance).toBe('west');
+    }
   });
 
   // Re-pinned M2-S11 P3 (measured): P1 authors the full ten-wave arc per m2.md's spec
@@ -248,48 +255,76 @@ describe('getBundledRuleset (happy path + authored values)', () => {
   // — `resolute`+`fast` moves from index 4 to index 6, `armored-flyer` from index 6 to
   // index 7, and the boss finale from index 7 to index 9.
   it("carries the ten waves: 10 × normal @ spacing 20, then 16 × swarm @ spacing 5 (the S4a AoE showcase), then 8 × fast @ spacing 15 (the S3 slow-showcase), then 6 × armored @ spacing 25 (the S5a armor showcase), then wave index 4's 12 × normal + 6 × swarm @ spacing 12/5 (arc row 5), then wave index 5's 8 × flying @ spacing 15 (the S7 air showcase), then wave index 6's 6 × resolute + 6 × fast @ spacing 15/15 (the S6 immunity showcase), then wave index 7's 6 × armored-flyer @ spacing 20 (the S10 armored-air showcase), then wave index 8's 10 × swarm + 6 × fast + 4 × armored + 4 × flying @ spacing 6/12/20/20 (arc row 9), then wave index 9's 1 × boss + 8 × normal @ spacing 20/20 (the S10 boss finale)", () => {
-    const normalEntries = [{ creepId: 'normal', count: 10, spacingTicks: 20, offsetTicks: 0 }];
-    const swarmEntries = [{ creepId: 'swarm', count: 16, spacingTicks: 5, offsetTicks: 0 }];
-    const fastEntries = [{ creepId: 'fast', count: 8, spacingTicks: 15, offsetTicks: 0 }];
-    const armoredEntries = [{ creepId: 'armored', count: 6, spacingTicks: 25, offsetTicks: 0 }];
-    const normalSwarmEntries = [
-      { creepId: 'normal', count: 12, spacingTicks: 12, offsetTicks: 0 },
-      { creepId: 'swarm', count: 6, spacingTicks: 5, offsetTicks: 0 },
+    const normalEntries = [
+      { creepId: 'normal', entrance: 'west', count: 10, spacingTicks: 20, offsetTicks: 0 },
     ];
-    const flyingEntries = [{ creepId: 'flying', count: 8, spacingTicks: 15, offsetTicks: 0 }];
+    const swarmEntries = [
+      { creepId: 'swarm', entrance: 'west', count: 16, spacingTicks: 5, offsetTicks: 0 },
+    ];
+    const fastEntries = [
+      { creepId: 'fast', entrance: 'west', count: 8, spacingTicks: 15, offsetTicks: 0 },
+    ];
+    const armoredEntries = [
+      { creepId: 'armored', entrance: 'west', count: 6, spacingTicks: 25, offsetTicks: 0 },
+    ];
+    const normalSwarmEntries = [
+      { creepId: 'normal', entrance: 'west', count: 12, spacingTicks: 12, offsetTicks: 0 },
+      { creepId: 'swarm', entrance: 'west', count: 6, spacingTicks: 5, offsetTicks: 0 },
+    ];
+    const flyingEntries = [
+      { creepId: 'flying', entrance: 'west', count: 8, spacingTicks: 15, offsetTicks: 0 },
+    ];
     const resoluteFastEntries = [
-      { creepId: 'resolute', count: 6, spacingTicks: 15, offsetTicks: 0 },
-      { creepId: 'fast', count: 6, spacingTicks: 15, offsetTicks: 0 },
+      { creepId: 'resolute', entrance: 'west', count: 6, spacingTicks: 15, offsetTicks: 0 },
+      { creepId: 'fast', entrance: 'west', count: 6, spacingTicks: 15, offsetTicks: 0 },
     ];
     const armoredFlyerEntries = [
-      { creepId: 'armored-flyer', count: 6, spacingTicks: 20, offsetTicks: 0 },
+      { creepId: 'armored-flyer', entrance: 'west', count: 6, spacingTicks: 20, offsetTicks: 0 },
     ];
     const swarmFastArmoredFlyingEntries = [
-      { creepId: 'swarm', count: 10, spacingTicks: 6, offsetTicks: 0 },
-      { creepId: 'fast', count: 6, spacingTicks: 12, offsetTicks: 0 },
-      { creepId: 'armored', count: 4, spacingTicks: 20, offsetTicks: 0 },
-      { creepId: 'flying', count: 4, spacingTicks: 20, offsetTicks: 0 },
+      { creepId: 'swarm', entrance: 'west', count: 10, spacingTicks: 6, offsetTicks: 0 },
+      { creepId: 'fast', entrance: 'west', count: 6, spacingTicks: 12, offsetTicks: 0 },
+      { creepId: 'armored', entrance: 'west', count: 4, spacingTicks: 20, offsetTicks: 0 },
+      { creepId: 'flying', entrance: 'west', count: 4, spacingTicks: 20, offsetTicks: 0 },
     ];
     const bossEntries = [
-      { creepId: 'boss', count: 1, spacingTicks: 20, offsetTicks: 0 },
+      { creepId: 'boss', entrance: 'west', count: 1, spacingTicks: 20, offsetTicks: 0 },
       // Re-pinned M2-S11 P4: the boss's `normal` escort gains `offsetTicks` 600. At 0 the
       // escort (speed 26) overtook the boss (speed 18) and screened it — every tower
       // preferring the creep nearest the exit — so the finale was fought against the
       // escort while the boss walked through behind it. Composition is untouched (ruling
       // 2): same creep ids, same counts, same order; only the stream's start moves.
-      { creepId: 'normal', count: 8, spacingTicks: 20, offsetTicks: 600 },
+      { creepId: 'normal', entrance: 'west', count: 8, spacingTicks: 20, offsetTicks: 600 },
     ];
     expect(board.waves).toEqual([
-      { index: 0, countdownTicks: 500, clearBonus: 4, entries: normalEntries },
-      { index: 1, countdownTicks: 300, clearBonus: 4, entries: swarmEntries },
-      { index: 2, countdownTicks: 300, clearBonus: 5, entries: fastEntries },
-      { index: 3, countdownTicks: 300, clearBonus: 5, entries: armoredEntries },
-      { index: 4, countdownTicks: 300, clearBonus: 6, entries: normalSwarmEntries },
-      { index: 5, countdownTicks: 300, clearBonus: 6, entries: flyingEntries },
-      { index: 6, countdownTicks: 300, clearBonus: 7, entries: resoluteFastEntries },
-      { index: 7, countdownTicks: 300, clearBonus: 7, entries: armoredFlyerEntries },
-      { index: 8, countdownTicks: 300, clearBonus: 8, entries: swarmFastArmoredFlyingEntries },
-      { index: 9, countdownTicks: 400, clearBonus: 12, entries: bossEntries },
+      { index: 0, countdownTicks: 500, clearBonus: 4, hpPercent: 100, entries: normalEntries },
+      { index: 1, countdownTicks: 300, clearBonus: 4, hpPercent: 100, entries: swarmEntries },
+      { index: 2, countdownTicks: 300, clearBonus: 5, hpPercent: 100, entries: fastEntries },
+      { index: 3, countdownTicks: 300, clearBonus: 5, hpPercent: 100, entries: armoredEntries },
+      { index: 4, countdownTicks: 300, clearBonus: 6, hpPercent: 100, entries: normalSwarmEntries },
+      { index: 5, countdownTicks: 300, clearBonus: 6, hpPercent: 100, entries: flyingEntries },
+      {
+        index: 6,
+        countdownTicks: 300,
+        clearBonus: 7,
+        hpPercent: 100,
+        entries: resoluteFastEntries,
+      },
+      {
+        index: 7,
+        countdownTicks: 300,
+        clearBonus: 7,
+        hpPercent: 100,
+        entries: armoredFlyerEntries,
+      },
+      {
+        index: 8,
+        countdownTicks: 300,
+        clearBonus: 8,
+        hpPercent: 100,
+        entries: swarmFastArmoredFlyingEntries,
+      },
+      { index: 9, countdownTicks: 400, clearBonus: 12, hpPercent: 100, entries: bossEntries },
     ]);
   });
 

@@ -21,14 +21,13 @@ import {
   createInitialState,
   step,
   countValidTowers,
-  materializeTowerMask,
-  computeDistanceField,
-  shortestPath,
+  spawnHp,
   type CompiledRuleset,
   type SimPhase,
   type SimState,
   type StepEvents,
 } from '@wynding/sim';
+import { currentPath } from '@wynding/content';
 import type { Replay } from '@wynding/replay';
 import type { Ruleset } from '@wynding/types';
 import { CATALOG_BUILD_TICKS } from './scenario';
@@ -226,10 +225,8 @@ function routeFromLiveTowers(
   compiled: CompiledRuleset,
   state: SimState,
 ): readonly { col: number; row: number }[] {
-  const grid = compiled.board.grid;
-  const mask = materializeTowerMask(grid, state.towers, compiled.towerById);
-  const field = computeDistanceField(grid, mask);
-  return shortestPath(grid, field, grid.entrance) ?? [];
+  // The board's first entrance to its OWN destination's exit, under the live towers.
+  return currentPath(compiled, state, 0) ?? [];
 }
 
 /**
@@ -486,7 +483,7 @@ export function runCatalogScene(replay: Replay, bundle: Ruleset): CatalogSceneRe
     airProbeImpacts,
     leak,
     adversarialDamageCeiling,
-    creepHp: compiled.creepById['cat-ground']?.hp ?? 0,
+    creepHp: catGroundSpawnHp(compiled),
     firingTowersByKind: Object.fromEntries(
       [...firingSources].map(([kind, ids]) => [kind, ids.size]),
     ),
@@ -495,6 +492,20 @@ export function runCatalogScene(replay: Replay, bundle: Ruleset): CatalogSceneRe
       return counts;
     })(),
   };
+}
+
+/** The fewest hit points any `cat-ground` creep spawns with: its catalog hit points
+ *  under each wave's `hpPercent` (`spawnHp`, the sim's own spawn formula — M3 creep HP
+ *  growth), minimised over the waves that spawn it. The no-combat-deaths claim compares
+ *  the adversarial damage ceiling against this, so it stays true when a wave grows or
+ *  shrinks hit points; 0 (the claim then fails loudly) if no wave spawns the creep. */
+function catGroundSpawnHp(compiled: CompiledRuleset): number {
+  const def = compiled.creepById['cat-ground'];
+  if (def === undefined) return 0;
+  const hps = compiled.waves
+    .filter((w) => w.spawns.some((s) => s.creepId === 'cat-ground'))
+    .map((w) => spawnHp(def.hp, w.hpPercent));
+  return hps.length === 0 ? 0 : Math.min(...hps);
 }
 
 function sameRoute(

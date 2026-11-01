@@ -112,8 +112,21 @@ export class RulesetError extends Error {
  *  here from `packages/replay`), and a placement budget of 1,000 joins it
  *  (`MAX_TOWER_PLACEMENTS`). `MAX_DOT_RECORDS` (`combat.ts`) is now derived from the
  *  placement budget and stays 9,000, so no runtime bound `step` reads moves. The capability
- *  profile's fields are unchanged; none of these is one of them. */
-export const SIM_VERSION = 17;
+ *  profile's fields are unchanged; none of these is one of them.
+ *
+ *  M3 story 3 bumps 17 → 18 — entrances, exits and destinations (ADR 0015), and
+ *  per-wave creep HP growth, on ruleset `formatVersion` 3. A board may carry several
+ *  entrances and exits, each entrance assigned a destination: a creep spawns at its
+ *  wave entry's entrance, takes that entrance's destination for life, routes on its
+ *  destination's own flow-field and leaks only at an exit in it; the maze invariant,
+ *  "first" targeting and the AoE lead are all measured per destination. `SimState`
+ *  gains one creep column (`destination`, appended last), so every world hash moves —
+ *  but nothing else about a one-pair board does: `field-01` in format 3 reproduces the
+ *  sv17 run of the M2 golden replay tick for tick in every pre-existing field
+ *  (`format3-parity.test.ts`, content). Every creep now spawns with
+ *  `spawnHp(catalog hp, its wave's hpPercent)`, which is the catalog value at 100 —
+ *  every shipped wave's. The capability profile gains the two destination ceilings. */
+export const SIM_VERSION = 18;
 
 /** Canonical immunity order — `slow` before `stun` (decision: "one hash form"). */
 const IMMUNITY_ORDER = ['slow', 'stun'] as const;
@@ -128,6 +141,39 @@ export function canonicalImmunities(immunities: readonly ('slow' | 'stun')[]): (
   return [...new Set(immunities)].sort(
     (a, b) => IMMUNITY_ORDER.indexOf(a) - IMMUNITY_ORDER.indexOf(b),
   );
+}
+
+/** Canonicalize a destination (ADR 0015 — a SET of exit ids) into the board's `exits`
+ *  order: one hash form regardless of authored order, the `canonicalImmunities`
+ *  precedent. The single implementation shared by `validateRulesetShape` (parse-time)
+ *  and `normalizeForHash` (defensive re-canonicalization for a hand-built bundle that
+ *  bypasses `parseRulesetJson`). Repeats collapse here; the schema has already
+ *  rejected them loudly by the time a parsed bundle reaches this, so the dedupe only
+ *  matters on the hand-built path. An id outside `exitIds` sorts last, in authored
+ *  order — unreachable after validation, kept total rather than throwing. */
+export function canonicalDestination(
+  destination: readonly string[],
+  exitIds: readonly string[],
+): string[] {
+  const rank = (id: string): number => {
+    const i = exitIds.indexOf(id);
+    return i === -1 ? exitIds.length : i;
+  };
+  return [...new Set(destination)].sort((a, b) => rank(a) - rank(b));
+}
+
+/**
+ * A creep's hit points at spawn under its wave's `hpPercent` (M3 creep HP growth):
+ * `max(1, ⌊catalogHp × hpPercent / 100⌋)`. THE single formula — the spawn site
+ * (`index.ts`) and the render view model's health-bar denominator both call it, so the
+ * bar a player sees is measured against exactly the hit points the creep spawned with.
+ * Integer math: the schema caps both operands at 1,000,000, so the product is at most
+ * 10¹² — a safe integer — and its floor division by 100 is exact. The `max(1, …)` floor
+ * keeps a tiny catalog value under a small percentage a live creep, never a 0-hp one.
+ * `hpPercent` 100 returns `catalogHp` unchanged.
+ */
+export function spawnHp(catalogHp: number, hpPercent: number): number {
+  return Math.max(1, Math.floor((catalogHp * hpPercent) / 100));
 }
 
 /** Integer ceiling division — `⌈a/b⌉` via `Math.floor((a+b-1)/b)`, never float
@@ -205,9 +251,19 @@ export const MAX_DOT_DURATION_CADENCE_RATIO = 8;
 /**
  * The validator's budget of tower commands (`placeTower` + `sellTower`) across a whole
  * match — a CPU budget: every `placeTower` that reaches the maze-invariant check runs a
- * full-board search, and a rejected placement is a free no-op, so the economy cannot
- * rate-limit repeats. 2,000 since sv17 (1,000 before), which a sell-and-rebuild build
- * needs: at I = 1,423, 40 kept `basic`s and 481 flips are 1,002 commands.
+ * full-board search per distinct destination on the board (M3, ADR 0015 — at most
+ * `maxDestinationsPerBoard`, 4, capability.ts), and a rejected placement is a free no-op,
+ * so the economy cannot rate-limit repeats. 2,000 since sv17 (1,000 before), which a
+ * sell-and-rebuild build needs: at I = 1,423, 40 kept `basic`s and 481 flips are 1,002
+ * commands.
+ *
+ * The combined field-building worst case, with D distinct destinations (M3 story 3): D
+ * fields per placement check, at most `MAX_TOWER_PLACEMENTS` of them; and D more per maze
+ * change in `step`, which rebuilds every destination's field once on any tick whose tower
+ * mask differs — an accepted place or sell (at most this budget) or a mine detonation (at
+ * most `MAX_TOWER_PLACEMENTS`). So a match builds at most (1,000 + 2,000 + 1,000)·D =
+ * 4,000·D full-board fields: 16,000 at D = 4, 4,000 on the shipped one-destination board,
+ * 8,000 on M3's two-destination crossing board.
  */
 export const MAX_TOTAL_TOWER_COMMANDS = 2_000;
 

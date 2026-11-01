@@ -49,7 +49,13 @@ import type {
   TowerTargetDomain,
 } from '@wynding/types';
 import { loadBoard, type BoardContext } from './context';
-import { RulesetError, canonicalImmunities, effectiveSpeedFp, SIM_VERSION } from './ruleset-shared';
+import {
+  RulesetError,
+  canonicalDestination,
+  canonicalImmunities,
+  effectiveSpeedFp,
+  SIM_VERSION,
+} from './ruleset-shared';
 import { validateRulesetShape } from './ruleset-schema';
 import { DIAG_LEN } from './movement';
 import { capabilityProfile, type CapabilityProfile } from './capability';
@@ -58,11 +64,14 @@ import { MAX_TOWERS } from './tower';
 export { RulesetError } from './ruleset-shared';
 
 /** One scheduled spawn: `offsetTicks` TICKS AFTER ITS WAVE'S LAUNCH, a creep of
- *  catalog `creepId`. (Renamed from v1's `kind` — catalog ids are open strings
- *  now, decision 4.) */
+ *  catalog `creepId`, at the board entrance `entrance` — an INDEX into the board's
+ *  entrances (`board.grid.entrances`, `board.entranceDestination`), resolved from the
+ *  entry's entrance id at compile time (M3). (`creepId` was renamed from v1's `kind` —
+ *  catalog ids are open strings now, decision 4.) */
 export interface ScheduledSpawn {
   readonly offsetTicks: number;
   readonly creepId: string;
+  readonly entrance: number;
 }
 
 /** One compiled board wave: the countdown/clear-bonus pair plus its fully
@@ -74,16 +83,36 @@ export interface ScheduledSpawn {
  *  compile time, so the sim only ever drains a cursor over pinned data, never
  *  runtime-interleaves streams itself (G7).
  *
- *  `entriesSummary` aggregates `spawns` back down to one row per creep id, in
- *  first-ARRIVAL order over the sorted spawn timeline (an offset can make a later
- *  table row arrive first) — the authoritative source for the wave preview (a
- *  duplicate-creepId entry, or several entries sharing a creepId, still shows one
- *  summed count). */
+ *  `entriesSummary` aggregates `spawns` back down to one {@link PreviewStream} per
+ *  (creep id, entrance) — M3: the preview's streams are per (creep, route), and an
+ *  entrance fixes its route — in first-ARRIVAL order over the sorted spawn timeline (an
+ *  offset can make a later table row arrive first). It is the authoritative source for
+ *  the wave preview: several entries sharing a creep id AND an entrance still show one
+ *  summed count; the same creep at two entrances shows two streams.
+ *
+ *  `hpPercent` is the wave's creep hit points as a percent of the catalog's (M3 creep HP
+ *  growth) — every creep the wave spawns starts at `spawnHp(catalog hp, hpPercent)`
+ *  (`ruleset-shared.ts`), and the wave preview reads it from here. */
 export interface CompiledWave {
   readonly countdownTicks: number;
   readonly clearBonus: number;
+  readonly hpPercent: number;
   readonly spawns: readonly ScheduledSpawn[];
-  readonly entriesSummary: readonly { readonly creepId: string; readonly count: number }[];
+  readonly entriesSummary: readonly PreviewStream[];
+}
+
+/** One wave-preview stream (M3): every spawn of one creep id from one entrance in a
+ *  wave, summed. Ids, not indices — this is presentation-facing data, and the ids are
+ *  what a preview names; the sim's own spawn schedule (`ScheduledSpawn`) keys on the
+ *  entrance's index instead. */
+export interface PreviewStream {
+  readonly creepId: string;
+  /** The entrance the stream spawns at, by its board id. */
+  readonly entrance: string;
+  /** That entrance's destination — its exit ids, in the board's exit order (ADR 0015). */
+  readonly destination: readonly string[];
+  /** How many creeps the stream spawns this wave. */
+  readonly count: number;
 }
 
 /** Sim-owned compile-time projection of `BalanceConstants` — the v1 field set,
@@ -390,24 +419,34 @@ function normalizeForHash(bundle: Ruleset): unknown {
       starThresholds: bundle.scoring.starThresholds,
       earlyCallScoreDivisor: bundle.scoring.earlyCallScoreDivisor,
     },
-    boards: bundle.boards.map((b) => ({
-      id: b.id,
-      widthTiles: b.widthTiles,
-      heightTiles: b.heightTiles,
-      entrance: { col: b.entrance.col, row: b.entrance.row },
-      exit: { col: b.exit.col, row: b.exit.row },
-      waves: b.waves.map((w) => ({
-        index: w.index,
-        countdownTicks: w.countdownTicks,
-        clearBonus: w.clearBonus,
-        entries: w.entries.map((e) => ({
-          creepId: e.creepId,
-          count: e.count,
-          spacingTicks: e.spacingTicks,
-          offsetTicks: e.offsetTicks ?? 0,
+    boards: bundle.boards.map((b) => {
+      const exitIds = b.exits.map((x) => x.id);
+      return {
+        id: b.id,
+        widthTiles: b.widthTiles,
+        heightTiles: b.heightTiles,
+        entrances: b.entrances.map((e) => ({
+          id: e.id,
+          cell: { col: e.cell.col, row: e.cell.row },
+          // Set semantics (ADR 0015): one hash form whatever the authored order.
+          destination: canonicalDestination(e.destination, exitIds),
         })),
-      })),
-    })),
+        exits: b.exits.map((x) => ({ id: x.id, cell: { col: x.cell.col, row: x.cell.row } })),
+        waves: b.waves.map((w) => ({
+          index: w.index,
+          countdownTicks: w.countdownTicks,
+          clearBonus: w.clearBonus,
+          hpPercent: w.hpPercent,
+          entries: w.entries.map((e) => ({
+            creepId: e.creepId,
+            entrance: e.entrance,
+            count: e.count,
+            spacingTicks: e.spacingTicks,
+            offsetTicks: e.offsetTicks ?? 0,
+          })),
+        })),
+      };
+    }),
   };
 }
 
@@ -718,32 +757,71 @@ function checkCapabilityBoard(
     }
   }
 
-  // AXIS-ALIGNMENT (M2-S7 P1) — triggered ONLY when THIS board's own wave schedule
-  // references an air-domain creep, deliberately NARROWER than the size gate above:
-  // it protects measurement FIDELITY (the straight-line metric movement.ts/
-  // combat.ts assume for a flyer), which only genuinely scheduled flight can reach
-  // — a catalog-wide test here would reject an unrelated ground-only board just
-  // because some OTHER board in the same catalog schedules a flyer. Fidelity has no
-  // meaning under forged state (the size gate's concern); overflow does — the two
-  // gates cannot share a scope. An entry referencing an unresolved `creepId` is NOT
-  // treated as air (same `?? 'ground'`-shaped fallback as every other totality rail
-  // in the sim) — a schema-valid-but-unknown id is rejected later, by wave
-  // compilation, not here.
-  const boardFliesAir = board.waves.some((wave) =>
-    wave.entries.some(
-      (entry) => creepCatalog.find((c) => c.id === entry.creepId)?.domain === 'air',
-    ),
-  );
-  if (boardFliesAir) {
-    const axisAligned =
-      board.entrance.col === board.exit.col || board.entrance.row === board.exit.row;
-    if (!axisAligned) {
+  // THE AIR RULE, PER ENTRANCE (M2-S7 P1's axis-alignment gate, generalized by M3 /
+  // ADR 0015) — triggered ONLY by an entry that schedules an air-domain creep at a given
+  // entrance, deliberately NARROWER than the size gate above: it protects measurement
+  // FIDELITY (the straight-line metric movement.ts/combat.ts assume for a flyer), which
+  // only genuinely scheduled flight can reach — a catalog-wide test here would reject an
+  // unrelated ground-only entrance just because some OTHER entrance, or board, flies.
+  // Fidelity has no meaning under forged state (the size gate's concern); overflow does
+  // — the two gates cannot share a scope. An entrance may carry air only when its
+  // destination is ONE exit in line with it (same row or column): a flyer re-aims
+  // straight at its own exit, and how one would pick among several exits is ADR 0015's
+  // open question, so a multi-exit destination can never carry air (the
+  // `maxDestinationExits` gate above already rejects one; this states the air rule on
+  // its own terms so a future widening of that gate cannot silently let flyers through).
+  // An entry referencing an unresolved `creepId` is NOT treated as air (same `?? 'ground'`-
+  // shaped fallback as every other totality rail in the sim) — a schema-valid-but-unknown
+  // id is rejected later, by wave compilation, not here.
+  const flyingEntrances = new Set<string>();
+  for (const wave of board.waves) {
+    for (const entry of wave.entries) {
+      if (creepCatalog.find((c) => c.id === entry.creepId)?.domain === 'air') {
+        flyingEntrances.add(entry.entrance);
+      }
+    }
+  }
+  for (const entrance of board.entrances) {
+    if (!flyingEntrances.has(entrance.id)) continue;
+    const exits = entrance.destination.map((id) => board.exits.find((x) => x.id === id)!.cell);
+    if (exits.length !== 1) {
       throw new RulesetError(
-        `board '${board.id}' entrance (${board.entrance.col},${board.entrance.row}) -> exit ` +
-          `(${board.exit.col},${board.exit.row}) is not axis-aligned at simVersion ${v} ` +
+        `board '${board.id}' entrance '${entrance.id}' flies an air creep but its destination ` +
+          `has ${exits.length} exits at simVersion ${v} (air needs a single exit in line with it)`,
+      );
+    }
+    const from = entrance.cell;
+    const to = exits[0]!;
+    if (from.col !== to.col && from.row !== to.row) {
+      throw new RulesetError(
+        `board '${board.id}' entrance '${entrance.id}' (${from.col},${from.row}) -> exit ` +
+          `(${to.col},${to.row}) is not axis-aligned at simVersion ${v} ` +
           `(its wave schedule flies an air creep)`,
       );
     }
+  }
+
+  // DESTINATIONS (M3, ADR 0015) — after the air rule, so a flying multi-exit entrance
+  // reports the air rule it breaks. Any other destination of more than one exit is
+  // rejected here: ADR 0015 leaves which exit wins a tie and how a flyer picks among
+  // several to the first story whose board needs one, and this keeps both questions
+  // unreachable rather than answered by accident. The distinct-destination count bounds
+  // the flow-field work — one full-board Dijkstra per distinct destination on every maze
+  // change and on every placement that reaches the maze invariant
+  // (`maxDestinationsPerBoard`'s own doc).
+  const distinctDestinations = new Set<string>();
+  for (const entrance of board.entrances) {
+    if (entrance.destination.length > profile.maxDestinationExits) {
+      throw new RulesetError(
+        `board '${board.id}' entrance '${entrance.id}' destination has ${entrance.destination.length} exits, exceeds ${profile.maxDestinationExits} at simVersion ${v}`,
+      );
+    }
+    distinctDestinations.add(entrance.destination.join(','));
+  }
+  if (distinctDestinations.size > profile.maxDestinationsPerBoard) {
+    throw new RulesetError(
+      `board '${board.id}' has ${distinctDestinations.size} distinct destinations, exceeds ${profile.maxDestinationsPerBoard} at simVersion ${v}`,
+    );
   }
 }
 
@@ -764,17 +842,23 @@ export function compileRuleset(bundle: Ruleset, boardId: string): CompiledRulese
   if (board === undefined) throw new RulesetError(`unknown boardId '${boardId}'`);
   checkCapabilityBoard(board, profile, normalized.creepCatalog);
 
-  // Build the grid + exit distance field; loadBoard rejects an unplayable board. Its
-  // failure (a GridError — non-border opening, bad dims, over-cap cells) is re-thrown
-  // as a RulesetError so ALL malformed content surfaces through one type and the
-  // replay validator can turn it into a clean rejection rather than a 500.
+  // Build the grid + one distance field per distinct destination; loadBoard rejects an
+  // unplayable board (an entrance that cannot reach its own destination included). Its
+  // failure (a GridError — non-border or coincident opening, bad dims, over-cap cells)
+  // is re-thrown as a RulesetError so ALL malformed content surfaces through one type
+  // and the replay validator can turn it into a clean rejection rather than a 500. An
+  // opening's INDEX in the board's list is its identity from here on; the ids stay on
+  // the raw bundle (validated unique, and every reference resolved, by the schema).
+  const exitIndex = new Map(board.exits.map((x, i) => [x.id, i] as const));
+  const entranceIndex = new Map(board.entrances.map((e, i) => [e.id, i] as const));
   let boardCtx: BoardContext;
   try {
     boardCtx = loadBoard({
       widthTiles: board.widthTiles,
       heightTiles: board.heightTiles,
-      entrance: board.entrance,
-      exit: board.exit,
+      entrances: board.entrances.map((e) => e.cell),
+      exits: board.exits.map((x) => x.cell),
+      destinations: board.entrances.map((e) => e.destination.map((id) => exitIndex.get(id)!)),
     });
   } catch (err) {
     throw new RulesetError(`unplayable board '${boardId}': ${(err as Error).message}`);
@@ -972,10 +1056,14 @@ export function compileRuleset(bundle: Ruleset, boardId: string): CompiledRulese
     interface RawSpawn {
       readonly offsetTicks: number;
       readonly creepId: string;
+      readonly entrance: number;
       readonly entryRow: number;
     }
     const rawSpawns: RawSpawn[] = [];
+    // Spawn count per preview stream (M3): keyed `${entrance index}|${creepId}` — the
+    // integer prefix keeps the split unambiguous whatever characters a creep id holds.
     const summaryCount = new Map<string, number>();
+    const streamKey = (entrance: number, creepId: string): string => `${entrance}|${creepId}`;
     wave.entries.forEach((entry, entryRow) => {
       if (creepById[entry.creepId] === undefined) {
         throw new RulesetError(`wave references unknown creep id '${entry.creepId}'`);
@@ -984,25 +1072,32 @@ export function compileRuleset(bundle: Ruleset, boardId: string): CompiledRulese
       // definite number by `validateRulesetShape` (omitted ⇒ 0) before `normalized`
       // reaches here — `?? 0` only satisfies the wider type, never masks a real gap.
       let offset = entry.offsetTicks ?? 0;
+      const entrance = entranceIndex.get(entry.entrance);
+      if (entrance === undefined) {
+        throw new RulesetError(`wave references unknown entrance '${entry.entrance}'`);
+      }
       for (let i = 0; i < entry.count; i++) {
-        rawSpawns.push({ offsetTicks: offset, creepId: entry.creepId, entryRow });
+        rawSpawns.push({ offsetTicks: offset, creepId: entry.creepId, entrance, entryRow });
         offset += entry.spacingTicks;
         totalSpawns++;
         if (totalSpawns > MAX_SCHEDULED_SPAWNS) {
           throw new RulesetError('wave schedule exceeds the scheduled-spawn cap');
         }
       }
-      summaryCount.set(entry.creepId, (summaryCount.get(entry.creepId) ?? 0) + entry.count);
+      const key = streamKey(entrance, entry.creepId);
+      summaryCount.set(key, (summaryCount.get(key) ?? 0) + entry.count);
     });
     // Stable sort by (offsetTicks, entryRow): `Array.prototype.sort` is spec-stable,
     // but the explicit entryRow tie-break also totally orders same-offset spawns
     // FROM DIFFERENT entries deterministically regardless of engine, matching the
-    // pinned cross-wave/same-tick ordering contract.
+    // pinned cross-wave/same-tick ordering contract. The entrance is NOT a sort key
+    // (M3): two entries at different entrances interleave by table row, as before.
     rawSpawns.sort((a, b) => a.offsetTicks - b.offsetTicks || a.entryRow - b.entryRow);
     if (rawSpawns.length === 0) throw new RulesetError('wave schedule is empty');
     const spawns: ScheduledSpawn[] = rawSpawns.map((s) => ({
       offsetTicks: s.offsetTicks,
       creepId: s.creepId,
+      entrance: s.entrance,
     }));
     tails.push(spawns[spawns.length - 1]!.offsetTicks); // sorted ascending ⇒ last is max
     for (const s of spawns) {
@@ -1029,21 +1124,26 @@ export function compileRuleset(bundle: Ruleset, boardId: string): CompiledRulese
     // authored entry order: with per-entry offsets the first creeps a player sees can
     // come from a later table row, and the wave-preview contract (m2.md §Waves) wants
     // the composition in schedule order as it will actually arrive (Codex PR #68).
-    const summaryOrder: string[] = [];
+    // One stream per (creep, entrance) — M3: an entrance fixes its destination, so the
+    // entrance alone names the stream's route.
+    const entriesSummary: PreviewStream[] = [];
     const summarySeen = new Set<string>();
     for (const s of rawSpawns) {
-      if (!summarySeen.has(s.creepId)) {
-        summarySeen.add(s.creepId);
-        summaryOrder.push(s.creepId);
-      }
+      const key = streamKey(s.entrance, s.creepId);
+      if (summarySeen.has(key)) continue;
+      summarySeen.add(key);
+      const entrance = board.entrances[s.entrance]!;
+      entriesSummary.push({
+        creepId: s.creepId,
+        entrance: entrance.id,
+        destination: entrance.destination,
+        count: summaryCount.get(key)!,
+      });
     }
-    const entriesSummary = summaryOrder.map((creepId) => ({
-      creepId,
-      count: summaryCount.get(creepId)!,
-    }));
     waves.push({
       countdownTicks: wave.countdownTicks,
       clearBonus: wave.clearBonus,
+      hpPercent: wave.hpPercent,
       spawns,
       entriesSummary,
     });
@@ -1052,6 +1152,10 @@ export function compileRuleset(bundle: Ruleset, boardId: string): CompiledRulese
   // AoE scan-work ceiling (M2-S4a, step 7): only gated when the catalog contains ANY
   // aoe tower — a catalog with none can never schedule a blast, so its per-tick
   // combat cost is bounded by `residentImpacts` alone, unaffected by creep count.
+  // RE-DERIVED for several entrances (M3, ADR 0015) and unchanged: `totalSpawns` counts
+  // every entry at every entrance, so it still bounds the creeps concurrently alive; a
+  // blast scans every live creep whatever its route, and its lead (`predictBlastPoint`)
+  // walks only its own target's field — one walk per blast, as before.
   const hasAoeTower = towers.some((t) => t.effects.some((e) => e.kind === 'aoe'));
   if (hasAoeTower) {
     const worstCaseScanWork = MAX_TOWERS * totalSpawns;
@@ -1072,7 +1176,12 @@ export function compileRuleset(bundle: Ruleset, boardId: string): CompiledRulese
   // countdowns [10k, 10k] + tails [20k, 0] peak at 30k, not 40k). Add the slowest
   // creep's full traversal (max route length ÷ min speed, over every creep any wave
   // spawns). Only the baseline must fit; adversarial build/sell juggling beyond it
-  // is caught by the validator's timeout.
+  // is caught by the validator's timeout. RE-DERIVED for several entrances and
+  // destinations (M3, ADR 0015) and unchanged: a ground creep's route strictly descends
+  // ITS OWN destination's field, so it visits each cell at most once and is at most
+  // `cells` edges of ≤ `DIAG_LEN` whichever entrance it left and whichever exit it
+  // seeks; a flyer's straight line is shorter still. The bound is per creep, so it does
+  // not grow with the number of pairs.
   // `minEffSpeedFp` deliberately never accounts for stun (M2-S6): `effectiveSpeedFp`
   // is shared verbatim with movement, but movement's `stunned` branch (index.ts)
   // passes a synthetic 0 budget straight to `advanceCreep` rather than threading a

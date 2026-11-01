@@ -23,7 +23,7 @@
 // after temporarily logging the values from the scenarios (see git history of this
 // file for the harness used to derive them) — never hand-compute a golden.
 //
-// Also pins the v2 `rulesetHash` of the shipped artifact itself — a content-identity
+// Also pins the `rulesetHash` of the shipped artifact itself — a content-identity
 // digest, independent of the world-hash goldens above.
 
 import { describe, it, expect } from 'vitest';
@@ -42,32 +42,43 @@ import {
 import { getBundledRuleset, defaultBoardId } from './registry';
 // The package's ONE fnv1a copy (test-digest.ts) — m2-golden.test.ts digests through the
 // same function, so the two files cannot drift onto different digests for one trace.
-import { fnv1a } from './test-digest';
+import { fnv1a, withoutDestination } from './test-digest';
 
 /** Shared fixed seed for both pinned scenarios. */
 const SCENARIO_SEED = 0x5eed;
 
+/** A scenario's final state and per-tick hash trace — plus the same trace of the state
+ *  minus M3 story 3's `destination` column, which must reproduce every pin from before
+ *  that column existed. */
+interface ScenarioRun {
+  readonly state: SimState;
+  readonly trace: string[];
+  readonly traceWithoutDestination: string[];
+}
+
 /** Run steps of the bundled ruleset from a fresh state, seeded and driven by
  *  `inputs`, continuing while `continueWhile(tick, state)` holds. Returns the
- *  terminal state and the per-tick world-hash trace. `probe`, if given, is called
- *  with the post-step state on every tick — used to observe transient per-tick
- *  facts (e.g. a slow status landing) that the terminal state alone cannot prove
- *  (Codex R2-3). */
+ *  terminal state and the per-tick world-hash traces (`ScenarioRun`). `probe`, if
+ *  given, is called with the post-step state on every tick — used to observe transient
+ *  per-tick facts (e.g. a slow status landing) that the terminal state alone cannot
+ *  prove (Codex R2-3). */
 function runScenario(
   inputs: (tick: number) => SimInput[],
   continueWhile: (tick: number, state: SimState) => boolean,
   probe?: (state: SimState) => void,
-): { state: SimState; trace: string[] } {
+): ScenarioRun {
   const bundle = getBundledRuleset();
   const ruleset = compileRuleset(bundle, defaultBoardId(bundle));
   let state = createInitialState(SCENARIO_SEED, ruleset);
   const trace: string[] = [];
+  const traceWithoutDestination: string[] = [];
   for (let t = 0; continueWhile(t, state); t++) {
     state = step(state, ruleset, inputs(t));
     trace.push(hashSimState(state));
+    traceWithoutDestination.push(hashSimState(withoutDestination(state)));
     probe?.(state);
   }
-  return { state, trace };
+  return { state, trace, traceWithoutDestination };
 }
 
 /** Like `runScenario`, but runs a fixed number of `ticks` rather than a
@@ -76,7 +87,7 @@ function runScenarioForTicks(
   inputs: (tick: number) => SimInput[],
   ticks: number,
   probe?: (state: SimState) => void,
-): { state: SimState; trace: string[] } {
+): ScenarioRun {
   return runScenario(inputs, (t) => t < ticks, probe);
 }
 
@@ -86,7 +97,7 @@ function runScenarioForTicks(
 function runScenarioUntilTerminal(
   inputs: (tick: number) => SimInput[],
   probe?: (state: SimState) => void,
-): { state: SimState; trace: string[] } {
+): ScenarioRun {
   return runScenario(inputs, (t, state) => t < MAX_MATCH_TICKS && state.phase === 'running', probe);
 }
 
@@ -95,7 +106,7 @@ describe('behavioral parity — v2-loaded bundle vs. the pre-verified goldens', 
     const bundle = getBundledRuleset();
     const ruleset = compileRuleset(bundle, defaultBoardId(bundle));
     const noInputs = (): SimInput[] => [];
-    const { state, trace } = runScenarioForTicks(noInputs, 1200);
+    const { state, trace, traceWithoutDestination } = runScenarioForTicks(noInputs, 1200);
 
     // Re-pinned M2-S5a P5: the appended `armored` wave (index 3) launches at
     // prefixCountdown 1,400 — this hands-off run loses at tick 946, well before
@@ -143,8 +154,14 @@ describe('behavioral parity — v2-loaded bundle vs. the pre-verified goldens', 
       'stars',
       deriveStars(state, ruleset),
     );
-    expect(hashSimState(state)).toBe('40e08409');
-    expect(fnv1a(trace.join(':'))).toBe('ca77e5d5');
+    // Re-pinned M3 story 3 (SIM_VERSION 17 → 18): the new `destination` creep column (ADR
+    // 0015) widens every creep's shape — a hash-only move, asserted below: the previous pin
+    // still holds under `withoutDestination`.
+    expect(hashSimState(state)).toBe('2d36cb85');
+    expect(fnv1a(trace.join(':'))).toBe('31ec2e16');
+    // The pin from before M3 story 3's `destination` creep column, which the state minus that column must still hash to — the proof the column is all that moved the pin above.
+    expect(hashSimState(withoutDestination(state))).toBe('40e08409');
+    expect(fnv1a(traceWithoutDestination.join(':'))).toBe('ca77e5d5');
     expect(state.phase).toBe('lost');
     expect(state.lives).toBe(0);
     expect(state.tick).toBe(946);
@@ -264,7 +281,7 @@ describe('behavioral parity — v2-loaded bundle vs. the pre-verified goldens', 
     // the `slow` commands actually landed — this asserts some creep really carried
     // an active slow status at some tick during the run.
     let sawSlowedCreep = false;
-    const { state, trace } = runScenarioUntilTerminal(inputs, (s) => {
+    const { state, trace, traceWithoutDestination } = runScenarioUntilTerminal(inputs, (s) => {
       sawSlowedCreep ||= s.creeps.slowMulFp.some((mulFp) => mulFp !== 0);
       // Feeds the affordability pacing above — read off the state rather than tracked
       // independently, so the script can never believe it can afford what it cannot.
@@ -441,8 +458,14 @@ describe('behavioral parity — v2-loaded bundle vs. the pre-verified goldens', 
     // running THIS script with the sv14 rule restored reproduces the previous golden
     // byte-for-byte (hash bf13755b, trace 0c6af742), which is what proves the
     // affordability pacing added above changed nothing on its own.
-    expect(hashSimState(state)).toBe('1ca97ecb');
-    expect(fnv1a(trace.join(':'))).toBe('636178da');
+    // Re-pinned M3 story 3 (SIM_VERSION 17 → 18): the new `destination` creep column (ADR
+    // 0015) widens every creep's shape — a hash-only move, asserted below: the previous pin
+    // still holds under `withoutDestination`.
+    expect(hashSimState(state)).toBe('66d1a6b3');
+    expect(fnv1a(trace.join(':'))).toBe('283985f1');
+    // The pin from before M3 story 3's `destination` creep column, which the state minus that column must still hash to — the proof the column is all that moved the pin above.
+    expect(hashSimState(withoutDestination(state))).toBe('1ca97ecb');
+    expect(fnv1a(traceWithoutDestination.join(':'))).toBe('636178da');
     expect(state.phase).toBe('lost');
     expect(state.lives).toBe(0);
     expect(state.tick).toBe(2256);
@@ -483,7 +506,7 @@ describe('behavioral parity — v2-loaded bundle vs. the pre-verified goldens', 
   });
 });
 
-// --- GOLDEN — the v2 rulesetHash of the shipped artifact -------------------------
+// --- GOLDEN — the rulesetHash of the shipped artifact --------------------------------
 // Recompute with: pnpm --filter @wynding/content exec vitest run parity
 // A change here means the shipped artifact's CONTENT changed (or its normalized
 // encoding did) — not a behavior change per se, but every deployed replay/leaderboard
@@ -503,7 +526,13 @@ describe('behavioral parity — v2-loaded bundle vs. the pre-verified goldens', 
 // bundle — `antiair`'s `cadenceTicks` 20 -> 15, `scoring.survivalMul` 35 -> 50, and the
 // boss wave's `normal` escort gaining `offsetTicks` 600 — so the content-identity digest
 // moves again. No creep id, count or wave order changed (ruling 2's frozen column).
-const SHIPPED_RULESET_HASH = 'fd0dfb25fd3249493ac3af9fd294e3b601d475f20887614231646968b3b34f67';
+// Re-pinned M3 story 3 (measured): `formatVersion` 2 → 3 re-encodes the board — v2's
+// single `entrance`/`exit` cells become `entrances`/`exits` lists with a destination per
+// entrance, every wave entry names its entrance, every wave carries `hpPercent` — so the
+// normalized form, and with it the digest, moves. Every authored VALUE is unchanged
+// (one pair `west` → `east`, every entry on `west`, `hpPercent` 100), and the world-hash
+// goldens above do not move with it (`format3-parity.test.ts` proves the run is the same).
+const SHIPPED_RULESET_HASH = 'c12145a48f4a094eba02307d399e1ac0dd393e2432aaccc2564674e8cc117d34';
 // ---------------------------------------------------------------------------------
 
 describe('digest goldens — the shipped artifact content-hash is pinned and stable', () => {
