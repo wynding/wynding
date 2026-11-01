@@ -20,9 +20,9 @@ just head for "the exit"; it needs to know which exit is its own.
 Rob also named a later wish: custom boards where a designer picks each entrance's exit — two
 entrances that both drain east, say — or simply lets creeps take the nearest exit. Custom boards
 are outside Phase 1, but how a creep's exit is expressed lands in the board format, the content
-hash and every replay now. Changing that shape later means another format bump and invalidating
-every stored replay a second time, while M3 is already paying for one (`formatVersion` 2 → 3 and
-a `simVersion` bump).
+hash and every replay now. Changing that shape later means another format bump and a migration
+of every board's data, while M3 is already paying for one (`formatVersion` 2 → 3 and a
+`simVersion` bump).
 
 ## Decision
 
@@ -43,7 +43,8 @@ entrance.**
   flyer would choose between several exits is left for the first board that needs it.
 
 M3 ships only one-exit destinations (`west → {east}`, `north → {south}`). "Pick any exit" is a
-different one-exit set — content alone. "Nearest exit" is the set of all the board's exits: the
+different one-exit set — content alone (an entrance whose exit is out of line with it carries no
+air; letting it fly would widen the air rule, which is sim work). "Nearest exit" is the set of all the board's exits: the
 format already holds it, but enabling it takes one small sim story that decides the two open
 questions below and widens the capability profile, and that story bumps `simVersion`. What the set
 shape saves is a second format change and a migration of every board's data.
@@ -73,6 +74,7 @@ shape saves is a second format change and a migration of every board's data.
   picks among several exits**. Both are decided by the first story whose board has a multi-exit
   destination. Until then the capability profile accepts only one-exit destinations, so neither
   can be answered by accident.
-- Custom boards (Phase 4) inherit "pick any exit" and "nearest exit" as data. Their editor, the
+- Custom boards (Phase 4) inherit "pick any exit" as data, and "nearest exit" as data once its
+  sim story (above) lands. Their editor, the
   exit-picking interface and the rules for what makes a player-made board valid get their own
   spec when that phase comes.
