@@ -108,15 +108,13 @@ describe('every shipped board stays inside the replay validator’s tower budget
       `[tower-budgets] ${name}: I = ${income.total} (${income.start} start + ${income.kills} ` +
         `kills + ${income.clears} clears + ${income.earlyCalls} early calls)`,
     );
+    // One bound, one message: whichever budget binds first, the fix touches both.
+    const bound = Math.min(MAX_TOTAL_TOWER_COMMANDS, 2 * MAX_TOWER_PLACEMENTS);
     expect(
       income.total,
-      `I = ${income.total} exceeds MAX_TOTAL_TOWER_COMMANDS (${MAX_TOTAL_TOWER_COMMANDS}) — ` +
-        're-derive the tower-command budget (ruleset-shared.ts)',
-    ).toBeLessThanOrEqual(MAX_TOTAL_TOWER_COMMANDS);
-    expect(
-      income.total,
-      `I = ${income.total} exceeds 2 × MAX_TOWER_PLACEMENTS (${2 * MAX_TOWER_PLACEMENTS}) — ` +
-        're-derive the placement budget, and MAX_DOT_RECORDS with it (ruleset-shared.ts, combat.ts)',
-    ).toBeLessThanOrEqual(2 * MAX_TOWER_PLACEMENTS);
+      `I = ${income.total} exceeds ${bound} (MAX_TOTAL_TOWER_COMMANDS ${MAX_TOTAL_TOWER_COMMANDS}, ` +
+        `2 × MAX_TOWER_PLACEMENTS ${2 * MAX_TOWER_PLACEMENTS}) — re-derive both budgets, and ` +
+        'MAX_DOT_RECORDS with the placement budget (ruleset-shared.ts, combat.ts)',
+    ).toBeLessThanOrEqual(bound);
   });
 });
