@@ -190,8 +190,8 @@ describe('controller — input → command mapping', () => {
     // M2-S9: a SELL still announces `sold`, never `destroyed` — `sellSelected` clears the
     // selection synchronously (it re-aims at the sold anchor), so the tick-time
     // reconciliation branch that emits `destroyed` is never reached on this path. The
-    // negative control for the test below.
-    expect(c.uiState().lastOutcome).toEqual({ kind: 'sold', refund: 3 });
+    // negative control for the test below. A basic refunds ⌊¾ × 6⌋ = 4 (M3 story 8's price).
+    expect(c.uiState().lastOutcome).toEqual({ kind: 'sold', refund: 4 });
   });
 
   it('a mine detonating under the selection announces `destroyed` — the only signal a non-sighted player gets (M2-S9)', () => {

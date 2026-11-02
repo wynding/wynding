@@ -580,7 +580,7 @@ test('the seventh Card (M2-S8): arms Beacon by click AND by Digit7, OMITS the fo
   await beaconCard.click();
   await expect(beaconCard).toHaveAttribute('aria-pressed', 'true');
   await expect(panel).toContainText('Beacon');
-  await expect(panel).toContainText('Cost: 15');
+  await expect(panel).toContainText('Cost: 18');
   // The aura's magnitude is TEXT, and it is the ONLY non-canvas carrier of what this
   // tower does — the shell and the recipient mark are both canvas-only.
   await expect(panel).toContainText('Support: +50.0% damage to towers sharing a full edge');
@@ -956,7 +956,7 @@ test('supports player-started runs, pause / speed controls, launches wave 1 on S
       '10 × Swarm Creep — north to south, ground, armor 0, leak cost 1, no immunities',
       '6 × Fast Creep — north to south, ground, armor 0, leak cost 1, no immunities',
     ],
-    16: ['10 × Flying Creep — north to south, air, armor 0, leak cost 1, no immunities'],
+    16: ['12 × Flying Creep — north to south, air, armor 0, leak cost 1, no immunities'],
     17: [
       '8 × Resolute Creep — west to east, ground, armor 0, leak cost 1, slow',
       '12 × Fast Creep — north to south, ground, armor 0, leak cost 1, no immunities',
@@ -966,9 +966,9 @@ test('supports player-started runs, pause / speed controls, launches wave 1 on S
       '8 × Armored Creep — north to south, ground, armor 6 (subtracted from each direct hit; damage over time ignores it), leak cost 1, no immunities',
     ],
     19: [
-      '8 × Armored Flyer — west to east, air, armor 5 (subtracted from each direct hit; damage over time ignores it), leak cost 1, no immunities',
+      '10 × Armored Flyer — west to east, air, armor 5 (subtracted from each direct hit; damage over time ignores it), leak cost 1, no immunities',
       '8 × Armored Creep — north to south, ground, armor 6 (subtracted from each direct hit; damage over time ignores it), leak cost 1, no immunities',
-      '10 × Swarm Creep — north to south, ground, armor 0, leak cost 1, no immunities',
+      '4 × Swarm Creep — north to south, ground, armor 0, leak cost 1, no immunities',
     ],
     20: [
       '1 × Boss — boss, west to east, ground, armor 8 (subtracted from each direct hit; damage over time ignores it), leak cost 3, stun',
@@ -1039,7 +1039,7 @@ test('supports player-started runs, pause / speed controls, launches wave 1 on S
     21: 195,
     22: 215,
     23: 235,
-    24: 255,
+    24: 270,
     25: 270,
     26: 270,
     27: 270,
