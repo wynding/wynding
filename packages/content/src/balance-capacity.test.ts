@@ -236,7 +236,7 @@ describe('the report’s capacity lines', () => {
     { timeout: 120_000 },
     () => {
       // Two mazes is the set's only winner, so its strongest; the serpentine's towers do not
-      // begin with its towers, so the serpentine priced is no drawing of it.
+      // begin with two mazes', so the serpentine priced is no drawing of it.
       const set: ReferenceSet = {
         ...M3_CROSSING,
         id: 'probe',
