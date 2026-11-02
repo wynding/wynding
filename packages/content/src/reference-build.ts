@@ -78,6 +78,12 @@ export interface ReferenceSet {
    *  a juggle's sell and re-place aside). Priced, never run as a drawing: the report checks
    *  it, then prices it and the schedule's income against it (`balance-capacity.ts`). */
   readonly fullBoard?: ReferenceBuild;
+  /** The set's juggling build (m3.md, "Juggling"), one of `builds`: the report gives its
+   *  result a line of its own beside the honest winners'. */
+  readonly juggling?: ReferenceBuild;
+  /** The set's centre-only anti-air build (m3.md, B), one of `builds`: the report says
+   *  whether it survives the waves that fly both air lanes at once. */
+  readonly centreAntiAir?: ReferenceBuild;
 }
 
 const CELL_GLYPH = {

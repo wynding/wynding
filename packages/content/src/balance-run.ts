@@ -98,6 +98,10 @@ export interface BuildRun {
   readonly kills: number;
   readonly leaks: readonly LeakRecord[];
   readonly sells: readonly SellRecord[];
+  /** Every tower command the runner sent, accepted or not — what a replay of the run would
+   *  carry, and what the replay validator's command budgets count (`MAX_TOTAL_TOWER_COMMANDS`,
+   *  `MAX_TOWER_PLACEMENTS`): a placement the sim refuses is re-sent the next tick. */
+  readonly commands: { readonly place: number; readonly sell: number };
   /** The most creeps alive at once over the whole run, counted as `WaveProfile`'s is. */
   readonly peakAlive: number;
   /** The wave whose window held the last placement on an anchor never built on before —
@@ -206,6 +210,7 @@ export function runReferenceBuild(
   const spendById: Record<string, number> = Object.create(null) as Record<string, number>;
   const leaks: LeakRecord[] = [];
   const sells: SellRecord[] = [];
+  const commands = { place: 0, sell: 0 };
   let spend = 0;
   let kills = 0;
   let peakAlive = 0;
@@ -219,7 +224,11 @@ export function runReferenceBuild(
       tickBefore = state.tick;
       aliveBefore = state.creeps.id.length;
     },
-    afterStep: (state, _ruleset, _inputs, placed, { sold, events }) => {
+    afterStep: (state, _ruleset, inputs, placed, { sold, events }) => {
+      for (const input of inputs) {
+        if (input.kind === 'placeTower') commands.place++;
+        else if (input.kind === 'sellTower') commands.sell++;
+      }
       while (rows.length < state.waveCursor) {
         rows.push({
           wave: rows.length,
@@ -323,6 +332,7 @@ export function runReferenceBuild(
     kills,
     leaks,
     sells,
+    commands,
     peakAlive,
     lastPlacementWave,
     waves: rows,

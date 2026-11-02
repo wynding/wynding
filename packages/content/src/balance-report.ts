@@ -8,24 +8,35 @@
 // build — the build that won on the most lives (then the highest score), leaving out any
 // that sold with a creep alive (the juggling build is reported beside the honest
 // winners, never as one) — which is the wave whose window held that build's last
-// placement, unless its plan never finished. A set that draws its board full (`fullBoard`)
-// then gets the board's capacity in bounty and the wave whose income first covers it
-// (`balance-capacity.ts`): where the strongest build would place its last tower once the
-// schedule is long enough to fill the board.
+// placement, unless its plan never finished. Then each honest winner's share of spend on
+// anti-air (M3 story 8), and, where the set names them, its juggling build's result beside
+// the honest winners' (`juggling`) and whether its centre-only anti-air build survives the
+// waves that fly two lanes at once (`centreAntiAir`). A set that draws its board full
+// (`fullBoard`) then gets the board's capacity in bounty and the wave whose income first
+// covers it (`balance-capacity.ts`): where the strongest build would place its last tower
+// once the schedule is long enough to fill the board.
 //
 // Beside the text it returns what makes the report untrustworthy — no set registered, a set
-// with no builds, a build whose plan didn't finish or whose run never ended, or a capacity
-// drawing the sim will not take as drawn (`placeCapacityDrawing`: a sell, a refused tower, a
-// creep on the board before it stands) or that does not draw the strongest build (the towers
-// it places must begin with that build's), whose price is still printed — so the command can
-// fail.
+// with no builds, a build whose plan didn't finish or whose run never ended, a juggling or
+// centre-only build that is not one of the set's builds, a juggling build that never sold
+// with a creep alive, or a capacity drawing the sim will not take as drawn
+// (`placeCapacityDrawing`: a sell, a refused tower, a creep on the board before it stands)
+// or that does not draw the strongest build (the towers it places must begin with that
+// build's), whose price is still printed — so the command can fail.
 
-import { compileRuleset, deriveScore, deriveStars, type CompiledRuleset } from '@wynding/sim';
+import {
+  compileRuleset,
+  deriveScore,
+  deriveStars,
+  resolveCreepLeakCost,
+  type CompiledRuleset,
+} from '@wynding/sim';
 import type { Ruleset } from '@wynding/types';
 import { compileReferenceBuild, type ReferenceBuild, type ReferenceSet } from './reference-build';
 import { runReferenceBuild, type BuildRun } from './balance-run';
 import {
   checkAllStepsRan,
+  checkCommandBudgets,
   checkNoSellWithLiveCreep,
   idsBySpend,
   locateLoss,
@@ -145,6 +156,103 @@ function boardFullLine(
   return `board-full: the strongest build, ${best.build.id} (won on ${run.state.lives} lives), ${where}`;
 }
 
+type Entry = { readonly build: ReferenceBuild; readonly run: BuildRun };
+
+/** The builds that won without a sell while a creep was alive — A1's winners. */
+function honestWinners(runs: readonly Entry[]): Entry[] {
+  return runs.filter(
+    (e) => e.run.state.phase === 'won' && checkNoSellWithLiveCreep(e.build.id, e.run).length === 0,
+  );
+}
+
+/** `part` of `whole` as a whole percent. */
+function percent(part: number, whole: number): string {
+  return `${whole > 0 ? Math.round((part * 100) / whole) : 0}%`;
+}
+
+/** How much of each honest winner's spend went on anti-air — the towers that hit only
+ *  flyers, then every tower that can hit one (m3.md's flag that every winner carries
+ *  `antiair`; the owner asked how heavily winning leans on it). */
+function antiAirLines(runs: readonly Entry[], ruleset: CompiledRuleset): string[] {
+  const winners = honestWinners(runs);
+  if (winners.length === 0) return [];
+  const spentWhere = (run: BuildRun, domains: readonly string[]) =>
+    Object.entries(run.spendById)
+      .filter(([id]) => domains.includes(ruleset.towerById[id]?.attack?.domain ?? 'none'))
+      .reduce((n, [, spend]) => n + spend, 0);
+  return [
+    'anti-air share of spend — on towers that hit only flyers, then on every tower that can hit one:',
+    ...winners.map(({ build, run }) => {
+      const only = spentWhere(run, ['air']);
+      const any = spentWhere(run, ['air', 'both']);
+      return `  ${build.id}: ${only} of ${run.spend} (${percent(only, run.spend)}), ${any} (${percent(any, run.spend)})`;
+    }),
+  ];
+}
+
+/** The juggling build's line beside the honest winners' (m3.md, B). Its spend counts every
+ *  placement, re-placements too (M2's measure), so the line also gives it net of what its
+ *  sells refunded: ⌊refundNum / refundDen⌋ of each sold tower's cost, the sim's rule. */
+function jugglingLines(entry: Entry, runs: readonly Entry[], ruleset: CompiledRuleset): string[] {
+  const { build, run } = entry;
+  const { refundNum, refundDen } = ruleset.balance;
+  const refunds = run.sells.reduce(
+    (n, s) => n + Math.floor((ruleset.towerById[s.towerId]!.cost * refundNum) / refundDen),
+    0,
+  );
+  const live = run.sells.filter((s) => s.creepsAlive > 0).length;
+  const result = (r: BuildRun) =>
+    `${r.state.phase} on ${r.state.lives} lives (${deriveStars(r.state, ruleset)}★)`;
+  const beside = honestWinners(runs).map(
+    ({ build: b, run: r }) => `${b.id} ${result(r)}, spend ${r.spend}`,
+  );
+  const { place, sell } = run.commands;
+  return [
+    `juggling: ${build.id} ${result(run)} — ${run.sells.length} sells, ${live} with creeps alive; spend ${run.spend}, ${run.spend - refunds} net of refunds; ${place + sell} tower commands, ${place} of them placements`,
+    `  beside the honest winners: ${beside.length > 0 ? beside.join('; ') : 'none'}`,
+  ];
+}
+
+/** The first wave that flies more than one air lane at once — block 3's two-lane air,
+ *  located by content: flyers from two entrances or more. `null` if none does. */
+export function firstMultiLaneAirWave(ruleset: CompiledRuleset): number | null {
+  const wave = ruleset.waves.findIndex(
+    (w) =>
+      new Set(
+        w.spawns
+          .filter((s) => ruleset.creepById[s.creepId]?.domain === 'air')
+          .map((s) => s.entrance),
+      ).size > 1,
+  );
+  return wave < 0 ? null : wave;
+}
+
+/** Whether the centre-only anti-air build survives the waves that fly both lanes at once
+ *  (m3.md, B), with the lives each of those waves' flyers took. */
+function centreAntiAirLines(entry: Entry, ruleset: CompiledRuleset): string[] {
+  const { build, run } = entry;
+  const both = firstMultiLaneAirWave(ruleset);
+  if (both === null) return [`centre-only anti-air: ${build.id} — no wave flies two lanes at once`];
+  const lost = new Map<number, number>();
+  for (const l of run.leaks) {
+    if (l.wave < both || ruleset.creepById[l.creepId]?.domain !== 'air') continue;
+    lost.set(l.wave, (lost.get(l.wave) ?? 0) + resolveCreepLeakCost(ruleset.creepById, l.creepId));
+  }
+  const air = [...lost].map(([w, n]) => `wave ${w + 1}: ${n}`).join(', ') || 'none';
+  const from = `the air down two lanes at once from wave ${both + 1}`;
+  const loss = locateLoss(run);
+  const verdict =
+    loss === null
+      ? `${run.state.phase} on ${run.state.lives} lives — it survives ${from}`
+      : loss.reachedWave < both
+        ? `lost on wave ${loss.reachedWave + 1}, before ${from}`
+        : `lost on wave ${loss.reachedWave + 1} — it does not survive ${from}`;
+  return [
+    `centre-only anti-air: ${build.id} ${verdict}`,
+    `  lives its flyers took from wave ${both + 1} on: ${air}`,
+  ];
+}
+
 /** The towers `build` places, each anchor once, in the order it first builds on them — its
  *  maze, without the timing or a juggle's sell and re-place. */
 function mazeOrder(build: ReferenceBuild, ruleset: CompiledRuleset): string[] {
@@ -245,6 +353,34 @@ export function balanceReport(
       failures.push(...checkAllStepsRan(`${set.id}/${build.id}`, run));
     }
     lines.push(boardFullLine(runs, ruleset), '');
+    const antiAir = antiAirLines(runs, ruleset);
+    if (antiAir.length > 0) lines.push(...antiAir, '');
+    if (set.juggling !== undefined) {
+      const entry = runs.find((e) => e.build === set.juggling);
+      if (entry === undefined) {
+        failures.push(
+          `${set.id}: its juggling build, ${set.juggling.id}, is not one of its builds`,
+        );
+      } else {
+        if (checkNoSellWithLiveCreep(entry.build.id, entry.run).length === 0) {
+          failures.push(
+            `${set.id}/${entry.build.id}: the juggling build never sold with a creep alive`,
+          );
+        }
+        failures.push(...checkCommandBudgets(`${set.id}/${entry.build.id}`, entry.run));
+        lines.push(...jugglingLines(entry, runs, ruleset), '');
+      }
+    }
+    if (set.centreAntiAir !== undefined) {
+      const entry = runs.find((e) => e.build === set.centreAntiAir);
+      if (entry === undefined) {
+        failures.push(
+          `${set.id}: its centre-only anti-air build, ${set.centreAntiAir.id}, is not one of its builds`,
+        );
+      } else {
+        lines.push(...centreAntiAirLines(entry, ruleset), '');
+      }
+    }
     if (set.fullBoard !== undefined) {
       const label = `${set.id}/${set.fullBoard.id}`;
       failures.push(...placeCapacityDrawing(label, set.fullBoard, ruleset, set.seed).failures);

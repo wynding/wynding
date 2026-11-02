@@ -7,7 +7,7 @@
 // build. They judge; they never run anything (`balance-run.ts` does that).
 
 import type { Cell } from '@wynding/types';
-import type { CompiledRuleset } from '@wynding/sim';
+import { MAX_TOTAL_TOWER_COMMANDS, MAX_TOWER_PLACEMENTS, type CompiledRuleset } from '@wynding/sim';
 import type { BuildRun } from './balance-run';
 import { waveIndexForCreep } from './wave-lookup';
 
@@ -93,6 +93,25 @@ export function checkNoSellWithLiveCreep(id: string, run: BuildRun): string[] {
       (s) =>
         `${id}: sold the ${s.towerId} at (${s.col},${s.row}) on tick ${s.tick} with ${s.creepsAlive} creep(s) alive`,
     );
+}
+
+/** The run's tower commands fit the replay validator's two budgets (`packages/sim`'s
+ *  `ruleset-shared.ts`): a run over either could not be submitted as a replay. The juggling
+ *  build is the one that comes near them (m3.md, "Juggling"). */
+export function checkCommandBudgets(id: string, run: BuildRun): string[] {
+  const { place, sell } = run.commands;
+  const violations: string[] = [];
+  if (place + sell > MAX_TOTAL_TOWER_COMMANDS) {
+    violations.push(
+      `${id}: ${place + sell} tower commands, over the replay budget of ${MAX_TOTAL_TOWER_COMMANDS}`,
+    );
+  }
+  if (place > MAX_TOWER_PLACEMENTS) {
+    violations.push(
+      `${id}: ${place} placements, over the replay budget of ${MAX_TOWER_PLACEMENTS}`,
+    );
+  }
+  return violations;
 }
 
 /** M2-style plausibility floors for a losing build — each optional, each checked only

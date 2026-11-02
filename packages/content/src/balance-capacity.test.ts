@@ -27,6 +27,10 @@ import { balanceReport, checkDrawsStrongest } from './balance-report';
 const bundle = loadRulesetOrM2Fixture(M3_CROSSING.rulesetId);
 const ruleset = compileRuleset(bundle, M3_CROSSING.boardId);
 
+/** M3's set without the juggling and centre-only builds it names — the probe sets below
+ *  carry builds of their own. */
+const { juggling: _juggling, centreAntiAir: _centre, ...PROBE_BASE } = M3_CROSSING;
+
 /** A basic on (1,10)–(2,11) walls in the west entrance at (0,11): the route is sealed. */
 const SEALED = {
   id: 'sealed',
@@ -48,8 +52,8 @@ describe('a drawing’s capacity', () => {
     };
     expect(drawnCapacity(build, ruleset)).toEqual({
       towers: 2,
-      bounty: 14,
-      spendById: { basic: 5, venom: 9 },
+      bounty: 17,
+      spendById: { basic: 6, venom: 11 },
     });
   });
 
@@ -163,9 +167,9 @@ describe('a schedule’s income', () => {
     // Waves 1–3: 10 normals, 16 swarm, 10 normals (1 bounty each), 2 a clear.
     // Wave 1's call pays nothing (Start claims it); a 500-tick countdown pays ⌊500 / 100⌋.
     expect(scheduleIncome(ruleset).slice(0, 3)).toEqual([
-      { wave: 0, earned: 92, earnedWithCalls: 92 },
-      { wave: 1, earned: 110, earnedWithCalls: 115 },
-      { wave: 2, earned: 122, earnedWithCalls: 132 },
+      { wave: 0, earned: 108, earnedWithCalls: 108 },
+      { wave: 1, earned: 126, earnedWithCalls: 131 },
+      { wave: 2, earned: 138, earnedWithCalls: 148 },
     ]);
   });
 
@@ -179,9 +183,9 @@ describe('a schedule’s income', () => {
 
   it('names the first wave whose income covers a sum, with or without the calls, or none', () => {
     const income = scheduleIncome(ruleset);
-    expect(firstWaveCovering(income, 92, false)).toBe(0);
-    expect(firstWaveCovering(income, 123, false)).toBe(3); // 122 by wave 3, 152 by wave 4
-    expect(firstWaveCovering(income, 123, true)).toBe(2); // 132 by wave 3
+    expect(firstWaveCovering(income, 108, false)).toBe(0);
+    expect(firstWaveCovering(income, 139, false)).toBe(3); // 138 by wave 3, 168 by wave 4
+    expect(firstWaveCovering(income, 139, true)).toBe(2); // 148 by wave 3
     // One past what the whole schedule earns, with or without the calls: no wave covers it.
     const last = income[income.length - 1]!;
     expect(firstWaveCovering(income, last.earned, false)).toBe(last.wave);
@@ -193,9 +197,9 @@ describe('a schedule’s income', () => {
 
 describe('the report’s capacity lines', () => {
   it('name the wave whose income covers a drawing the schedule can pay for', () => {
-    // West only's 19 towers, as a stand-in capacity drawing: 123 bounty.
+    // West only's 19 towers, as a stand-in capacity drawing: 150 bounty.
     const set: ReferenceSet = {
-      ...M3_CROSSING,
+      ...PROBE_BASE,
       id: 'probe',
       builds: [M3_UNDEFENDED],
       fullBoard: M3_WEST_ONLY,
@@ -203,20 +207,20 @@ describe('the report’s capacity lines', () => {
     const { text, failures } = balanceReport([set], loadRulesetOrM2Fixture);
     expect(failures).toEqual([]);
     expect(text).toContain(
-      'capacity: m3-west-only draws 19 towers worth 123 bounty — basic 65, venom 27, splash 24, antiair 7',
+      'capacity: m3-west-only draws 19 towers worth 150 bounty — basic 78, venom 33, splash 30, antiair 9',
     );
     expect(text).toContain('income (every kill and clear bonus) covers it by the end of wave 4');
     expect(text).toContain(
-      'income with every early call at its maximum covers it by the end of wave 3',
+      'income with every early call at its maximum covers it by the end of wave 4',
     );
   });
 
   it('say how far short the schedule’s income falls of a drawing it cannot pay for', () => {
-    // The serpentine's 648 against block 1 alone: ten waves earn 315, 361 with every call.
+    // The serpentine's 799 against block 1 alone: ten waves earn 331, 377 with every call.
     const board = bundle.boards[0]!;
     const blockOne = { ...bundle, boards: [{ ...board, waves: board.waves.slice(0, 10) }] };
     const set: ReferenceSet = {
-      ...M3_CROSSING,
+      ...PROBE_BASE,
       id: 'probe',
       builds: [M3_UNDEFENDED],
       fullBoard: M3_SERPENTINE,
@@ -224,10 +228,10 @@ describe('the report’s capacity lines', () => {
     const { text, failures } = balanceReport([set], () => blockOne);
     expect(failures).toEqual([]);
     expect(text).toContain(
-      'income (every kill and clear bonus) reaches 315 by the end of wave 10, short of it',
+      'income (every kill and clear bonus) reaches 331 by the end of wave 10, short of it',
     );
     expect(text).toContain(
-      'income with every early call at its maximum reaches 361 by the end of wave 10, short of it',
+      'income with every early call at its maximum reaches 377 by the end of wave 10, short of it',
     );
   });
 
@@ -238,7 +242,7 @@ describe('the report’s capacity lines', () => {
       // Two mazes is the set's only winner, so its strongest; the serpentine's towers do not
       // begin with two mazes', so the serpentine priced is no drawing of it.
       const set: ReferenceSet = {
-        ...M3_CROSSING,
+        ...PROBE_BASE,
         id: 'probe',
         builds: [M3_TWO_MAZES],
         fullBoard: M3_SERPENTINE,
@@ -251,7 +255,7 @@ describe('the report’s capacity lines', () => {
 
   it('fail the report for a drawing the sim will not take', () => {
     const set: ReferenceSet = {
-      ...M3_CROSSING,
+      ...PROBE_BASE,
       id: 'probe',
       builds: [M3_UNDEFENDED],
       fullBoard: SEALED,
@@ -262,7 +266,7 @@ describe('the report’s capacity lines', () => {
   });
 
   it('are absent for a set that draws no full board', () => {
-    const set: ReferenceSet = { ...M3_CROSSING, id: 'probe', builds: [M3_UNDEFENDED] };
+    const set: ReferenceSet = { ...PROBE_BASE, id: 'probe', builds: [M3_UNDEFENDED] };
     const { fullBoard: _, ...withoutFull } = set;
     expect(balanceReport([withoutFull], loadRulesetOrM2Fixture).text).not.toContain('capacity:');
   });

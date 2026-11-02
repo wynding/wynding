@@ -14,7 +14,7 @@
 // field on the wire (`Replay` carries none) is silently ignored.
 //
 // Every leg plays `m3-serpentine`, the first build of M3's reference set on the shipped
-// crossing board (`packages/content/src/reference-builds.ts`, M3 stories 5–7), compiled from
+// crossing board (`packages/content/src/reference-builds.ts`, M3 stories 5–8), compiled from
 // its grid to the same plan `balance-crossing.test.ts` proves wins the whole arc — imported
 // here, never re-typed, so this file can't drift into scripting a DIFFERENT build than the
 // one the balance checker pins. `@wynding/content`'s package.json `exports` map has no subpath for

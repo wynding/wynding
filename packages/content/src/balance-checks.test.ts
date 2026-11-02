@@ -4,13 +4,20 @@
 // `balance-calibration.test.ts` runs them on M2's real builds.
 
 import { describe, it, expect } from 'vitest';
-import { compileRuleset, createInitialState, type SimState } from '@wynding/sim';
+import {
+  compileRuleset,
+  createInitialState,
+  MAX_TOTAL_TOWER_COMMANDS,
+  MAX_TOWER_PLACEMENTS,
+  type SimState,
+} from '@wynding/sim';
 import type { Cell } from '@wynding/types';
 import { getM2Fixture, M2_BOARD_ID } from './m2-fixture';
 import { runReferenceBuild, type BuildRun } from './balance-run';
 import { compileReferenceBuild, drawGrid, type ReferenceBuild } from './reference-build';
 import {
   checkAllStepsRan,
+  checkCommandBudgets,
   checkDistinctness,
   checkLossWindow,
   checkNoSellWithLiveCreep,
@@ -39,6 +46,7 @@ function fakeRun(
     kills: 0,
     leaks: [],
     sells: [],
+    commands: { place: 0, sell: 0 },
     peakAlive: 0,
     lastPlacementWave: null,
     waves: [],
@@ -186,6 +194,38 @@ describe('no sell while any creep is alive', { timeout: 120_000 }, () => {
     ]);
     expect(checkNoSellWithLiveCreep(build.id, run)).toEqual([
       'seller: sold the basic at (6,2) on tick 560 with 3 creep(s) alive',
+    ]);
+    // Two placements and two sells sent, each accepted the tick it was sent.
+    expect(run.commands).toEqual({ place: 2, sell: 2 });
+  });
+});
+
+describe('the replay validator’s command budgets', () => {
+  it('passes a run at both budgets and names each one it goes over', () => {
+    const at = fakeRun({
+      commands: {
+        place: MAX_TOWER_PLACEMENTS,
+        sell: MAX_TOTAL_TOWER_COMMANDS - MAX_TOWER_PLACEMENTS,
+      },
+    });
+    expect(checkCommandBudgets('juggler', at)).toEqual([]);
+    const over = fakeRun({
+      commands: {
+        place: MAX_TOWER_PLACEMENTS + 1,
+        sell: MAX_TOTAL_TOWER_COMMANDS - MAX_TOWER_PLACEMENTS,
+      },
+    });
+    expect(checkCommandBudgets('juggler', over)).toEqual([
+      `juggler: ${MAX_TOTAL_TOWER_COMMANDS + 1} tower commands, over the replay budget of ${MAX_TOTAL_TOWER_COMMANDS}`,
+      `juggler: ${MAX_TOWER_PLACEMENTS + 1} placements, over the replay budget of ${MAX_TOWER_PLACEMENTS}`,
+    ]);
+    expect(
+      checkCommandBudgets(
+        'seller',
+        fakeRun({ commands: { place: 1, sell: MAX_TOTAL_TOWER_COMMANDS } }),
+      ),
+    ).toEqual([
+      `seller: ${MAX_TOTAL_TOWER_COMMANDS + 1} tower commands, over the replay budget of ${MAX_TOTAL_TOWER_COMMANDS}`,
     ]);
   });
 });
