@@ -888,7 +888,7 @@ test('supports player-started runs, pause / speed controls, launches wave 1 on S
   // CORRECT upcoming wave before each call (PLAN.md P3 step 19) — per-wave, since each
   // wave of the arc (M3 stories 5–7: m3.md's first-pass arc, rows 1–30) brings a new
   // threat or route: the swarm, the north route opening at wave 3, multi-entry waves from
-  // wave 4 (an array of `<li>` texts in authored order, each naming its route), the air
+  // wave 4 (an array of `<li>` texts in arrival order, each naming its route), the air
   // headline at wave 6 (its row reads `air`, not `ground`), the armored-flyer wall at wave
   // 9, the boss at wave 10; then block 2's threats on both routes, the north lane's air at
   // wave 16, the second wall at wave 19 and a boss down each route at wave 20; then block

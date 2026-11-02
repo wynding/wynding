@@ -170,9 +170,8 @@ export const M2_SHOWCASE: ReferenceSet = {
 // last walls, so they are up for the first flyers even when towers cost more. Six more,
 // placed late in block 2 against block 3's air, stand down the north lane above the crossing
 // (two antiair and a beacon) and over the west lane east of it, with a venom beside the west
-// route's last run. It still
-// lets a few of block 3's armored flyers and its north boss through, so it wins on fewer
-// lives. By spend it is a venom and antiair build.
+// route's last run. It still lets a few of block 3's armored flyers and its north boss
+// through, so it wins on fewer lives. By spend it is a venom and antiair build.
 //
 // THE CHANNEL sends both routes down one straight channel. A wall from the top border
 // (columns 3–4) turns west creeps down at the entrance; a block three towers wide from the
