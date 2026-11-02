@@ -16,7 +16,7 @@
 // so they live in the default suite, as M2's calibration does.
 
 import { describe, it, expect } from 'vitest';
-import { compileRuleset, createInitialState, deriveStars, step, type SimState } from '@wynding/sim';
+import { compileRuleset, deriveStars, type SimState } from '@wynding/sim';
 import { loadRulesetOrM2Fixture } from './m2-fixture';
 import { compileReferenceBuild, type ReferenceBuild } from './reference-build';
 import {
@@ -39,9 +39,15 @@ import {
   locateLoss,
   totalScheduledSpawns,
 } from './balance-checks';
-import { drawnCapacity, firstWaveCovering, scheduleIncome } from './balance-capacity';
+import {
+  drawnCapacity,
+  firstWaveCovering,
+  placeCapacityDrawing,
+  scheduleIncome,
+} from './balance-capacity';
 import { balanceReport } from './balance-report';
 import { currentPath } from './paths';
+import { runBuildScript } from './script-runner';
 import { waveIndexForCreep } from './wave-lookup';
 
 const ruleset = compileRuleset(loadRulesetOrM2Fixture(M3_CROSSING.rulesetId), M3_CROSSING.boardId);
@@ -77,6 +83,64 @@ function routes(state: { readonly towers: SimState['towers'] }) {
     north: north.length - 1,
     sharing: classifyPathSharing(west, north),
   };
+}
+
+/** Where `build`'s leaked creeps were bound, and where each wave's creeps were: the sim's
+ *  own `destination` column, fixed at spawn — the runner's leak records carry no route. A
+ *  creep leaks in the movement phase, so an earlier tick has already recorded it. */
+function leakDestinations(build: ReferenceBuild) {
+  const seen = new Map<number, number>();
+  const leaked: (number | undefined)[] = [];
+  const byWave = new Map<number, Set<number>>();
+  runBuildScript(ruleset, SEED, compileReferenceBuild(build, ruleset), {
+    collectEvents: true,
+    afterStep: (state, _ruleset, _inputs, _placed, { events }) => {
+      const c = state.creeps;
+      for (let i = 0; i < c.id.length; i++) {
+        seen.set(c.id[i]!, c.destination[i]!);
+        let wave = byWave.get(c.wave[i]!);
+        if (wave === undefined) byWave.set(c.wave[i]!, (wave = new Set()));
+        wave.add(c.destination[i]!);
+      }
+      for (const id of events!.leaked!) leaked.push(seen.get(id));
+    },
+  });
+  return { leaked, byWave };
+}
+
+/** Every open 2 × 2 on `state`'s board left clear of both routes' paths — room for one more
+ *  tower that blocks neither route. */
+function openRoom(state: SimState): string[] {
+  const { grid } = ruleset.board;
+  const onPath = new Set(
+    [...currentPath(ruleset, state, WEST)!, ...currentPath(ruleset, state, NORTH)!].map(
+      (c) => `${c.col},${c.row}`,
+    ),
+  );
+  const covered = new Set<string>();
+  for (let i = 0; i < state.towers.id.length; i++) {
+    for (const [dc, dr] of [
+      [0, 0],
+      [1, 0],
+      [0, 1],
+      [1, 1],
+    ] as const) {
+      covered.add(`${state.towers.col[i]! + dc},${state.towers.row[i]! + dr}`);
+    }
+  }
+  const free = (col: number, row: number) =>
+    grid.classAt({ col, row }) === 'buildable-open' &&
+    !covered.has(`${col},${row}`) &&
+    !onPath.has(`${col},${row}`);
+  const room: string[] = [];
+  for (let row = 0; row < grid.height - 1; row++) {
+    for (let col = 0; col < grid.width - 1; col++) {
+      if (free(col, row) && free(col + 1, row) && free(col, row + 1) && free(col + 1, row + 1)) {
+        room.push(`${col},${row}`);
+      }
+    }
+  }
+  return room;
 }
 
 describe('M3 story 5 — the first reference builds, block 1 on the crossing board', () => {
@@ -143,8 +207,9 @@ describe('M3 story 5 — the first reference builds, block 1 on the crossing boa
     const swarm = waveIndexForCreep(ruleset, 'swarm');
     expect(swarm).toBeLessThanOrEqual(NORTH_OPENS); // "by wave 3", the north route's opening
     expect(checkLossWindow(M3_UNDEFENDED.id, run, ruleset, { toWaveOf: 'swarm' })).toEqual([]);
+    expect(run.state.tick).toBe(1376);
     expect(locateLoss(run)).toEqual({
-      tick: run.state.tick - 1,
+      tick: 1375,
       reachedWave: swarm,
       fatalLeaks: [{ creepId: 'swarm', wave: swarm }],
     });
@@ -169,12 +234,23 @@ describe('M3 story 5 — the first reference builds, block 1 on the crossing boa
           toWaveOf: 'armored',
         }),
       ).toEqual([]);
-      expect(locateLoss(run)!.fatalLeaks).toEqual([{ creepId: 'armored', wave: armored }]);
+      expect(run.state.tick).toBe(2943);
+      expect(locateLoss(run)).toEqual({
+        tick: 2942,
+        reachedWave: armored,
+        fatalLeaks: [{ creepId: 'armored', wave: armored }],
+      });
       // That wave's armored creeps all walk the north route, which the build never reaches —
-      // and every life it lost went down that route, from the opening on.
+      // and every life it lost went down that route: each creep that leaked was bound where
+      // the north route's own first wave was, never where wave 1's west creeps were.
       const armoredSpawns = ruleset.waves[armored]!.spawns.filter((s) => s.creepId === 'armored');
       expect(new Set(armoredSpawns.map((s) => s.entrance))).toEqual(new Set([NORTH]));
-      expect(run.leaks.every((l) => l.wave >= NORTH_OPENS)).toBe(true);
+      const { leaked, byWave } = leakDestinations(M3_WEST_ONLY);
+      const north = byWave.get(NORTH_OPENS)!;
+      expect([north.size, byWave.get(0)!.size]).toEqual([1, 1]);
+      expect(north).not.toEqual(byWave.get(0));
+      expect(leaked).toHaveLength(run.leaks.length);
+      expect(new Set(leaked)).toEqual(north);
     },
   );
 
@@ -217,58 +293,19 @@ describe('M3 story 5 — the board’s capacity in bounty', () => {
   });
 
   it('is a maze the sim accepts tower by tower, still one both routes walk, with no 2 × 2 left clear of their paths', () => {
-    // Bounty enough for every tower before wave 1: one placement a tick, each accepted —
-    // the maze invariant never refuses one.
-    const rich = compileRuleset(
-      {
-        ...loadRulesetOrM2Fixture(M3_CROSSING.rulesetId),
-        balance: { ...ruleset.balance, startingBounty: 10_000 },
-      },
-      M3_CROSSING.boardId,
-    );
-    let state = createInitialState(SEED, rich);
-    for (const s of full) {
-      if (s.kind === 'sell') throw new Error('the capacity drawing sells nothing');
-      const before = state.towers.id.length;
-      state = step(state, rich, [
-        { kind: 'placeTower', anchor: { col: s.col, row: s.row }, towerId: s.towerId },
-      ]);
-      expect(state.towers.id.length, `${s.towerId} at (${s.col},${s.row})`).toBe(before + 1);
-    }
-    expect(state.waveLaunchTick[0]).toBeNull(); // all of it before wave 1
+    // One placement a tick before wave 1, each accepted — the maze invariant never refuses
+    // one (the report's own check, `placeCapacityDrawing`).
+    const { state, failures } = placeCapacityDrawing('full', M3_SERPENTINE_FULL, ruleset, SEED);
+    expect(failures).toEqual([]);
+    expect(state.towers.id.length).toBe(full.length);
     expect(routes(state)).toEqual({ west: 167, north: 143, sharing: 'merged' });
 
-    // "Every tower the maze holds": no open 2 × 2 is left off both routes' paths.
-    const { grid } = ruleset.board;
-    const onPath = new Set(
-      [...currentPath(ruleset, state, WEST)!, ...currentPath(ruleset, state, NORTH)!].map(
-        (c) => `${c.col},${c.row}`,
-      ),
-    );
-    const covered = new Set<string>();
-    for (let i = 0; i < state.towers.id.length; i++) {
-      for (const [dc, dr] of [
-        [0, 0],
-        [1, 0],
-        [0, 1],
-        [1, 1],
-      ] as const) {
-        covered.add(`${state.towers.col[i]! + dc},${state.towers.row[i]! + dr}`);
-      }
-    }
-    const free = (col: number, row: number) =>
-      grid.classAt({ col, row }) === 'buildable-open' &&
-      !covered.has(`${col},${row}`) &&
-      !onPath.has(`${col},${row}`);
-    const room: string[] = [];
-    for (let row = 0; row < grid.height - 1; row++) {
-      for (let col = 0; col < grid.width - 1; col++) {
-        if (free(col, row) && free(col + 1, row) && free(col, row + 1) && free(col + 1, row + 1)) {
-          room.push(`${col},${row}`);
-        }
-      }
-    }
-    expect(room).toEqual([]);
+    // "Every tower the maze holds": no open 2 × 2 is left off both routes' paths — where the
+    // block-1 serpentine, five horizontal walls short, leaves room (the scan can find some).
+    expect(openRoom(state)).toEqual([]);
+    const block1 = placeCapacityDrawing('block 1', M3_SERPENTINE, ruleset, SEED);
+    expect(block1.failures).toEqual([]);
+    expect(openRoom(block1.state).length).toBeGreaterThan(0);
   });
 
   it('prices at 83 towers, 569 bounty, beyond what block 1 earns', () => {

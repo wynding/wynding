@@ -265,7 +265,7 @@ export const M3_UNDEFENDED: ReferenceBuild = {
 export const M3_WEST_ONLY: ReferenceBuild = {
   id: 'm3-west-only',
   summary:
-    'two mazes’ west serpentine and nothing else: every tower in columns 1–8, out of the north route’s reach',
+    'a maze for the west route alone: two vertical walls, every tower in columns 1–8, out of the north route’s reach',
   grid: `
     #############+##############
     #..bbvv....................#

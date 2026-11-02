@@ -11,7 +11,8 @@
 // placement, unless its plan never finished. A set that draws its board full (`fullBoard`)
 // then gets the board's capacity in bounty and the wave whose income first covers it
 // (`balance-capacity.ts`): where the strongest build would place its last tower once the
-// schedule is long enough to fill the board.
+// schedule is long enough to fill the board. A drawing the sim will not take as drawn — a
+// refused tower, a sell — fails the report rather than pricing a maze that cannot stand.
 //
 // Beside the text it returns what makes the report untrustworthy — no set registered, or
 // a build whose plan didn't finish or whose run never ended — so the command can fail.
@@ -26,7 +27,12 @@ import {
   idsBySpend,
   locateLoss,
 } from './balance-checks';
-import { drawnCapacity, firstWaveCovering, scheduleIncome } from './balance-capacity';
+import {
+  drawnCapacity,
+  firstWaveCovering,
+  placeCapacityDrawing,
+  scheduleIncome,
+} from './balance-capacity';
 
 /** Where a placement fell: a wave's window as the arc numbers it, before the first, or
  *  nowhere. */
@@ -195,7 +201,11 @@ export function balanceReport(
       failures.push(...checkAllStepsRan(`${set.id}/${build.id}`, run));
     }
     lines.push(boardFullLine(runs, ruleset), '');
-    if (set.fullBoard !== undefined) lines.push(...capacityLines(set.fullBoard, ruleset), '');
+    if (set.fullBoard !== undefined) {
+      const label = `${set.id}/${set.fullBoard.id}`;
+      failures.push(...placeCapacityDrawing(label, set.fullBoard, ruleset, set.seed).failures);
+      lines.push(...capacityLines(set.fullBoard, ruleset), '');
+    }
   }
   return { text: lines.join('\n'), failures };
 }

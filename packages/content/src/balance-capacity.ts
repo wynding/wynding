@@ -5,7 +5,9 @@
 //
 // Both halves are arithmetic, never a run:
 //   - a drawing's capacity is every tower its grid draws, at catalog cost — a reference
-//     set's `fullBoard`, the strongest winner's maze drawn to the whole board at its mix;
+//     set's `fullBoard`, the strongest winner's maze drawn to the whole board at its mix
+//     (`placeCapacityDrawing` checks the sim takes it, so a price is never of a maze that
+//     cannot stand);
 //   - a schedule's income is what a run that kills every creep and clears every wave earns
 //     by the end of each wave: the starting bounty, then each wave's kill bounty and clear
 //     bonus. Beside it, the same with every early call made the tick its countdown starts,
@@ -15,7 +17,7 @@
 // its own income when it leaks nothing, and the wave that column first covers the capacity
 // is where it places its last tower.
 
-import type { CompiledRuleset } from '@wynding/sim';
+import { createInitialState, step, type CompiledRuleset, type SimState } from '@wynding/sim';
 import { compileReferenceBuild, type ReferenceBuild } from './reference-build';
 
 export interface Capacity {
@@ -39,6 +41,42 @@ export function drawnCapacity(build: ReferenceBuild, ruleset: CompiledRuleset): 
     bounty += cost;
   }
   return { towers: drawn.size, bounty, spendById };
+}
+
+/** `build` placed as a capacity drawing — one tower a tick from the first, on a state given
+ *  the drawing's whole price, so bounty refuses nothing — with the state it leaves and what
+ *  makes its price untrustworthy, each labelled `label`: a sell (a drawing is every tower
+ *  it holds, never a juggle, and its sold towers would still be priced), a placement the
+ *  sim refuses (one that seals a route, or overlaps another), or wave 1 launching before
+ *  the last tower stands. */
+export function placeCapacityDrawing(
+  label: string,
+  build: ReferenceBuild,
+  ruleset: CompiledRuleset,
+  seed: number,
+): { readonly state: SimState; readonly failures: readonly string[] } {
+  const failures: string[] = [];
+  let state: SimState = {
+    ...createInitialState(seed, ruleset),
+    bounty: drawnCapacity(build, ruleset).bounty,
+  };
+  for (const s of compileReferenceBuild(build, ruleset)) {
+    if (s.kind === 'sell') {
+      failures.push(`${label}: a capacity drawing sells nothing, but it sells (${s.col},${s.row})`);
+      continue;
+    }
+    const before = state.towers.id.length;
+    state = step(state, ruleset, [
+      { kind: 'placeTower', anchor: { col: s.col, row: s.row }, towerId: s.towerId },
+    ]);
+    if (state.towers.id.length !== before + 1) {
+      failures.push(`${label}: the sim refused its ${s.towerId} at (${s.col},${s.row})`);
+    }
+  }
+  if (state.waveLaunchTick[0] !== null) {
+    failures.push(`${label}: wave 1 launched before its last tower stood`);
+  }
+  return { state, failures };
 }
 
 /** One wave's row of a schedule's income — see this file's header. */

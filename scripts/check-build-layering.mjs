@@ -222,7 +222,7 @@ const MARKERS = [
     text: 'waves harness: the board has no wave',
     module: 'apps/web/e2e-harness/',
     emittedBy: 'apps/web/e2e-harness/waves-entry.ts',
-    why: "the waves harness entry's failure message for a `?wave=` the board does not have (apps/web/e2e-harness/waves-entry.ts, M3 story 4) — an ordinary string literal at the module's top level, so any graph that imports the module keeps it",
+    why: "the waves harness entry's failure message for a `?wave=` the board does not have (apps/web/e2e-harness/waves-entry.ts, M3 story 4) — an ordinary string literal in code the module runs as it loads (the callback that reads each requested wave, since M3 story 5), so any graph that imports the module keeps it",
   },
   {
     text: '__wyTurnedHeads',

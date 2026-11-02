@@ -722,7 +722,7 @@ a.wy-home:focus-visible {
      the floor's only job is to decide when the strip takes a line of its own, and a line is
      paid for in board height. Measured in the narrow form below: a single entry fits in
      ~11rem (its name and clause give way first), a two-entry wave needs 13.8–14.3rem on
-     macOS's font stack and 15.2–15.9rem on CI's Linux one, and wave 9's four entries
+     macOS's font stack and 15.2–15.9rem on CI's Linux one, and a four-entry wave's line
      21.1–23rem — so no floor short of the cap spares the densest wave the scroll form, and a
      strip squeezed under a wave's line scrolls (below, with a cue at the clipped edge) instead
      of costing the board a line. A 20rem floor, measured against this one: 1280×720 at 150%

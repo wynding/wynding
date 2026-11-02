@@ -708,9 +708,10 @@ test('the Venom Tower ghost stays functional and axe-clean under reduced motion,
   const previewAudit = await new AxeBuilder({ page }).include('#app').analyze();
   expect(previewAudit.violations, JSON.stringify(previewAudit.violations, null, 2)).toEqual([]);
 
-  // Call wave 5 and let the (reduced-motion, axe-invisible) poisoned telegraph + hexagon
-  // silhouette actually render for a moment on canvas — proving the live-run DOM stays
-  // axe-clean with an armored, poisoned creep on the board, not merely the wave preview.
+  // Call wave 5 and let the (reduced-motion, axe-invisible) hexagon silhouette and the
+  // poisoned telegraph actually render for a moment on canvas — proving the live-run DOM
+  // stays axe-clean with an armored creep on the board (at the north entrance, its route)
+  // and west creeps poisoned passing the venom, not merely the wave preview.
   await callWave.click();
   await page.waitForTimeout(1000);
 

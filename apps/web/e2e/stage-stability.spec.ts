@@ -64,8 +64,8 @@ const isScrollForm = (page: Page): Promise<boolean> =>
     document.querySelector('.wy-wave-preview')!.classList.contains('wy-wave-preview--scroll'),
   );
 
-/** Grow the strip to wave 9's four-entry shape (or longer) by DOM probe, so a pin needs no
- *  nine-wave walk. The rows are the pre-#101 verbose sentence ON PURPOSE: these probes bound how
+/** Grow the strip to the arc's four-entry shape (or longer) by DOM probe, so a pin needs no
+ *  wave walk. The rows are the pre-#101 verbose sentence ON PURPOSE: these probes bound how
  *  far content may grow before the board re-projects, so a longer-than-real row is the
  *  conservative direction, and swapping in the real (shorter) glance would weaken every pin in
  *  this file. It is a size fixture, not a rendering assertion — the rendered entries are pinned
@@ -96,8 +96,9 @@ test('1512×854: preview growth and hiding cannot re-project the board, resize t
   const statusBefore = await statusHeight(page);
   const stripBefore = await stripBox(page);
 
-  // Grow the strip by three entries — wave 9 previews FOUR, so this is the real in-run COUNT
-  // range, with longer-than-real rows (see `growPreview`).
+  // Grow the strip by three entries — the arc's densest waves preview FOUR (m3.md: at most
+  // four streams a wave), so this is the real in-run COUNT range, with longer-than-real rows
+  // (see `growPreview`).
   await growPreview(page, 3);
   expect(await projectedGrid(page), 'a four-entry preview re-projected the board').toEqual(
     gridBefore,
@@ -603,7 +604,7 @@ for (const size of PINNED_STANDARD) {
         await page.addStyleTag({ content: `:root { font-size: ${zoom}% }` });
         await page.waitForTimeout(200); // the zoom's own (legitimate) reflow
       }
-      // Wave 9's four-entry shape FIRST: the rule has to hold at the strip's largest real
+      // The arc's four-entry shape FIRST: the rule has to hold at the strip's largest real
       // content, and the line it takes must not depend on it.
       await growPreview(page, 3);
       await page.waitForTimeout(100);
@@ -671,7 +672,7 @@ for (const size of PINNED_STANDARD) {
   }
 }
 
-test('1000×720, walking to wave 9: the board never re-projects — the strip is content-invariant on its WIDTH axis too (#101, Codex P2)', async ({
+test('1000×720, walking every wave: the board never re-projects — the strip is content-invariant on its WIDTH axis too (#101, Codex P2)', async ({
   page,
 }) => {
   // The width axis is the one #101's height pin missed: `.wy-status` is a wrapping flex row,
@@ -690,21 +691,23 @@ test('1000×720, walking to wave 9: the board never re-projects — the strip is
   const gridBefore = await projectedGrid(page);
   const statusBefore = await statusHeight(page);
 
-  // The real walk, not an injected fixture: every wave the shipped run previews, wave 9 —
-  // block 1's wall, two entries, one of them airborne — last, so this measures the width the
-  // shipped content actually demands.
+  // The real walk, not an injected fixture: every wave the shipped run previews, each one
+  // measured, so this measures the width the shipped content actually demands.
+  const holds = async (what: string): Promise<void> => {
+    expect(await statusHeight(page), `${what} resized the status row`).toBe(statusBefore);
+    expect(await projectedGrid(page), `${what} re-projected the board`).toEqual(gridBefore);
+  };
   const previewTitle = page.locator('.wy-wave-preview .wy-wave-preview-title');
   await page.getByRole('button', { name: 'Start' }).click(); // Start claims wave 1 (#70)
   await expect(previewTitle).toHaveText('Wave 2 of 10');
   await page.getByRole('button', { name: 'Pause' }).click();
-  for (let waveNumber = 2; waveNumber <= 8; waveNumber++) {
+  await holds('wave 2');
+  for (let waveNumber = 2; waveNumber <= 9; waveNumber++) {
     await callWavePaced(page, titleAfterCall(waveNumber, 10));
+    await holds(`wave ${waveNumber + 1}`);
   }
-  await expect(previewTitle).toHaveText('Wave 9 of 10');
+  await expect(previewTitle).toHaveText('Wave 10 of 10');
   await expect(page.locator('.wy-wave-preview li')).toHaveCount(2);
-
-  expect(await statusHeight(page), 'wave 9 resized the status row').toBe(statusBefore);
-  expect(await projectedGrid(page), 'wave 9 re-projected the board').toEqual(gridBefore);
 
   // ...and then the CONSERVATIVE bound, which is what turns this red for a content-sized strip.
   // The shipped glance (icon and count) is narrow, so the walk above would pass even if the
@@ -717,20 +720,21 @@ test('1000×720, walking to wave 9: the board never re-projects — the strip is
   expect(await projectedGrid(page), 'over-long rows re-projected the board').toEqual(gridBefore);
 });
 
-test('1512×854, wave 9 pending: a tower built in the corner the preview used to own is FULLY visible (#101)', async ({
+test('1512×854, a four-stream wave pending: a tower built in the corner the preview used to own is FULLY visible (#101)', async ({
   page,
 }) => {
   // The #101 regression case, at the reported viewport, in the reported situation. The
   // owner's words were "I rarely build in that corner, though — but I could! Except I can't
-  // because it's in the way" — so this builds there, walks the run to wave 9 (block 1's wall,
-  // two entries), and proves the strip and the tower do not share a pixel —
+  // because it's in the way" — so this builds there with the arc's densest preview pending
+  // (four entries), and proves the strip and the tower do not share a pixel —
   // nor the strip and ANY cell of the board, since #181 put it in the status row for good.
   //
-  // Above the sum of this test's budgets — seven paced calls at a 5s in-page deadline each
-  // (`paced-call.ts`) plus the placement and geometry tail — which the 60s config default
-  // cannot hold. Same budget-coherence rule as the other marathon specs.
-  test.setTimeout(150_000);
-  await gotoAt(page, STANDARD);
+  // M3 story 5: block 1's waves carry two streams at most (the arc's four-stream waves come
+  // with blocks 2–3), so the preview is wave 1 on the waves harness
+  // (`e2e-harness/waves-entry.ts`), given waves 8 and 9's streams.
+  await page.setViewportSize(STANDARD);
+  await page.goto('http://localhost:4176/e2e-harness/waves.html?wave=8,9');
+  await expect(page.locator('.wy-board')).toBeVisible();
 
   const board = page.locator('.wy-board');
   const box = (await board.boundingBox()) as Rect;
@@ -753,18 +757,9 @@ test('1512×854, wave 9 pending: a tower built in the corner the preview used to
   );
   await expect(page.locator('.wy-panel').getByRole('button', { name: /^Sell/ })).toBeVisible();
 
-  // Walk to wave 9. Start claims wave 1 (#70), so waves 2..8 are called from here; the
-  // paced helper holds the sim frozen for every observation so an undefended marathon
-  // cannot lose mid-loop (#97).
   const previewTitle = page.locator('.wy-wave-preview .wy-wave-preview-title');
-  await page.getByRole('button', { name: 'Start' }).click();
-  await expect(previewTitle).toHaveText('Wave 2 of 10');
-  await page.getByRole('button', { name: 'Pause' }).click();
-  for (let waveNumber = 2; waveNumber <= 8; waveNumber++) {
-    await callWavePaced(page, titleAfterCall(waveNumber, 10));
-  }
-  await expect(previewTitle).toHaveText('Wave 9 of 10');
-  await expect(page.locator('.wy-wave-preview li')).toHaveCount(2);
+  await expect(previewTitle).toHaveText('Wave 1 of 10');
+  await expect(page.locator('.wy-wave-preview li')).toHaveCount(4);
 
   // The tower's own 2×2 footprint in page coordinates, and the strip's box. Not one pixel
   // of overlap — the whole complaint was that the corner was unusable because the card was
@@ -779,18 +774,18 @@ test('1512×854, wave 9 pending: a tower built in the corner the preview used to
   const strip = await stripBox(page);
   expect(
     intersect(strip, footprint),
-    `the wave-9 strip at [${Math.round(strip.x)},${Math.round(strip.y)} ${Math.round(
+    `the four-stream strip at [${Math.round(strip.x)},${Math.round(strip.y)} ${Math.round(
       strip.width,
     )}×${Math.round(strip.height)}] covers the corner tower at [${Math.round(
       footprint.x,
     )},${Math.round(footprint.y)}]`,
   ).toBeNull();
-  expect(intersect(strip, grid), 'the wave-9 strip covers part of the board').toBeNull();
-  // ...and the strip is still doing its job: the whole wave-9 composition is on screen, every
-  // entry inside the strip's own box — not merely out of the way.
+  expect(intersect(strip, grid), 'the four-stream strip covers part of the board').toBeNull();
+  // ...and the strip is still doing its job: the whole composition is on screen, every entry
+  // inside the strip's own box — not merely out of the way.
   await expect(page.locator('.wy-wave-preview')).toBeVisible();
   for (const entry of await page.locator('.wy-wave-preview li').all()) {
     const e = (await entry.boundingBox()) as Rect;
-    expect(contains(strip, e), 'a wave-9 entry is cut off by the strip').toBe(true);
+    expect(contains(strip, e), 'a four-stream entry is cut off by the strip').toBe(true);
   }
 });

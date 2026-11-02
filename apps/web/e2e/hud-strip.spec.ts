@@ -25,6 +25,9 @@ import { COMPACT_QUERY } from '../src/layout';
 
 const STANDARD = { width: 1280, height: 720 };
 const PHONE = { width: 658, height: 320 }; // Galaxy S9+ landscape — Compact
+/** The arc's densest line, four streams on two routes: block 1's waves carry two at most, so
+ *  wave 1 on the waves harness (`e2e-harness/waves-entry.ts`), given waves 8 and 9's streams. */
+const FOUR_STREAMS = 'http://localhost:4176/e2e-harness/waves.html?wave=8,9';
 
 async function gotoAt(page: Page, size: { width: number; height: number }): Promise<void> {
   await page.setViewportSize(size);
@@ -192,7 +195,7 @@ test('wave 1 and a four-stream line, at 1280×720, 1440×900, 1920×1080 and 108
   // arc's four-stream waves come with blocks 2–3), so it is wave 1 on the waves harness
   // (`e2e-harness/waves-entry.ts`), given waves 8 and 9's streams.
   await page.setViewportSize(VIEWS[0]!);
-  await page.goto('http://localhost:4176/e2e-harness/waves.html?wave=8,9');
+  await page.goto(FOUR_STREAMS);
   await expect(page.locator('.wy-board')).toBeVisible();
   await expect(previewTitle).toHaveText('Wave 1 of 10');
   await expect(page.locator('.wy-wave-preview li')).toHaveCount(4);
@@ -877,7 +880,7 @@ test('360×640, a four-stream line: no page scroll range, a reader’s move to a
   expect(await pageScrollRange(page), 'wave 1, before Start').toEqual({ x: 0, y: 0 });
   // Four streams, the arc's densest line: block 1's own waves carry two at most (its four-stream
   // waves come with blocks 2–3), so wave 1 on the waves harness, given waves 8 and 9's streams.
-  await page.goto('http://localhost:4176/e2e-harness/waves.html?wave=8,9');
+  await page.goto(FOUR_STREAMS);
   await expect(page.locator('.wy-board')).toBeVisible();
   await expect(page.locator('.wy-wave-preview li')).toHaveCount(4);
   await settle(page);
@@ -1562,7 +1565,7 @@ test('Compact: in a wave of several creeps each count stays with its own icon �
   test.setTimeout(180_000); // four windows at five text sizes
   await page.setViewportSize(PHONE);
   await stubFullscreen(page);
-  await page.goto('http://localhost:4176/e2e-harness/waves.html?wave=8,9');
+  await page.goto(FOUR_STREAMS);
   await expect(page.locator('.wy-board')).toBeVisible();
   expect(await page.evaluate((q) => matchMedia(q).matches, COMPACT_QUERY)).toBe(true);
   const previewTitle = page.locator('.wy-wave-preview .wy-wave-preview-title');

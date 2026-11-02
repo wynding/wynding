@@ -1,18 +1,32 @@
 // balance-capacity.test.ts — M3 story 5: the capacity arithmetic (`balance-capacity.ts`) on
-// small drawings and the shipped schedule, each branch on both sides, and the report's
-// capacity lines when the schedule's income does cover a drawing. The registered capacity
-// drawing is `balance-crossing.test.ts`'s.
+// small drawings and the shipped schedule, each branch on both sides; the check that the sim
+// takes a drawing as drawn; and the report's capacity lines when the schedule's income does
+// cover a drawing, and its failure when the sim refuses one. The registered capacity drawing
+// is `balance-crossing.test.ts`'s.
 
 import { describe, it, expect } from 'vitest';
 import { compileRuleset } from '@wynding/sim';
 import { loadRulesetOrM2Fixture } from './m2-fixture';
 import { drawGrid, type ReferenceSet } from './reference-build';
 import { M3_CROSSING, M3_UNDEFENDED, M3_WEST_ONLY } from './reference-builds';
-import { drawnCapacity, firstWaveCovering, scheduleIncome } from './balance-capacity';
+import {
+  drawnCapacity,
+  firstWaveCovering,
+  placeCapacityDrawing,
+  scheduleIncome,
+} from './balance-capacity';
 import { balanceReport } from './balance-report';
 
 const bundle = loadRulesetOrM2Fixture(M3_CROSSING.rulesetId);
 const ruleset = compileRuleset(bundle, M3_CROSSING.boardId);
+
+/** A basic on (1,10)–(2,11) walls in the west entrance at (0,11): the route is sealed. */
+const SEALED = {
+  id: 'sealed',
+  summary: 'a basic across the west entrance',
+  grid: drawGrid(ruleset, [[1, 10, 'b']]),
+  order: 'b1,10',
+};
 
 describe('a drawing’s capacity', () => {
   it('prices every drawn tower once, at catalog cost — a sold and re-placed tower counts once', () => {
@@ -34,6 +48,49 @@ describe('a drawing’s capacity', () => {
 
   it('is nothing for an empty board', () => {
     expect(drawnCapacity(M3_UNDEFENDED, ruleset)).toEqual({ towers: 0, bounty: 0, spendById: {} });
+  });
+});
+
+describe('a capacity drawing, placed', () => {
+  const seed = M3_CROSSING.seed;
+
+  it('stands tower by tower before wave 1, its whole price spent', () => {
+    const { state, failures } = placeCapacityDrawing('probe', M3_WEST_ONLY, ruleset, seed);
+    expect(failures).toEqual([]);
+    expect(state.towers.id.length).toBe(19);
+    expect(state.bounty).toBe(0);
+    expect(state.waveLaunchTick[0]).toBeNull();
+  });
+
+  it('names a sell — and the re-placement the skipped sell leaves refused', () => {
+    const juggled = {
+      id: 'juggled',
+      summary: 'a juggled basic',
+      grid: drawGrid(ruleset, [[2, 10, 'b']]),
+      order: 'b2,10 -b2,10@700 b2,10',
+    };
+    expect(placeCapacityDrawing('probe', juggled, ruleset, seed).failures).toEqual([
+      'probe: a capacity drawing sells nothing, but it sells (2,10)',
+      'probe: the sim refused its basic at (2,10)',
+    ]);
+  });
+
+  it('names a tower the sim refuses: one that seals a route', () => {
+    expect(placeCapacityDrawing('probe', SEALED, ruleset, seed).failures).toEqual([
+      'probe: the sim refused its basic at (1,10)',
+    ]);
+  });
+
+  it('names a wave 1 that launched before the last tower stood', () => {
+    const board = bundle.boards[0]!;
+    const waves = board.waves.map((w, k) => (k === 0 ? { ...w, countdownTicks: 1 } : w));
+    const early = compileRuleset(
+      { ...bundle, boards: [{ ...board, waves }, ...bundle.boards.slice(1)] },
+      M3_CROSSING.boardId,
+    );
+    expect(placeCapacityDrawing('probe', M3_WEST_ONLY, early, seed).failures).toEqual([
+      'probe: wave 1 launched before its last tower stood',
+    ]);
   });
 });
 
@@ -84,6 +141,18 @@ describe('the report’s capacity lines', () => {
     expect(text).toContain(
       'income with every early call at its maximum covers it by the end of wave 3',
     );
+  });
+
+  it('fail the report for a drawing the sim will not take', () => {
+    const set: ReferenceSet = {
+      ...M3_CROSSING,
+      id: 'probe',
+      builds: [M3_UNDEFENDED],
+      fullBoard: SEALED,
+    };
+    expect(balanceReport([set], loadRulesetOrM2Fixture).failures).toEqual([
+      'probe/sealed: the sim refused its basic at (1,10)',
+    ]);
   });
 
   it('are absent for a set that draws no full board', () => {

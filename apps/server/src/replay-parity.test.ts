@@ -131,7 +131,7 @@ describe('M2-S11 P6 — client/server replay parity through the real handler()',
     expect(original.state.phase).toBe('won');
     const originalScore = deriveScore(original.state, ruleset);
 
-    // Drop exactly ONE placement — the second, the `basic` at the west wall's foot beside the
+    // Drop exactly ONE placement — the second, the west wall's `basic` just below the
     // entrance — a genuinely different build, re-simulated from scratch, never a
     // claimed-score echo. Measured: it still WINS, on fewer lives, so the changed value is a
     // real score rather than a loss's 0.
@@ -247,8 +247,15 @@ describe('#25 item 1 — the terminal contract is STRICT, on a WINNING replay, t
 
     const res = await handler({ body: JSON.stringify(replayFor(client.tickInputs)) });
     expect(res.statusCode).toBe(200); // a loss is a VALID replay, not a rejected one
-    const payload = JSON.parse(res.body) as { ok: boolean; score: number; stars: number };
+    const payload = JSON.parse(res.body) as {
+      ok: boolean;
+      score: number;
+      stars: number;
+      finalHash: string;
+    };
     expect(payload.ok).toBe(true);
+    // The handler re-simulated to THIS loss — not a default 0/0 for a replay it never ran.
+    expect(payload.finalHash).toBe(hashSimState(client.state));
     expect(payload.score).toBe(0);
     expect(payload.stars).toBe(0);
   }, 120_000);
