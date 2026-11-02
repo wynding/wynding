@@ -99,6 +99,11 @@ describe('a capacity drawing, placed', () => {
     expect(placeCapacityDrawing('probe', M3_WEST_ONLY, launchingAt(17), seed).failures).toEqual([
       'probe: creeps were on the board before its last tower stood',
     ]);
+    // Launched on tick 10, its first creep is on the board before four of the placements
+    // (until the towers kill it): said once.
+    expect(placeCapacityDrawing('probe', M3_WEST_ONLY, launchingAt(10), seed).failures).toEqual([
+      'probe: creeps were on the board before its last tower stood',
+    ]);
   });
 });
 
