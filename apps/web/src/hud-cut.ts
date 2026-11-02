@@ -33,10 +33,11 @@ export const HUD_CUT_PROP = '--wy-hud-cut';
 // An item that runs past the room by less than half a pixel looks whole: the same allowance the e2e `runsThrough` check uses.
 const OVERHANG = 0.5;
 
-/** What the column holds, top to bottom: the chips, and the wave strip's title and lines. */
+/** What the column holds, top to bottom: the chips, and the wave strip's title, its hit-point
+ *  clause (M3, where the wave has one) and its lines. */
 const ITEMS =
   ':scope > .wy-chip, :scope > .wy-wave-preview .wy-wave-preview-title, ' +
-  ':scope > .wy-wave-preview .wy-preview-entry';
+  ':scope > .wy-wave-preview .wy-wave-preview-hp, :scope > .wy-wave-preview .wy-preview-entry';
 
 /** One painted part of an item — an icon's box, or one line of its text — in px below the
  *  scrollport's padding-box top, in its content. */
@@ -74,11 +75,13 @@ export function lastWholeLine(room: number, parts: readonly PaintedPart[]): numb
 }
 
 /** The painted parts of `item`, `toContent` mapping a viewport y to the scrollport's content:
- *  every SVG's box and every line of text in its visible form — a chip's or a strip line's
- *  glance, never its visually hidden sentence, or else the item itself (the strip's title). Text
- *  in a `display: none` companion has no line boxes, so it adds nothing. */
+ *  every SVG's box and every line of text in its visible form — a chip's, a strip line's or the
+ *  hit-point clause's glance, never its visually hidden sentence, or else the item itself (the
+ *  strip's title). Text in a `display: none` companion has no line boxes, so it adds nothing. */
 function paintedParts(item: HTMLElement, toContent: (y: number) => number): PaintedPart[] {
-  const shown = item.querySelector<HTMLElement>('.wy-chip-glance, .wy-preview-glance') ?? item;
+  const shown =
+    item.querySelector<HTMLElement>('.wy-chip-glance, .wy-preview-glance, .wy-preview-hp-glance') ??
+    item;
   const parts: PaintedPart[] = [];
   const add = (r: DOMRect): void => {
     if (r.width > 0 && r.height > 0)

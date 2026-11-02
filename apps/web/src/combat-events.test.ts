@@ -1,7 +1,8 @@
 // combat-events.test.ts — what one sim step did that the board shows as combat feedback (#181
 // C1/C2), as the step reports it: its kills (`StepEvents.killed`), each where the board last drew
-// it, with its look and the bounty credited; its leaks (`StepEvents.leaked`); which flyer a
-// targeted impact struck, by the creep its point names; and which shots in flight lost their tower.
+// it, with its look and the bounty credited; its leaks, by exit (`StepEvents.leakedExits`);
+// which flyer a targeted impact struck, by the creep its point names; and which shots in flight
+// lost their tower.
 
 import { describe, it, expect } from 'vitest';
 import type { CreepVM, KillVM, RenderVM, TowerVM, TracerVM } from '@wynding/render';
@@ -85,11 +86,11 @@ describe('stepOutcome — the kills and leaks of one step, as it reports them', 
           bounty: 1,
         },
       ] satisfies KillVM[],
-      leaks: 0,
+      leaks: [],
     });
   });
 
-  it('takes the step’s own lists as exact: the creeps it names killed are the kills, in its order, and the ids it names leaked the leaks — where a creep stood decides nothing', () => {
+  it('takes the step’s own lists as exact: the creeps it names killed are the kills, in its order, and the exits it names leaked by the leaks — where a creep stood decides nothing', () => {
     const before = vm([
       creep(1, { x: 2 * FP, y: 2 * FP }),
       creep(2, { x: EXIT_AT.x - 10, y: EXIT_AT.y }),
@@ -98,11 +99,11 @@ describe('stepOutcome — the kills and leaks of one step, as it reports them', 
       creep(5), // survives
     ]);
     // The far creep leaks and the ones beside the exit die: position does not decide it.
-    const one = stepOutcome(before, [killed(2), killed(3), killed(4)], [1], ruleset);
-    expect(one.leaks).toBe(1);
+    const one = stepOutcome(before, [killed(2), killed(3), killed(4)], [0], ruleset);
+    expect(one.leaks).toEqual([0]);
     expect(one.kills.map((k) => k.id)).toEqual([2, 3, 4]);
-    const two = stepOutcome(before, [killed(3), killed(2)], [4, 1], ruleset);
-    expect(two.leaks).toBe(2);
+    const two = stepOutcome(before, [killed(3), killed(2)], [1, 0], ruleset);
+    expect(two.leaks).toEqual([1, 0]);
     expect(two.kills.map((k) => k.id)).toEqual([3, 2]);
   });
 
@@ -111,8 +112,8 @@ describe('stepOutcome — the kills and leaks of one step, as it reports them', 
       creep(1, { x: EXIT_AT.x - 3 * FP, y: EXIT_AT.y }), // fast: began farther out, reaches the exit
       creep(2, { x: EXIT_AT.x - 20, y: EXIT_AT.y }), // slow: began at the door, killed
     ]);
-    const out = stepOutcome(before, [killed(2, { bounty: 2 })], [1], ruleset);
-    expect(out.leaks).toBe(1);
+    const out = stepOutcome(before, [killed(2, { bounty: 2 })], [0], ruleset);
+    expect(out.leaks).toEqual([0]);
     expect(out.kills).toEqual([
       {
         id: 2,
@@ -127,10 +128,23 @@ describe('stepOutcome — the kills and leaks of one step, as it reports them', 
   });
 
   it('counts every leak the step names whatever the view models hold — and reports no kill it does not name', () => {
-    expect(stepOutcome(vm([]), [], [7, 8], ruleset)).toEqual({ kills: [], leaks: 2 });
-    expect(stepOutcome(vm([creep(1)]), [], [9], ruleset)).toEqual({ kills: [], leaks: 1 });
+    expect(stepOutcome(vm([]), [], [0, 0], ruleset)).toEqual({ kills: [], leaks: [0, 0] });
     // A creep the view model drew and the step did not name is no kill, whatever became of it.
-    expect(stepOutcome(vm([creep(1)]), [], [1, 8, 9], ruleset)).toEqual({ kills: [], leaks: 3 });
+    expect(stepOutcome(vm([creep(1)]), [], [0, 1, 0], ruleset)).toEqual({
+      kills: [],
+      leaks: [0, 1, 0],
+    });
+  });
+
+  it('keeps the exit each leak left by, in the step’s order — the crossing board’s east exit is 0, its south exit 1 (M3)', () => {
+    expect(ruleset.board.grid.exits).toEqual([
+      { col: 27, row: 11 },
+      { col: 13, row: 23 },
+    ]);
+    const exits = [1, 0, 1];
+    const out = stepOutcome(vm([creep(1)]), [killed(1)], exits, ruleset);
+    expect(out.leaks).toEqual([1, 0, 1]);
+    expect(out.leaks).not.toBe(exits); // its own list: the step's collector is not handed on
   });
 
   it('a kill the view model before the step never drew — a creep the step spawned and killed — shows where the step left it, in the look its catalog id gives', () => {

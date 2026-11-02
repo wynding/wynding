@@ -763,15 +763,56 @@ a.wy-home:focus-visible {
     flex: none;
   }
 
+  /* THE HEAD STACKS THE WAVE'S HIT-POINT CLAUSE UNDER THE TITLE (M3), inside the strip's one
+     fixed line. Beside the title, "+70% hit points" took ~110px of a line the rows need: at
+     1280×720 a four-stream wave lost its last two rows to the scroll form for it. Stacked, the
+     clause costs the line only what it is wider than the title, and nothing is clipped: while
+     the clause shows, the two lines are set tight and the clause smaller (0.8em), so they take
+     ~30px of the strip's 34px content box at every text size.
+
+     THE LINE HEIGHTS ARE IN REM, as the strip's height is, so the stack can never outgrow the
+     box: a browser's minimum font size enlarges the type but not a rem, and the two line boxes
+     stay 1.15× the type they were set for (the strip's 0.9rem; 0.8 of it for the clause).
+     Under a minimum font size above ~13px the clause's glyphs fill its line box to the edges,
+     tight but inside the strip. A title alone keeps the line height and place it always had. */
+  .wy-shell .wy-wave-preview-head {
+    flex: none;
+    display: flex;
+    flex-direction: column;
+  }
+
+  .wy-shell
+    .wy-wave-preview-head:has(> .wy-wave-preview-hp:not([hidden]))
+    > .wy-wave-preview-title {
+    line-height: calc(1.15 * 0.9rem);
+  }
+
+  .wy-shell .wy-wave-preview-head > .wy-wave-preview-hp {
+    font-size: 0.8em;
+    line-height: calc(1.15 * 0.72rem);
+  }
+
   /* The list's box IS its line (`flex: none`): a multi-entry line longer than the strip
      overflows it and the strip scrolls (below), and because the box tracks its content, the
      strip's observer (`overlay.ts`) sees every change in the line's length — a reflow, a font
      swap — not only the ones that also resize the strip. */
   .wy-shell .wy-wave-preview-list {
+    --wy-strip-row-gap: 0.9rem;
     display: flex;
     align-items: center;
-    gap: 0.9rem;
+    gap: var(--wy-strip-row-gap);
     flex: none;
+  }
+
+  /* A ROUTE'S STREAMS SIT TOGETHER (M3 story 4). The rows come grouped by route, its arrow on
+     the group's first row only (`overlay.ts`'s `byRoute`), and a row continuing the group
+     closes to half the gap between routes, in either form of the strip — the arrow and the
+     wider gap mark where a route begins. Together they keep a four-stream wave on its line at
+     1080×810 under a wide font: with an arrow on every row it ran 2px past the strip on CI's
+     Linux face. `hud-strip.spec.ts` holds the line's slack under a wide face (Verdana on
+     macOS, wider than CI's; DejaVu Sans, CI's own, on Linux). */
+  .wy-shell .wy-wave-preview-list > .wy-preview-entry--continues {
+    margin-inline-start: calc(-0.5 * var(--wy-strip-row-gap));
   }
 
   /* A NARROW strip (squeezed beside the chips, or its own line in a portrait window's hud)
@@ -785,7 +826,7 @@ a.wy-home:focus-visible {
     }
 
     .wy-shell .wy-wave-preview-list {
-      gap: 0.55rem;
+      --wy-strip-row-gap: 0.55rem;
     }
 
     .wy-wave-preview-list .wy-creep-icon {
@@ -1285,6 +1326,42 @@ a.wy-home:focus-visible {
   font-weight: 700;
 }
 
+/* A stream's route (M3 story 4): its arrow leads its route's group of rows — the heading the
+   board draws on that entrance and its exit, once per route (`overlay.ts`'s `byRoute`). The
+   walls it runs between, in words, lead a single entry's detail (`.wy-preview-route-name`,
+   below); a multi-entry line and Compact's column keep the arrow alone, and every row's full
+   sentence names its route either way. */
+.wy-preview-arrow {
+  flex: none;
+  margin-inline-end: 0.3em;
+  font-weight: 700;
+}
+
+/* The wave's hit-point clause (M3 creep HP growth), once, under the title in the strip's head
+   (`.wy-wave-preview-head`); hidden while a wave's creeps have the catalog's hit points. Its
+   full sentence is positioned against it, as a row's is against the row (`.wy-preview-entry`).
+   Standard stacks it beside the rows in the strip's one line, Compact gives it a line or two of
+   its own in the column (each form's block). */
+.wy-wave-preview-hp {
+  position: relative;
+  margin: 0;
+  font-weight: 700;
+}
+
+/* The clause's full sentence, hidden as a row's is (`.wy-preview-full`, restated rather than
+   shared: specs and AT tooling read the rows' sentences by that class). */
+.wy-preview-hp-full {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+  border: 0;
+}
+
 /* The name and deviating clause beside a SINGLE-entry wave, shown only where they fit — by
    WRAPPING away, not by a breakpoint: the box is one line tall and clips whatever wraps, and
    the empty `::before` keeps that line occupied so an item too wide for what is left wraps
@@ -1305,6 +1382,7 @@ a.wy-home:focus-visible {
   content: '';
 }
 
+.wy-preview-route-name,
 .wy-preview-name,
 .wy-preview-clause {
   margin-inline-start: 0.6em;
@@ -3274,6 +3352,14 @@ a.wy-home:focus-visible {
     overflow-wrap: anywhere;
   }
 
+  /* The hit-point clause (M3) under it wraps the same way: between words, and inside "+70%"
+     only where that alone outgrows the column. It is one of the column's items for the cut
+     (`hud-cut.ts`), so the column rests after it whole or before it, never through it. */
+  .wy-wave-preview-hp {
+    margin-top: 0.15rem;
+    overflow-wrap: anywhere;
+  }
+
   /* An air entry's wings reach 0.1287em past the icon's box on each side (the armored flyer's,
      the widest that ships), and the column's scrollport has no gap to give them on the left:
      this margin does. 0.15em, not the reach, for a little room. The glance gives the same
@@ -3306,6 +3392,24 @@ a.wy-home:focus-visible {
   .wy-wave-preview-list .wy-preview-count {
     flex-shrink: 1;
     white-space: normal;
+  }
+
+  /* A ROUTE'S ARROW TAKES A LINE OF ITS OWN, above its group's first icon (M3 story 4). The
+     column has no width to spare beside the icon and count — their wrap, above, is measured to
+     the pixel — and an arrow beside them would narrow the glance and move both. On its own line the
+     glance keeps the column's whole width, so every rule above holds as it did; the arrow
+     lines up with the icon (the wings' margin), and the row's full sentence names the route. */
+  .wy-wave-preview-list .wy-preview-entry {
+    flex-wrap: wrap;
+  }
+
+  /* Its inset is padding inside its 100% basis, not a margin beside it: a margin put the row
+     2px past the column, scrollable sideways. */
+  .wy-wave-preview-list .wy-preview-arrow {
+    flex-basis: 100%;
+    box-sizing: border-box;
+    margin-inline: 0;
+    padding-inline-start: 0.15em;
   }
 
   .wy-preview-detail {
@@ -3383,6 +3487,22 @@ a.wy-home:focus-visible {
     --wy-rail-w: calc(min(9rem, 28vw) + var(--wy-safe-right));
 
     grid-template-columns: minmax(0, 1fr) var(--wy-rail-w);
+  }
+
+  /* THE BOARD PAYS THE TOP AND BOTTOM INSETS here (M3 story 4). The crossing board sets an
+     entrance into its top row and an exit into its bottom one, and in Compact `.wy-main` runs
+     the screen's full height, so on a device with system bars both sat under them. The board's
+     box steps in from each bar, and the letterbox projection fits the grid inside what is
+     left; with no inset both terms are 0 and nothing moves. The banner, while it shows, sits
+     below the board and pays the bottom inset itself (`.wy-banner` above), so the board pays
+     it only while the banner is hidden — the banner precedes `.wy-main` in the DOM
+     (`shell.ts`). `crossing-board.spec.ts` measures all four openings inside the safe area. */
+  .wy-board {
+    top: var(--wy-safe-top);
+  }
+
+  .wy-banner[hidden] ~ .wy-main .wy-board {
+    bottom: var(--wy-safe-bottom);
   }
 
   /* The Rail PAYS THE TOP INSET here, and only here (#153, owner ruling arm 3 + "inset and

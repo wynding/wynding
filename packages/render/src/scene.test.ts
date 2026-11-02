@@ -169,7 +169,7 @@ const EMPTY_OVERLAY: RenderOverlay = {
   reducedMotion: false,
   tracers: [],
   kills: [],
-  leaks: 0,
+  leaks: [],
 };
 
 const vmWith = (towers: readonly TowerVM[]): RenderVM => ({

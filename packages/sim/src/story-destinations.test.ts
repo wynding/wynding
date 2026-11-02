@@ -154,14 +154,19 @@ function runToEnd(
 ): {
   state: SimState;
   leaks: { id: number; destination: number; lastHead: { col: number; row: number } }[];
+  /** `StepEvents.leakedExits`, every step's in order — parallel to `leaks`. */
+  leakedExits: number[];
   trace: string[];
 } {
   const lastSeen = new Map<number, { destination: number; col: number; row: number }>();
   const leaks: { id: number; destination: number; lastHead: { col: number; row: number } }[] = [];
+  const leakedExits: number[] = [];
   const trace: string[] = [];
   for (let t = 0; t < cap && state.phase === 'running'; t++) {
-    const events: StepEvents = { impactPoints: [], fired: [], leaked: [] };
+    const events: StepEvents = { impactPoints: [], fired: [], leaked: [], leakedExits: [] };
     step(state, ruleset, inputs(state.tick), events);
+    expect(events.leakedExits).toHaveLength(events.leaked!.length);
+    leakedExits.push(...events.leakedExits!);
     for (const id of events.leaked!) {
       const seen = lastSeen.get(id)!;
       leaks.push({ id, destination: seen.destination, lastHead: { col: seen.col, row: seen.row } });
@@ -175,7 +180,7 @@ function runToEnd(
     }
     trace.push(hashSimState(state));
   }
-  return { state, leaks, trace };
+  return { state, leaks, leakedExits, trace };
 }
 
 describe('M3 story 3 — the two-pair crossing board compiles into one field per destination', () => {
@@ -285,7 +290,7 @@ describe('leaking only at a creep’s own exit', () => {
     // Creeps too tough for the crossing tower to kill, so every one of the 8 reaches an exit.
     const tough = compileRuleset(crossingBundle(BOTH_STREAMS, { creepHp: 1_000_000 }), 'crossing');
     const s = createInitialState(7, tough);
-    const { leaks, state } = runToEnd(tough, s, 3_000, (t) =>
+    const { leaks, leakedExits, state } = runToEnd(tough, s, 3_000, (t) =>
       t === 0 ? [{ kind: 'callWaveEarly' }] : t === 8 ? [place(4, 3)] : [],
     );
     expect(state.towers.id).toHaveLength(1); // the crossing tower stood
@@ -293,6 +298,9 @@ describe('leaking only at a creep’s own exit', () => {
     for (const leak of leaks) {
       expect(leak.lastHead).toEqual(leak.destination === EAST_FIELD ? EAST : SOUTH);
     }
+    // The step names the exit each one left by, in the board's exit order: east 0, south 1.
+    expect(tough.board.grid.exits).toEqual([EAST, SOUTH]);
+    expect(leakedExits).toEqual(leaks.map((l) => (l.destination === EAST_FIELD ? 0 : 1)));
     expect(leaks.filter((l) => l.destination === EAST_FIELD)).toHaveLength(4);
     expect(state.lives).toBe(20 - 8);
   });

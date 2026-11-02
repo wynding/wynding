@@ -202,8 +202,9 @@ export interface BoardFrameInput {
   readonly projection: Projection;
   /** The baked atlas's frames, for placement. */
   readonly frames: ReadonlyMap<string, FrameAnchor>;
-  /** The board's exit cell, where a leak pulses (C1). */
-  readonly exit: { readonly col: number; readonly row: number };
+  /** The board's exit cells, in board order (M3: one per pair) — a leak pulses the exit it
+   *  reached (C1), named by its index here (`RenderOverlay.leaks`). */
+  readonly exits: readonly { readonly col: number; readonly row: number }[];
   /** The wall clock, ms — the clock the sparks fade on, and combat feedback's (C1). */
   readonly nowMs: number;
   /** The sparks still lit this frame (`SparkStore.live`). */
@@ -367,9 +368,12 @@ export function drawBoardFrame(t: BoardTargets, input: BoardFrameInput): void {
       pops.push(p);
     }
   }
-  const pulse = feedback.pulseSinceMs();
-  if (pulse !== null) {
-    const exit = projection.cellToPixel(input.exit.col, input.exit.row);
+  // A leak pulses the exit it left by (M3), one exit at a time: the tracker's gap is the board's.
+  for (let i = 0; i < input.exits.length; i++) {
+    const pulse = feedback.pulseSinceMs(i);
+    if (pulse === null) continue;
+    const cell = input.exits[i]!;
+    const exit = projection.cellToPixel(cell.col, cell.row);
     const half = projection.cellPx / 2;
     drawFeedbackStrokes(
       cues,

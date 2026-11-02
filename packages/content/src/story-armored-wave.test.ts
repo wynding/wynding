@@ -1,5 +1,9 @@
 // story-armored-wave.test.ts — the M2-S5a P8 pinned wave-4 measurement (PLAN.md step 38).
 //
+// M3 story 4: this file runs the FROZEN M2 bundle (`m2-fixture.ts` — `field-01` and M2's ten
+// waves), not the shipped one, which is now the crossing board. "Shipped" in the prose below
+// means as M2 shipped it; every pinned value is unchanged.
+//
 // LOCATION NOTE (deviation from PLAN.md's file list): the plan names
 // `packages/sim/src/story-armored-wave.test.ts`, but `packages/sim`'s dependencies are
 // `@wynding/engine` and `@wynding/types` only (see `determinism.test.ts`'s own header) — it
@@ -46,7 +50,7 @@ import {
   type StepEvents,
   type CompiledRuleset,
 } from '@wynding/sim';
-import { getBundledRuleset, defaultBoardId } from './registry';
+import { getM2Fixture, M2_BOARD_ID } from './m2-fixture';
 import { withoutDestination } from './test-digest';
 import { waveIndexForCreep, wallInputsFromTick, wallInputsFromObservedWave } from './wave-lookup';
 
@@ -116,8 +120,8 @@ describe('wave 4 (the appended `armored` wave) — a pinned, scripted-build meas
 
   function runWave4Script() {
     if (wave4ScriptResult) return wave4ScriptResult;
-    const bundle = getBundledRuleset();
-    const ruleset = compileRuleset(bundle, defaultBoardId(bundle));
+    const bundle = getM2Fixture();
+    const ruleset = compileRuleset(bundle, M2_BOARD_ID);
     // The `armored` wave, LOCATED by creep id in the compiled schedule (ruling 1) — never
     // a hardcoded index, so this survives P1's renumber unedited.
     const armoredWaveIndex = waveIndexForCreep(ruleset, 'armored');
@@ -451,8 +455,8 @@ describe('wave 4 (the appended `armored` wave) — a pinned, scripted-build meas
   it('the same build WITHOUT the venom pair leaks the armored wave — DoT is what clears it', () => {
     const inputs = basicWallInputs();
 
-    const bundle = getBundledRuleset();
-    const ruleset = compileRuleset(bundle, defaultBoardId(bundle));
+    const bundle = getM2Fixture();
+    const ruleset = compileRuleset(bundle, M2_BOARD_ID);
     let state: SimState = createInitialState(SCENARIO_SEED, ruleset);
     const events: StepEvents = { impactPoints: [], fired: [], dotTicks: 0, dotDropped: 0 };
     for (let t = 0; t < 1900; t++) {
@@ -529,8 +533,8 @@ describe('`venom` is a specialist, not a strict upgrade — exact per-bounty ari
   // armor, unlike `direct`. (Cited by symbol, not line number: an earlier draft cited lines
   // that had already drifted onto an unrelated expiry guard.)
   it('venom beats basic per bounty against armored but loses against unarmored (both gated)', () => {
-    const bundle = getBundledRuleset();
-    const ruleset = compileRuleset(bundle, defaultBoardId(bundle));
+    const bundle = getM2Fixture();
+    const ruleset = compileRuleset(bundle, M2_BOARD_ID);
 
     const basic = ruleset.towerById['basic'];
     const venom = ruleset.towerById['venom'];
@@ -637,8 +641,8 @@ describe('a venom-heavy build (PLAN.md step 3) — same board, same seed, kinds 
 
   function runVenomHeavyScript() {
     if (venomHeavyResult) return venomHeavyResult;
-    const bundle = getBundledRuleset();
-    const ruleset = compileRuleset(bundle, defaultBoardId(bundle));
+    const bundle = getM2Fixture();
+    const ruleset = compileRuleset(bundle, M2_BOARD_ID);
     // The `basic` pair, kind-swapped from the first test above, anchored the same way —
     // 200 ticks after the `armored` wave's OWN observed countdown start (located by
     // creep id, never a hardcoded index; S11 P2).
@@ -877,8 +881,8 @@ describe('wave index 6 (`resolute` + `fast`) — a stun-holding build ahead of i
 
   function runStunScript() {
     if (stunScriptResult) return stunScriptResult;
-    const bundle = getBundledRuleset();
-    const ruleset = compileRuleset(bundle, defaultBoardId(bundle));
+    const bundle = getM2Fixture();
+    const ruleset = compileRuleset(bundle, M2_BOARD_ID);
     const armoredWaveIndex = waveIndexForCreep(ruleset, 'armored');
     const resoluteWaveIndex = waveIndexForCreep(ruleset, 'resolute');
     const basicWall = basicWallInputs();

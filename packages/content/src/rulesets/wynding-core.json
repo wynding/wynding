@@ -203,11 +203,17 @@
   },
   "boards": [
     {
-      "id": "field-01",
+      "id": "crossing-medium",
       "widthTiles": 28,
       "heightTiles": 24,
-      "entrances": [{ "id": "west", "cell": { "col": 0, "row": 11 }, "destination": ["east"] }],
-      "exits": [{ "id": "east", "cell": { "col": 27, "row": 11 } }],
+      "entrances": [
+        { "id": "west", "cell": { "col": 0, "row": 11 }, "destination": ["east"] },
+        { "id": "north", "cell": { "col": 13, "row": 0 }, "destination": ["south"] }
+      ],
+      "exits": [
+        { "id": "east", "cell": { "col": 27, "row": 11 } },
+        { "id": "south", "cell": { "col": 13, "row": 23 } }
+      ],
       "waves": [
         {
           "index": 0,
@@ -244,7 +250,7 @@
           "hpPercent": 100,
           "entries": [
             { "creepId": "normal", "entrance": "west", "count": 12, "spacingTicks": 12 },
-            { "creepId": "swarm", "entrance": "west", "count": 6, "spacingTicks": 5 }
+            { "creepId": "swarm", "entrance": "north", "count": 6, "spacingTicks": 5 }
           ]
         },
         {
@@ -261,7 +267,7 @@
           "hpPercent": 100,
           "entries": [
             { "creepId": "resolute", "entrance": "west", "count": 6, "spacingTicks": 15 },
-            { "creepId": "fast", "entrance": "west", "count": 6, "spacingTicks": 15 }
+            { "creepId": "fast", "entrance": "north", "count": 6, "spacingTicks": 15 }
           ]
         },
         {
@@ -279,9 +285,9 @@
           "clearBonus": 8,
           "hpPercent": 100,
           "entries": [
-            { "creepId": "swarm", "entrance": "west", "count": 10, "spacingTicks": 6 },
+            { "creepId": "swarm", "entrance": "north", "count": 10, "spacingTicks": 6 },
             { "creepId": "fast", "entrance": "west", "count": 6, "spacingTicks": 12 },
-            { "creepId": "armored", "entrance": "west", "count": 4, "spacingTicks": 20 },
+            { "creepId": "armored", "entrance": "north", "count": 4, "spacingTicks": 20 },
             { "creepId": "flying", "entrance": "west", "count": 4, "spacingTicks": 20 }
           ]
         },
@@ -294,7 +300,7 @@
             { "creepId": "boss", "entrance": "west", "count": 1, "spacingTicks": 20 },
             {
               "creepId": "normal",
-              "entrance": "west",
+              "entrance": "north",
               "count": 8,
               "spacingTicks": 20,
               "offsetTicks": 600

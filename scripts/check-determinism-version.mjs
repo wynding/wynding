@@ -25,9 +25,10 @@ const BASE_REF = process.env.BASE_REF || 'main';
 // Every file carrying a keyed `GOLDEN = { finalHash, traceDigest }` object — both parse
 // with the same two regexes below, so the second costs no new parsing.
 // `m2-golden.test.ts` is the M2 close-out golden over the finished ten-wave arc against
-// the SHIPPED bundle, where `determinism.test.ts` runs a deliberately narrow synthetic
-// one (no stun, no AoE, no burst, no support, no air, no armor) — so the widest
-// behavioural pin in the repo was the one this guard did not watch.
+// the M2 bundle (shipped through M2, frozen as a test fixture since M3 story 4), where
+// `determinism.test.ts` runs a deliberately narrow synthetic one (no stun, no AoE, no burst,
+// no support, no air, no armor) — so the widest behavioural pin in the repo was the one
+// this guard did not watch.
 //
 // The three `story-*.test.ts` files listed in #107 stay out, and that one IS a parser
 // limit rather than a preference: they pin hashes as bare inline

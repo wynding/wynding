@@ -393,9 +393,11 @@ export interface RenderOverlay {
   /** Creeps killed since the last frame (visual pass C1, #181) — accumulated per sim tick by
    *  the controller, like `sparks`, so a catch-up frame still bursts every kill. */
   readonly kills: readonly KillVM[];
-  /** How many creeps reached the exit since the last frame (C1): the ids the step
-   *  reported as leaked (`StepEvents.leaked`), counted. The exit pulses for them, rate-limited (`combat-feedback.ts`). */
-  readonly leaks: number;
+  /** The creeps that reached an exit since the last frame (C1), one entry per leak: the index,
+   *  in the board's exit order, of the exit it left by (M3), as the step reported it
+   *  (`StepEvents.leakedExits`). A leak pulses its own exit, under one rate limit for the
+   *  whole board (`combat-feedback.ts`); how many is the length. */
+  readonly leaks: readonly number[];
 }
 
 /** Live handle to a mounted Phaser view. The controller feeds it the last two render

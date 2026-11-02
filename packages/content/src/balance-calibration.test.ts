@@ -20,7 +20,7 @@
 
 import { describe, it, expect } from 'vitest';
 import { compileRuleset, deriveStars, hashSimState } from '@wynding/sim';
-import { getBundledRuleset } from './registry';
+import { loadRulesetOrM2Fixture, M2_BOARD_ID, M2_FIXTURE_KEY } from './m2-fixture';
 import { compileReferenceBuild } from './reference-build';
 import {
   M2_PINNED_LOSER,
@@ -45,7 +45,7 @@ import { balanceReport } from './balance-report';
 import { waveIndexForCreep } from './wave-lookup';
 import { withoutDestination } from './test-digest';
 
-const ruleset = compileRuleset(getBundledRuleset(M2_SHOWCASE.rulesetId), M2_SHOWCASE.boardId);
+const ruleset = compileRuleset(loadRulesetOrM2Fixture(M2_SHOWCASE.rulesetId), M2_SHOWCASE.boardId);
 const SEED = M2_SHOWCASE.seed;
 
 /** M3's section-A budget on creeps alive at once. */
@@ -74,8 +74,8 @@ describe('M3 story 1 — the balance checker, calibrated on M2', () => {
   it('registers M2’s showcase on its own board and seed', () => {
     expect(REFERENCE_SETS).toContain(M2_SHOWCASE);
     expect(M2_SHOWCASE).toMatchObject({
-      rulesetId: 'wynding-core',
-      boardId: 'field-01',
+      rulesetId: M2_FIXTURE_KEY, // the frozen M2 bundle, since M3 story 4
+      boardId: M2_BOARD_ID,
       seed: 0x5eed,
     });
     expect(M2_SHOWCASE.builds).toEqual([M2_WINNER_A, M2_WINNER_B, M2_PINNED_LOSER]);
@@ -201,7 +201,7 @@ describe('M3 story 1 — the balance checker, calibrated on M2', () => {
     () => {
       // M2's set only: the command runs every registered set, and M3's full-arc runs
       // belong there, not in the default suite.
-      const { text, failures } = balanceReport([M2_SHOWCASE], getBundledRuleset);
+      const { text, failures } = balanceReport([M2_SHOWCASE], loadRulesetOrM2Fixture);
       expect(failures).toEqual([]);
       for (const build of M2_SHOWCASE.builds)
         expect(text).toContain(`${build.id} — ${build.summary}`);

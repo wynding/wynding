@@ -59,6 +59,10 @@ export {
 export { backingStoreSize, devicePixelReport, observesDevicePixels } from './device-px';
 export type { DevicePixelReport } from './device-px';
 export type { GraphicsLike } from './board-draw';
+// The heading creeps travel through an opening (M3) — the shape cue the board draws on each
+// entrance and exit, and the arrow `apps/web`'s wave strip names each stream's route with.
+export { borderSide, openingHeading } from './board-cells';
+export type { Heading } from './board-cells';
 export type {
   CreepVM,
   CreepStatusCounts,

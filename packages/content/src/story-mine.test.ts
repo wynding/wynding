@@ -1,6 +1,10 @@
 // story-mine.test.ts — M2 Story 9: the `mine` burst tower, measured against the shipped
 // bundle.
 //
+// M3 story 4: this file runs the FROZEN M2 bundle (`m2-fixture.ts` — `field-01` and M2's ten
+// waves), not the shipped one, which is now the crossing board. "Shipped" in the prose below
+// means as M2 shipped it; every pinned value is unchanged.
+//
 // LOCATION NOTE, same reasoning as `story-support.test.ts`'s own header: this file lives
 // beside `parity.test.ts` (not in `packages/sim`, which cannot import `@wynding/content`)
 // so every scenario below runs the REAL shipped `wynding-core` bundle through
@@ -40,7 +44,7 @@ import {
   type SimState,
   type Grid,
 } from '@wynding/sim';
-import { getBundledRuleset, defaultBoardId } from './registry';
+import { getM2Fixture, M2_BOARD_ID } from './m2-fixture';
 import {
   waveIndexForCreep,
   wallInputsFromObservedWave,
@@ -130,8 +134,8 @@ function runScene(
   earlyCallTicks: readonly number[] = [],
   dynamicPlacements: (tick: number, state: SimState) => SimInput[] = () => [],
 ): SceneResult {
-  const bundle = getBundledRuleset();
-  const ruleset = compileRuleset(bundle, defaultBoardId(bundle));
+  const bundle = getM2Fixture();
+  const ruleset = compileRuleset(bundle, M2_BOARD_ID);
   let state: SimState = createInitialState(SCENARIO_SEED, ruleset);
   const shouldContinue: (tick: number, state: SimState) => boolean =
     typeof untilTick === 'number' ? (tick) => tick < untilTick : untilTick;
@@ -296,8 +300,7 @@ describe('M2-S9 — the `mine` burst tower, measured against the shipped bundle'
 
     it('2. creeps re-route from the NEXT movement step — not the same step, not two later', () => {
       const t = fireTick!;
-      const grid = compileRuleset(getBundledRuleset(), defaultBoardId(getBundledRuleset())).board
-        .grid;
+      const grid = compileRuleset(getM2Fixture(), M2_BOARD_ID).board.grid;
       // `t`'s OWN movement step precedes the consumption (combat runs after movement, same
       // tick) and reads the tower snapshot as it stood at the END of `t - 1` — still walled.
       const preField = computeDistanceField(
@@ -549,8 +552,8 @@ describe('M2-S9 — the `mine` burst tower, measured against the shipped bundle'
       // today only because `RUN_TICKS` stops short of the `flying` wave. A wave retune, a
       // longer window, or an air entry in an earlier wave would then turn this red for a
       // non-bug, reading as "the trigger boundary broke" while the sim behaved correctly.
-      const bundle = getBundledRuleset();
-      const catalog = compileRuleset(bundle, defaultBoardId(bundle)).creepById;
+      const bundle = getM2Fixture();
+      const catalog = compileRuleset(bundle, M2_BOARD_ID).creepById;
       const isGround = (creepId: string): boolean => catalog[creepId]?.domain === 'ground';
       let minDistFp = Infinity;
       let groundSamples = 0;
@@ -605,8 +608,8 @@ describe('M2-S9 — the `mine` burst tower, measured against the shipped bundle'
     const ARMORED_MINE = { col: 1, row: 7 } as const; // off-lane, entrance side, untouched by the wall
 
     it('the mine kills the first armored creep to reach it, at full HP', () => {
-      const bundle = getBundledRuleset();
-      const ruleset = compileRuleset(bundle, defaultBoardId(bundle));
+      const bundle = getM2Fixture();
+      const ruleset = compileRuleset(bundle, M2_BOARD_ID);
       const armoredWaveIndex = waveIndexForCreep(ruleset, 'armored');
       const placements: Placement[] = basicAnchors.map((anchor, i) => ({
         tick: i * 10,
@@ -696,8 +699,8 @@ describe('M2-S9 — the `mine` burst tower, measured against the shipped bundle'
   // the spec.
   describe("the kill-zone guarantee's own inequality, derived from the shipped catalog", () => {
     it('the fastest ground creep cannot outrun the blast in travelTicks', () => {
-      const bundle = getBundledRuleset();
-      const ruleset = compileRuleset(bundle, defaultBoardId(bundle));
+      const bundle = getM2Fixture();
+      const ruleset = compileRuleset(bundle, M2_BOARD_ID);
       const mine = ruleset.towerById['mine']!;
       expect(mine.attack?.mode).toBe('burst');
       const attack = mine.attack!;

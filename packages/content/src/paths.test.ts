@@ -4,14 +4,14 @@
 import { describe, it, expect } from 'vitest';
 import { compileRuleset, createInitialState, step } from '@wynding/sim';
 import type { Ruleset } from '@wynding/types';
-import { getBundledRuleset, defaultBoardId } from './registry';
+import { getM2Fixture, M2_BOARD_ID } from './m2-fixture';
 import { currentPath } from './paths';
 
-const bundle = getBundledRuleset();
-const ruleset = compileRuleset(bundle, defaultBoardId(bundle));
+const bundle = getM2Fixture();
+const ruleset = compileRuleset(bundle, M2_BOARD_ID);
 
-/** The shipped bundle with two more entrances and one more exit — THREE entrances, TWO
- *  destinations, so an entrance's index is not its destination's: `west` (0,11) and
+/** The frozen M2 bundle (`field-01`) with two more entrances and one more exit — THREE
+ *  entrances, TWO destinations, so an entrance's index is not its destination's: `west` (0,11) and
  *  `west-lo` (0,20) both → `east` (27,11); `east-lo` (27,20) → `south` (13,23). Fields
  *  [east, south]; entrances → [0, 0, 1]. The waves still spawn only at `west`. */
 function threeEntranceRuleset(): ReturnType<typeof compileRuleset> {
@@ -25,7 +25,7 @@ function threeEntranceRuleset(): ReturnType<typeof compileRuleset> {
     { id: 'east-lo', cell: { col: 27, row: 20 }, destination: ['south'] },
   );
   board.exits.push({ id: 'south', cell: { col: 13, row: 23 } });
-  return compileRuleset(b, defaultBoardId(b));
+  return compileRuleset(b, M2_BOARD_ID);
 }
 
 const key = (c: { col: number; row: number }): string => `${c.col},${c.row}`;

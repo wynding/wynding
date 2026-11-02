@@ -6,14 +6,14 @@ import { SIM_VERSION } from '@wynding/sim';
 import { getBundledRuleset, defaultBoardId } from '@wynding/content';
 import { handler } from './handler';
 
-const m1Ruleset = getBundledRuleset();
-const M1_BOARD_ID = defaultBoardId(m1Ruleset);
+const shippedRuleset = getBundledRuleset();
+const SHIPPED_BOARD_ID = defaultBoardId(shippedRuleset);
 
 function validReplayBody(): string {
   const replay: Replay = {
     seed: 12345,
-    boardId: M1_BOARD_ID,
-    rulesetHash: currentRulesetHash(m1Ruleset),
+    boardId: SHIPPED_BOARD_ID,
+    rulesetHash: currentRulesetHash(shippedRuleset),
     simVersion: SIM_VERSION,
     // Launch the wave; undefended, it leaks out → the validator drives to terminal.
     tickInputs: [[{ kind: 'callWaveEarly' }]],
@@ -63,7 +63,7 @@ describe('lambda handler', () => {
   it('rejects a replay from a different sim version with 422', async () => {
     const bad = JSON.stringify({
       seed: 1,
-      boardId: M1_BOARD_ID,
+      boardId: SHIPPED_BOARD_ID,
       rulesetHash: '0'.repeat(64),
       simVersion: 999,
       tickInputs: [],

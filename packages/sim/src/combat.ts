@@ -336,6 +336,11 @@ export interface StepEvents {
    *  contract as `impactPoints`/`fired`: append-only, never hash-relevant, never
    *  serialized; a caller that passes no `leaked` array sees no difference at all. */
   readonly leaked?: number[];
+  /** Parallel to `leaked` (M3): the index, in the board's exit order (`grid.exits`), of the
+   *  exit each leaked creep left by — always an exit in its own destination — so a caller can
+   *  show a leak where it happened on a board with several exits. Same optional,
+   *  presentational contract as `leaked`. */
+  readonly leakedExits?: number[];
   /** Every creep the combat phase KILLED this tick, in the order its sweep credits them
    *  (visual pass C1, #181): the creep's entity id, its catalog kind, its fixed-point
    *  position as the step left it — the point the view model and an impact point derive

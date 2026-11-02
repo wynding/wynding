@@ -38,8 +38,8 @@ const control: HarnessControl = { towers: [], creeps: [], colourMode: 'default',
 const handle = mount(el, {
   cols: COLS,
   rows: ROWS,
-  entrance: { col: 0, row: 11 },
-  exit: { col: COLS - 1, row: 11 },
+  entrances: [{ col: 0, row: 11 }],
+  exits: [{ col: COLS - 1, row: 11 }],
 });
 let prev: RenderVM | null = null;
 let tick = 0;
@@ -56,7 +56,7 @@ const frame = (): void => {
     reducedMotion: false,
     tracers: [],
     kills: [],
-    leaks: 0,
+    leaks: [],
   };
   handle.draw(prev, cur, 1, overlay);
   prev = cur;

@@ -1,5 +1,9 @@
 // parity.test.ts — an S3-shipped-content snapshot (PLAN M2-S3 step 13).
 //
+// M3 story 4: this file runs the FROZEN M2 bundle (`m2-fixture.ts` — `field-01` and M2's ten
+// waves), not the shipped one, which is now the crossing board. "Shipped" in the prose below
+// means as M2 shipped it; every pinned value is unchanged.
+//
 // Through M2-S1/S2 this file's charter was "behavior must not change / literals are
 // never updated" — a TS-era-format-migration parity proof. That charter is retired
 // as of M2-S3: this story DELIBERATELY changes the shipped bundle (the `slow` tower,
@@ -39,7 +43,7 @@ import {
   type SimInput,
   type SimState,
 } from '@wynding/sim';
-import { getBundledRuleset, defaultBoardId } from './registry';
+import { getM2Fixture, M2_BOARD_ID } from './m2-fixture';
 // The package's ONE fnv1a copy (test-digest.ts) — m2-golden.test.ts digests through the
 // same function, so the two files cannot drift onto different digests for one trace.
 import { fnv1a, withoutDestination } from './test-digest';
@@ -67,8 +71,8 @@ function runScenario(
   continueWhile: (tick: number, state: SimState) => boolean,
   probe?: (state: SimState) => void,
 ): ScenarioRun {
-  const bundle = getBundledRuleset();
-  const ruleset = compileRuleset(bundle, defaultBoardId(bundle));
+  const bundle = getM2Fixture();
+  const ruleset = compileRuleset(bundle, M2_BOARD_ID);
   let state = createInitialState(SCENARIO_SEED, ruleset);
   const trace: string[] = [];
   const traceWithoutDestination: string[] = [];
@@ -103,8 +107,8 @@ function runScenarioUntilTerminal(
 
 describe('behavioral parity — v2-loaded bundle vs. the pre-verified goldens', () => {
   it('hands-off loss (no inputs, 1200 ticks) matches the pinned golden exactly', () => {
-    const bundle = getBundledRuleset();
-    const ruleset = compileRuleset(bundle, defaultBoardId(bundle));
+    const bundle = getM2Fixture();
+    const ruleset = compileRuleset(bundle, M2_BOARD_ID);
     const noInputs = (): SimInput[] => [];
     const { state, trace, traceWithoutDestination } = runScenarioForTicks(noInputs, 1200);
 
@@ -233,8 +237,8 @@ describe('behavioral parity — v2-loaded bundle vs. the pre-verified goldens', 
       { col: 2, row: 7 },
       { col: 5, row: 15 },
     ];
-    const bundle = getBundledRuleset();
-    const ruleset = compileRuleset(bundle, defaultBoardId(bundle));
+    const bundle = getM2Fixture();
+    const ruleset = compileRuleset(bundle, M2_BOARD_ID);
     const basicCost = ruleset.towerById['basic']!.cost;
     const slowCost = ruleset.towerById['slow']!.cost;
 
@@ -532,22 +536,25 @@ describe('behavioral parity — v2-loaded bundle vs. the pre-verified goldens', 
 // normalized form, and with it the digest, moves. Every authored VALUE is unchanged
 // (one pair `west` → `east`, every entry on `west`, `hpPercent` 100), and the world-hash
 // goldens above do not move with it (`format3-parity.test.ts` proves the run is the same).
-const SHIPPED_RULESET_HASH = 'c12145a48f4a094eba02307d399e1ac0dd393e2432aaccc2564674e8cc117d34';
+// M3 story 4: the shipped artifact became the crossing board, so this pin now holds the FROZEN
+// M2 fixture (`m2-fixture.ts`), whose bytes are the M2 artifact's — the value does not move. The
+// shipped artifact's own digest is pinned in `crossing-board.test.ts`.
+const M2_RULESET_HASH = 'c12145a48f4a094eba02307d399e1ac0dd393e2432aaccc2564674e8cc117d34';
 // ---------------------------------------------------------------------------------
 
-describe('digest goldens — the shipped artifact content-hash is pinned and stable', () => {
+describe("digest goldens — the frozen M2 fixture's content-hash is pinned and stable", () => {
   it('matches the committed rulesetHash literal', () => {
-    const bundle = getBundledRuleset();
+    const bundle = getM2Fixture();
     const digest = rulesetDigest(bundle);
-    console.log(`[parity] SHIPPED_RULESET_HASH: ${digest}`);
-    expect(digest).toBe(SHIPPED_RULESET_HASH);
+    console.log(`[parity] M2_RULESET_HASH: ${digest}`);
+    expect(digest).toBe(M2_RULESET_HASH);
   });
 
-  it('is stable across two independent loads of the registry', () => {
-    const first = rulesetDigest(getBundledRuleset());
-    const second = rulesetDigest(getBundledRuleset());
+  it('is stable across two loads of the fixture', () => {
+    const first = rulesetDigest(getM2Fixture());
+    const second = rulesetDigest(getM2Fixture());
     console.log(`[parity] rulesetDigest stability: first=${first} second=${second}`);
     expect(first).toBe(second);
-    expect(first).toBe(SHIPPED_RULESET_HASH);
+    expect(first).toBe(M2_RULESET_HASH);
   });
 });

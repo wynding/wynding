@@ -233,20 +233,23 @@ describe('getBundledRuleset (happy path + authored values)', () => {
     });
   });
 
-  it('carries the board geometry: field-01, a 28×24 grid', () => {
-    expect(board.id).toBe('field-01');
-    expect(defaultBoardId(ruleset)).toBe('field-01');
+  it('carries the board geometry: crossing-medium, a 28×24 grid with two crossing pairs', () => {
+    expect(board.id).toBe('crossing-medium');
+    expect(defaultBoardId(ruleset)).toBe('crossing-medium');
     expect(board.widthTiles).toBe(28);
     expect(board.heightTiles).toBe(24);
-    // Format 3 (M3): one entrance → exit pair, every creep from `west` heading `east`.
+    // M3 story 4: the crossing board — west → east along row 11, north → south down
+    // column 13, each entrance heading for its own one exit (m3.md, "The board").
     expect(board.entrances).toEqual([
       { id: 'west', cell: { col: 0, row: 11 }, destination: ['east'] },
+      { id: 'north', cell: { col: 13, row: 0 }, destination: ['south'] },
     ]);
-    expect(board.exits).toEqual([{ id: 'east', cell: { col: 27, row: 11 } }]);
-    for (const wave of board.waves) {
-      expect(wave.hpPercent).toBe(100);
-      for (const entry of wave.entries) expect(entry.entrance).toBe('west');
-    }
+    expect(board.exits).toEqual([
+      { id: 'east', cell: { col: 27, row: 11 } },
+      { id: 'south', cell: { col: 13, row: 23 } },
+    ]);
+    // The placeholder schedule grows no creep hit points (stories 5–7 author the curve).
+    for (const wave of board.waves) expect(wave.hpPercent).toBe(100);
   });
 
   // Re-pinned M2-S11 P3 (measured): P1 authors the full ten-wave arc per m2.md's spec
@@ -254,7 +257,12 @@ describe('getBundledRuleset (happy path + authored values)', () => {
   // (10x`swarm`+6x`fast`+4x`armored`+4x`flying`) at index 8, and renumbering every wave
   // — `resolute`+`fast` moves from index 4 to index 6, `armored-flyer` from index 6 to
   // index 7, and the boss finale from index 7 to index 9.
-  it("carries the ten waves: 10 × normal @ spacing 20, then 16 × swarm @ spacing 5 (the S4a AoE showcase), then 8 × fast @ spacing 15 (the S3 slow-showcase), then 6 × armored @ spacing 25 (the S5a armor showcase), then wave index 4's 12 × normal + 6 × swarm @ spacing 12/5 (arc row 5), then wave index 5's 8 × flying @ spacing 15 (the S7 air showcase), then wave index 6's 6 × resolute + 6 × fast @ spacing 15/15 (the S6 immunity showcase), then wave index 7's 6 × armored-flyer @ spacing 20 (the S10 armored-air showcase), then wave index 8's 10 × swarm + 6 × fast + 4 × armored + 4 × flying @ spacing 6/12/20/20 (arc row 9), then wave index 9's 1 × boss + 8 × normal @ spacing 20/20 (the S10 boss finale)", () => {
+  // Re-pinned M3 story 4: the crossing board's PLACEHOLDER schedule — M2's ten waves with
+  // five streams moved to the north route (index 4's swarm, index 6's fast, index 8's swarm
+  // and armored, index 9's escort). The north route opens at index 4, a wave that brings
+  // nothing else new; north stays ground-only; air stays on the west lane. Stories 5–7
+  // replace the whole schedule. Every count, spacing, offset, countdown and bonus is M2's.
+  it("carries the placeholder ten waves, M2's with five streams moved north: 10 × normal @ spacing 20, then 16 × swarm @ spacing 5 (the S4a AoE showcase), then 8 × fast @ spacing 15 (the S3 slow-showcase), then 6 × armored @ spacing 25 (the S5a armor showcase), then wave index 4's 12 × normal + 6 × swarm @ spacing 12/5 (arc row 5), then wave index 5's 8 × flying @ spacing 15 (the S7 air showcase), then wave index 6's 6 × resolute + 6 × fast @ spacing 15/15 (the S6 immunity showcase), then wave index 7's 6 × armored-flyer @ spacing 20 (the S10 armored-air showcase), then wave index 8's 10 × swarm + 6 × fast + 4 × armored + 4 × flying @ spacing 6/12/20/20 (arc row 9), then wave index 9's 1 × boss + 8 × normal @ spacing 20/20 (the S10 boss finale)", () => {
     const normalEntries = [
       { creepId: 'normal', entrance: 'west', count: 10, spacingTicks: 20, offsetTicks: 0 },
     ];
@@ -269,22 +277,22 @@ describe('getBundledRuleset (happy path + authored values)', () => {
     ];
     const normalSwarmEntries = [
       { creepId: 'normal', entrance: 'west', count: 12, spacingTicks: 12, offsetTicks: 0 },
-      { creepId: 'swarm', entrance: 'west', count: 6, spacingTicks: 5, offsetTicks: 0 },
+      { creepId: 'swarm', entrance: 'north', count: 6, spacingTicks: 5, offsetTicks: 0 },
     ];
     const flyingEntries = [
       { creepId: 'flying', entrance: 'west', count: 8, spacingTicks: 15, offsetTicks: 0 },
     ];
     const resoluteFastEntries = [
       { creepId: 'resolute', entrance: 'west', count: 6, spacingTicks: 15, offsetTicks: 0 },
-      { creepId: 'fast', entrance: 'west', count: 6, spacingTicks: 15, offsetTicks: 0 },
+      { creepId: 'fast', entrance: 'north', count: 6, spacingTicks: 15, offsetTicks: 0 },
     ];
     const armoredFlyerEntries = [
       { creepId: 'armored-flyer', entrance: 'west', count: 6, spacingTicks: 20, offsetTicks: 0 },
     ];
     const swarmFastArmoredFlyingEntries = [
-      { creepId: 'swarm', entrance: 'west', count: 10, spacingTicks: 6, offsetTicks: 0 },
+      { creepId: 'swarm', entrance: 'north', count: 10, spacingTicks: 6, offsetTicks: 0 },
       { creepId: 'fast', entrance: 'west', count: 6, spacingTicks: 12, offsetTicks: 0 },
-      { creepId: 'armored', entrance: 'west', count: 4, spacingTicks: 20, offsetTicks: 0 },
+      { creepId: 'armored', entrance: 'north', count: 4, spacingTicks: 20, offsetTicks: 0 },
       { creepId: 'flying', entrance: 'west', count: 4, spacingTicks: 20, offsetTicks: 0 },
     ];
     const bossEntries = [
@@ -294,7 +302,7 @@ describe('getBundledRuleset (happy path + authored values)', () => {
       // preferring the creep nearest the exit — so the finale was fought against the
       // escort while the boss walked through behind it. Composition is untouched (ruling
       // 2): same creep ids, same counts, same order; only the stream's start moves.
-      { creepId: 'normal', entrance: 'west', count: 8, spacingTicks: 20, offsetTicks: 600 },
+      { creepId: 'normal', entrance: 'north', count: 8, spacingTicks: 20, offsetTicks: 600 },
     ];
     expect(board.waves).toEqual([
       { index: 0, countdownTicks: 500, clearBonus: 4, hpPercent: 100, entries: normalEntries },
@@ -383,8 +391,9 @@ describe('the compile-bound arithmetic, pinned as named numbers (M2-S5a P5, mirr
   // here in a way stress.test.ts's single-wave bundle doesn't exercise.
   const text = readFileSync(BUNDLED_ARTIFACT_URL, 'utf8');
   const bundle = parseRulesetJson(text);
-  const board = bundle.boards.find((b) => b.id === 'field-01');
-  if (board === undefined) throw new Error("no board 'field-01' in the shipped bundle");
+  // The shipped default board — `crossing-medium` since M3 story 4, whose placeholder schedule
+  // keeps M2's timing, so every number below is M2's.
+  const board = bundle.boards[0]!;
   const slowTower = bundle.towerCatalog.find((t) => t.id === 'slow');
   if (slowTower === undefined) throw new Error("no tower 'slow' in the shipped bundle");
   const slowEffect = slowTower.effects.find((e) => e.kind === 'slow');
@@ -484,7 +493,7 @@ describe('the compile-bound arithmetic, pinned as named numbers (M2-S5a P5, mirr
   // The bundle must actually compile under this bound — a passing arithmetic pin
   // above proves nothing if the compiler disagrees; this ties the two together.
   it('compiles cleanly given the bound holds', () => {
-    expect(() => compileRuleset(bundle, 'field-01')).not.toThrow();
+    expect(() => compileRuleset(bundle, board.id)).not.toThrow();
   });
 });
 
@@ -522,8 +531,9 @@ describe('the win-over-loss score ordering invariant (m2.md §Scoring & star gra
   // best loss.
   const text = readFileSync(BUNDLED_ARTIFACT_URL, 'utf8');
   const bundle = parseRulesetJson(text);
-  const board = bundle.boards.find((b) => b.id === 'field-01');
-  if (board === undefined) throw new Error("no board 'field-01' in the shipped bundle");
+  // The shipped default board — `crossing-medium` since M3 story 4, whose placeholder schedule
+  // keeps M2's timing, so every number below is M2's.
+  const board = bundle.boards[0]!;
   const creepById = new Map(bundle.creepCatalog.map((c) => [c.id, c]));
   const L = bundle.balance.startingLives;
   const survivalMul = bundle.scoring.survivalMul;

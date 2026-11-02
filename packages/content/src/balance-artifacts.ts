@@ -10,12 +10,19 @@ import { readFileSync } from 'node:fs';
 import { parseRulesetJson } from '@wynding/sim';
 import type { Ruleset } from '@wynding/types';
 import { BUNDLED_ARTIFACT_URL } from './artifact';
+import { M2_FIXTURE_KEY } from './m2-fixture-key';
 
 // `artifact.ts` names the shipped bundle's file; its id is the registry's default
 // (`registry.ts` itself can't be imported under `tsx` — its `?raw` import is Vite-only).
-const ARTIFACTS: ReadonlyMap<string, URL> = new Map([['wynding-core', BUNDLED_ARTIFACT_URL]]);
+// Beside it, under a key of its own, the frozen M2 bundle (M3 story 4): the same file
+// `m2-fixture.ts` imports, which the calibration set (`reference-builds.ts`) runs on.
+const ARTIFACTS: ReadonlyMap<string, URL> = new Map([
+  ['wynding-core', BUNDLED_ARTIFACT_URL],
+  [M2_FIXTURE_KEY, new URL('./fixtures/m2-wynding-core.json', import.meta.url)],
+]);
 
-/** The bundled ruleset `rulesetId`, read from disk and validated. */
+/** The ruleset a reference set names by `rulesetId` — a bundled id, or the M2 fixture's key
+ *  — read from disk and validated. */
 export function loadArtifactRuleset(rulesetId: string): Ruleset {
   const url = ARTIFACTS.get(rulesetId);
   if (url === undefined) throw new Error(`balance: no on-disk artifact for '${rulesetId}'`);

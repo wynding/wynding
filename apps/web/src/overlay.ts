@@ -23,6 +23,7 @@ import {
   type CreepStatusCounts,
   type Palette,
   type TowerRole,
+  type Heading,
 } from '@wynding/render';
 import {
   MS_PER_TICK,
@@ -44,6 +45,8 @@ import { createResultsPanel, type StoppedRun } from './results-panel';
 import type { InstallHandle, InstallState } from './install';
 import type { ArmedTower, UiState, PlacementOutcome, RunStats } from './controller';
 import type { SurveySlots } from './survey-form';
+import { describeRoutes, HEADING_ARROW } from './routes';
+import type { RulesetBoard } from '@wynding/content';
 
 /** A player intent emitted by the overlay for the app to route to the controller. */
 export type UiAction =
@@ -394,6 +397,7 @@ export function createOverlay(
   keymap: Keymap,
   shell: ShellHandle,
   ruleset: CompiledRuleset,
+  board: RulesetBoard,
   abortGesture: () => void,
   install: InstallHandle,
 ): Overlay {
@@ -723,11 +727,26 @@ export function createOverlay(
   // sell are single bindings; an unbound action falls back to `settings.unbound` (via
   // `codeLabel`). Set here — overlay owns the Shell's dynamic content, like the Card hotkey
   // badge — and refreshed on every rebind below.
+  //
+  // It leads with the board's display name (M3 story 4: "Crossing", owner ruling 2026-11-01) —
+  // an i18n string keyed by content id like a creep's, with the id itself as the fallback for
+  // a board this build has no name for.
+  const BOARD_NAME: Readonly<Partial<Record<string, () => string>>> = Object.assign(
+    Object.create(null) as Record<string, () => string>,
+    { 'crossing-medium': () => t('board.crossing-medium.name') },
+  );
+  const boardName = (): string =>
+    BOARD_NAME[board.id]?.() ?? t('board.unknown.name', { id: board.id });
   function refreshBoardAria(): void {
     const move = (['up', 'down', 'left', 'right'] as const).map(codeLabel).join(' / ');
     shell.board.setAttribute(
       'aria-label',
-      t('board.aria', { move, confirm: codeLabel('confirm'), sell: codeLabel('sell') }),
+      t('board.aria', {
+        board: boardName(),
+        move,
+        confirm: codeLabel('confirm'),
+        sell: codeLabel('sell'),
+      }),
     );
   }
   refreshBoardAria();
@@ -2121,6 +2140,76 @@ export function createOverlay(
     slow: () => t('hud.preview.immunity.slow'),
     stun: () => t('hud.preview.immunity.stun'),
   };
+  // Each stream's route (M3 story 4), named by the walls it runs between — "north to south" —
+  // and pointed by the heading the board draws on its entrance and exit (`routes.ts`). Read
+  // from the board this overlay was made for, once.
+  const routes = describeRoutes(board);
+  const SIDE_NAME: Readonly<Record<Heading, () => string>> = {
+    north: () => t('hud.preview.side.north'),
+    east: () => t('hud.preview.side.east'),
+    south: () => t('hud.preview.side.south'),
+    west: () => t('hud.preview.side.west'),
+  };
+
+  /** A stream's route in words: its entrance's wall, then its exit's ("north to south"). A
+   *  destination of several exits names each, joined by `', '` like the immunities list
+   *  ("west to east, south") — no M3 board has one (ADR 0015). That join is punctuation
+   *  between already-translated words, so a translator cannot yet order the list or conjoin
+   *  it ("east and south"): locale-aware list formatting (ICU / `Intl.ListFormat`) is later
+   *  work. An entrance this overlay's board does not have — only a test or a mismatched build
+   *  could make one — is named by its ids rather than dropped, the `creep.unknown.name`
+   *  posture. */
+  function routeText(entry: PreviewEntryVM): string {
+    const route = routes.get(entry.entrance);
+    if (route === undefined) {
+      return t('hud.preview.route', { from: entry.entrance, to: entry.destination.join(', ') });
+    }
+    return t('hud.preview.route', {
+      from: SIDE_NAME[route.from](),
+      to: route.to.map((side) => SIDE_NAME[side]()).join(', '),
+    });
+  }
+
+  /** The stream's arrow: the heading its creeps enter by, as the board draws it on their
+   *  entrance and exit. Empty for an entrance the board does not have. */
+  function routeArrow(entry: PreviewEntryVM): string {
+    const route = routes.get(entry.entrance);
+    return route === undefined ? '' : HEADING_ARROW[route.heading];
+  }
+
+  /** Each entrance's place in the board's order — the order the strip groups routes in. */
+  const ROUTE_ORDER = new Map([...routes.keys()].map((id, i) => [id, i] as const));
+  /** A wave's streams GROUPED BY ROUTE, in the board's entrance order, each route's streams
+   *  in the order the wave lists them (a stable sort). Entrances the board lacks share the
+   *  last place, kept in the wave's order rather than grouped (a test's or a mismatched
+   *  build's case; no route arrow either).
+   *  The strip draws each route's arrow once, on its group's first row: a route's arrow per
+   *  row cost a four-stream wave its fit at 1080×810 under a wide font (CI's). The arrows now
+   *  cost one per route, not one per stream — two on the crossing board, however many streams
+   *  a wave sends. The rows' sentences read in the same order. */
+  function byRoute(entries: readonly PreviewEntryVM[]): readonly PreviewEntryVM[] {
+    const at = (e: PreviewEntryVM): number => ROUTE_ORDER.get(e.entrance) ?? ROUTE_ORDER.size;
+    return [...entries].sort((a, b) => at(a) - at(b));
+  }
+
+  /** The wave's creep hit points, said once per wave when they are not the catalog's (M3 creep
+   *  HP growth): the full sentence and the glance, or null at 100. Two literal keys per sign,
+   *  for `i18n-check.mjs`'s extractor (see `previewEntryFull`). */
+  function hpClause(hpPercent: number): { readonly full: string; readonly glance: string } | null {
+    if (hpPercent === 100) return null;
+    if (hpPercent > 100) {
+      const percent = hpPercent - 100;
+      return {
+        full: t('hud.preview.hp.more', { percent }),
+        glance: t('hud.preview.hp.more.glance', { percent }),
+      };
+    }
+    const percent = 100 - hpPercent;
+    return {
+      full: t('hud.preview.hp.fewer', { percent }),
+      glance: t('hud.preview.hp.fewer.glance', { percent }),
+    };
+  }
 
   /** THE ACCESSIBLE FORM — every stat slot always named: "{count} × {name} — {domain},
    *  armor {n}, leak cost {n}, {immunities}", never colour/icon-only.
@@ -2163,6 +2252,7 @@ export function createOverlay(
     const params = {
       count: entry.count,
       name: creepName(entry.creepId),
+      route: routeText(entry),
       domain,
       armor: armorClause,
       leakCost: t('hud.preview.leakCost', { leakCost: entry.leakCost }),
@@ -2251,6 +2341,12 @@ export function createOverlay(
     if (single) {
       const detail = doc.createElement('span');
       detail.className = 'wy-preview-detail';
+      // The route in words leads the detail (M3 story 4), so where the strip is short of room
+      // it is the last of the three to wrap away; the row's arrow stays either way.
+      const route = doc.createElement('span');
+      route.className = 'wy-preview-route-name';
+      route.textContent = parts.route;
+      detail.append(route);
       const name = doc.createElement('span');
       name.className = 'wy-preview-name';
       name.textContent = parts.name;
@@ -2268,16 +2364,22 @@ export function createOverlay(
 
   /** The strings one glance is written from — the single source for `buildEntryGlance` and the
    *  locale sentinel's `previewEntryGlanceText`, so the two cannot drift (a drift makes every
-   *  HUD refresh rebuild the list and reset a scrolled strip). `name` and `clause` are empty
-   *  unless the wave has a single entry; `clause` is also empty when the entry deviates in
+   *  HUD refresh rebuild the list and reset a scrolled strip). `route`, `name` and `clause` are
+   *  empty unless the wave has a single entry; `clause` is also empty when the entry deviates in
    *  nothing. The join separator is punctuation between already-translated fragments, not
    *  copy — the same posture the immunities list has always taken with its `', '`. */
   function glanceParts(
     entry: PreviewEntryVM,
     single: boolean,
-  ): { readonly count: string; readonly name: string; readonly clause: string } {
+  ): {
+    readonly count: string;
+    readonly route: string;
+    readonly name: string;
+    readonly clause: string;
+  } {
     return {
       count: countText(entry.count),
+      route: single ? routeText(entry) : '',
       name: single ? creepName(entry.creepId) : '',
       clause: single ? previewEntryNotes(entry).join(' · ') : '',
     };
@@ -2306,8 +2408,8 @@ export function createOverlay(
   /** The text `buildEntryGlance` writes, in document order — the locale sentinel's half of the
    *  row comparison (the icon carries no text). */
   function previewEntryGlanceText(entry: PreviewEntryVM, single: boolean): string {
-    const { count, name, clause } = glanceParts(entry, single);
-    return count + name + clause;
+    const { count, route, name, clause } = glanceParts(entry, single);
+    return count + route + name + clause;
   }
 
   /** The scroll form's cue (`ui.css`): each edge with entries past it fades, because the
@@ -2390,6 +2492,15 @@ export function createOverlay(
   // `lastPanelKey`): a screen-reader virtual cursor or braille display parked on a preview
   // row must not have its node torn down and rebuilt underneath it every tick.
   let lastPreviewKey = '';
+  /** The wave's hit-point clause, once, under the title (M3): hidden at the catalog's 100. Both
+   *  forms, as a row has them — the full sentence for assistive tech, the aria-hidden glance
+   *  for the eye (`ui.css`). Written only on a rebuild, which the preview key's `hpPercent`
+   *  already triggers. */
+  function renderHp(clause: { readonly full: string; readonly glance: string } | null): void {
+    previewEl.hp.hidden = clause === null;
+    previewEl.hpFull.textContent = clause?.full ?? '';
+    previewEl.hpGlance.textContent = clause?.glance ?? '';
+  }
   function renderPreview(preview: HudPreview | null): void {
     if (preview === null) {
       previewEl.root.hidden = true;
@@ -2400,9 +2511,9 @@ export function createOverlay(
     const key =
       preview.kind === 'lastWave'
         ? 'last'
-        : // The wave's hpPercent and each stream's route are in the key now (M3), though
-          // nothing here renders them yet: a wave that differs only there must still
-          // rebuild the day story 4 draws them, not keep the previous wave's rows.
+        : // The wave's hpPercent and each stream's route are in the key (M3): both are drawn
+          // (the hit-point clause, each row's route), so a wave that differs only there must
+          // rebuild rather than keep the previous wave's.
           `${preview.waveNumber}/${preview.waveCount}:${preview.hpPercent}%:${preview.entries
             .map(
               (e) =>
@@ -2413,9 +2524,9 @@ export function createOverlay(
     // locale/catalog change would otherwise leave stale-language DOM until the wave
     // moved — defeating the module's deferred-`t()` convention (line ~86). Like
     // `renderPrimary`, the sentinel compares the exact strings this render would
-    // write: the title AND the first entry row (rows read five catalog keys the
+    // write: the title, the first entry row (rows read five catalog keys the
     // title doesn't — a title-only sentinel would self-heal the heading while the
-    // rows stayed stale). On drift, fall through and rebuild.
+    // rows stayed stale) and the hit-point clause (M3). On drift, fall through and rebuild.
     // Unreachable while only `en` ships; load-bearing the day a second locale
     // lands. (Consciously untested: exercising it would mean faking a runtime
     // catalog-swap mechanism that does not exist. The MEMO direction — unchanged
@@ -2424,8 +2535,9 @@ export function createOverlay(
       preview.kind === 'lastWave'
         ? t('hud.preview.lastWave')
         : t('hud.preview.title', { waveNumber: preview.waveNumber, waveCount: preview.waveCount });
-    const firstEntry = preview.kind === 'upcoming' ? preview.entries[0] : undefined;
-    const single = preview.kind === 'upcoming' && preview.entries.length === 1;
+    const entries = preview.kind === 'upcoming' ? byRoute(preview.entries) : [];
+    const firstEntry = entries[0];
+    const single = entries.length === 1;
     // `textContent` on a row concatenates BOTH forms in document order (full, then glance
     // — the append order below), so this sentinel covers every catalog key either form
     // reads. Comparing one side alone would let a locale swap self-heal that form while
@@ -2434,12 +2546,19 @@ export function createOverlay(
     const expectedFirstRow =
       firstEntry === undefined
         ? null
-        : previewEntryFull(firstEntry) + previewEntryGlanceText(firstEntry, single);
+        : previewEntryFull(firstEntry) +
+          routeArrow(firstEntry) +
+          previewEntryGlanceText(firstEntry, single);
     const firstRowCurrent = previewEl.list.firstElementChild?.textContent ?? null;
+    // The hit-point clause reads catalog keys neither the title nor a row does, so it is
+    // compared too: both its forms, in document order (full, then glance — `shell.ts`).
+    const expectedHp = preview.kind === 'upcoming' ? hpClause(preview.hpPercent) : null;
+    const expectedHpText = expectedHp === null ? '' : expectedHp.full + expectedHp.glance;
     if (
       key === lastPreviewKey &&
       previewEl.title.textContent === expectedTitle &&
-      firstRowCurrent === expectedFirstRow
+      firstRowCurrent === expectedFirstRow &&
+      previewEl.hp.textContent === expectedHpText
     ) {
       return;
     }
@@ -2449,6 +2568,7 @@ export function createOverlay(
     previewEl.root.scrollLeft = 0;
     if (preview.kind === 'lastWave') {
       previewEl.title.textContent = t('hud.preview.lastWave');
+      renderHp(null);
       clearChildren(previewEl.list);
       syncStripScroll();
       return;
@@ -2457,9 +2577,10 @@ export function createOverlay(
       waveNumber: preview.waveNumber,
       waveCount: preview.waveCount,
     });
+    renderHp(hpClause(preview.hpPercent));
     clearChildren(previewEl.list);
     warnUnmappedCreeps(preview.entries); // dev diagnostic — rebuild path only
-    for (const entry of preview.entries) {
+    for (const [i, entry] of entries.entries()) {
       const li = doc.createElement('li');
       li.className = 'wy-preview-entry';
       // Dual-form row, mirroring `shell.ts`'s `chip()` exactly: both nodes always exist,
@@ -2471,7 +2592,23 @@ export function createOverlay(
       const full = doc.createElement('span');
       full.className = 'wy-preview-full';
       full.textContent = sentence;
-      li.append(full, buildEntryGlance(entry, single, sentence));
+      li.append(full);
+      // The route's arrow leads its group's first row (M3 story 4; `byRoute`): the heading the
+      // board draws on this stream's entrance and exit. Its own aria-hidden node, outside the
+      // glance, so the glance's layout — Compact's icon-above-count wrap — is the one it has
+      // always had, only narrower. The words are the full sentence's, and the single-entry
+      // detail's. A row continuing its route's group has no arrow (`ui.css` sets it closer).
+      const arrowText = routeArrow(entry);
+      const leadsRoute = i === 0 || entries[i - 1]!.entrance !== entry.entrance;
+      if (!leadsRoute) li.classList.add('wy-preview-entry--continues');
+      if (arrowText !== '' && leadsRoute) {
+        const arrow = doc.createElement('span');
+        arrow.className = 'wy-preview-arrow';
+        arrow.setAttribute('aria-hidden', 'true');
+        arrow.textContent = arrowText;
+        li.append(arrow);
+      }
+      li.append(buildEntryGlance(entry, single, sentence));
       previewEl.list.appendChild(li);
     }
     syncStripScroll();

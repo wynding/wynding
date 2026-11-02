@@ -1,6 +1,10 @@
 // story-finale.test.ts — M2 Story 10 P6: the finale content (`boss`, `armored-flyer`,
 // `frost-splash`), measured against the shipped bundle.
 //
+// M3 story 4: this file runs the FROZEN M2 bundle (`m2-fixture.ts` — `field-01` and M2's ten
+// waves), not the shipped one, which is now the crossing board. "Shipped" in the prose below
+// means as M2 shipped it; every pinned value is unchanged.
+//
 // LOCATION NOTE, same reasoning as `story-mine.test.ts`'s own header: this file lives
 // beside `parity.test.ts` (not in `packages/sim`, which cannot import `@wynding/content`)
 // so every scenario below runs the REAL shipped `wynding-core` bundle through
@@ -26,7 +30,7 @@ import {
   type SimState,
   type CompiledRuleset,
 } from '@wynding/sim';
-import { getBundledRuleset, defaultBoardId } from './registry';
+import { getM2Fixture, M2_BOARD_ID } from './m2-fixture';
 import {
   waveIndexForCreep,
   wallInputsFromTick,
@@ -135,8 +139,8 @@ function survivalWallInputs(
 function runSurvivalScene(
   extra: (tick: number, state: SimState) => SimInput[] = () => [],
 ): SceneResult {
-  const bundle = getBundledRuleset();
-  const ruleset = compileRuleset(bundle, defaultBoardId(bundle));
+  const bundle = getM2Fixture();
+  const ruleset = compileRuleset(bundle, M2_BOARD_ID);
   let state: SimState = createInitialState(SCENARIO_SEED, ruleset);
   const inputs = survivalWallInputs(ruleset, extra);
   const livesByTick: number[] = [];
@@ -215,8 +219,8 @@ function runBossProbe(
   readonly rngStateAt: readonly number[];
   readonly bossId: number | undefined; // the boss's entity id, for target-identity witnesses
 } {
-  const bundle = getBundledRuleset();
-  const ruleset = compileRuleset(bundle, defaultBoardId(bundle));
+  const bundle = getM2Fixture();
+  const ruleset = compileRuleset(bundle, M2_BOARD_ID);
   let state: SimState = createInitialState(SCENARIO_SEED, ruleset);
   // Each probe placed 10 ticks apart, anchored to the BOSS wave's OWN observed LAUNCH
   // transition (located by creep id, never a hardcoded index; S11 P2). A per-probe
@@ -633,8 +637,8 @@ describe('M2-S10 — the finale: `boss`, `armored-flyer`, `frost-splash`, measur
   });
 
   it('`armored-flyer` is hit by `antiair` and NEVER targeted by `basic` (domain gating)', () => {
-    const bundle = getBundledRuleset();
-    const ruleset = compileRuleset(bundle, defaultBoardId(bundle));
+    const bundle = getM2Fixture();
+    const ruleset = compileRuleset(bundle, M2_BOARD_ID);
     let state: SimState = createInitialState(SCENARIO_SEED, ruleset);
     const inputs = survivalWallInputs(ruleset);
     const towerKindById = new Map<number, string>();
@@ -706,8 +710,8 @@ describe('M2-S10 — the finale: `boss`, `armored-flyer`, `frost-splash`, measur
   });
 
   it('`frost-splash` slows EVERY member within one blast radius — the composability proof (m2.md, ruleset.ts:603-609)', () => {
-    const bundle = getBundledRuleset();
-    const ruleset = compileRuleset(bundle, defaultBoardId(bundle));
+    const bundle = getM2Fixture();
+    const ruleset = compileRuleset(bundle, M2_BOARD_ID);
     let state: SimState = createInitialState(SCENARIO_SEED, ruleset);
     // Wave index 1 (`swarm`, 16 x, spacingTicks 5) bunches creeps close enough
     // together (speed 30 fp/tick x 5 ticks = 150 fp apart) that a single 384 fp

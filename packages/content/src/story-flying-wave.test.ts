@@ -1,5 +1,9 @@
 // story-flying-wave.test.ts — the M2-S7 P6 pinned wave-5 measurement (PLAN.md §P6).
 //
+// M3 story 4: this file runs the FROZEN M2 bundle (`m2-fixture.ts` — `field-01` and M2's ten
+// waves), not the shipped one, which is now the crossing board. "Shipped" in the prose below
+// means as M2 shipped it; every pinned value is unchanged.
+//
 // LOCATION NOTE, same reasoning as `story-armored-wave.test.ts`'s own header: this file
 // lives beside `parity.test.ts` (not in `packages/sim`, which cannot import
 // `@wynding/content`) so every scenario below runs the REAL shipped `wynding-core`
@@ -41,7 +45,7 @@ import {
   type SimState,
   type CompiledRuleset,
 } from '@wynding/sim';
-import { getBundledRuleset, defaultBoardId } from './registry';
+import { getM2Fixture, M2_BOARD_ID } from './m2-fixture';
 import { withoutDestination } from './test-digest';
 import {
   waveIndexForCreep,
@@ -123,8 +127,8 @@ describe('wave 5 (the appended `flying` wave) — S7 done-criteria, each measure
 
   function runGroundOnlyWall() {
     if (groundOnlyResult) return groundOnlyResult;
-    const bundle = getBundledRuleset();
-    const ruleset = compileRuleset(bundle, defaultBoardId(bundle));
+    const bundle = getM2Fixture();
+    const ruleset = compileRuleset(bundle, M2_BOARD_ID);
     const inputs = baselineInputs(ruleset, () => []);
     const flyingDef = ruleset.creepById['flying'];
     if (!flyingDef) throw new Error("expected a compiled 'flying' creep");
@@ -283,8 +287,8 @@ describe('wave 5 (the appended `flying` wave) — S7 done-criteria, each measure
       { col: 24, row: 10 },
       { col: 24, row: 12 },
     ];
-    const bundle = getBundledRuleset();
-    const ruleset = compileRuleset(bundle, defaultBoardId(bundle));
+    const bundle = getM2Fixture();
+    const ruleset = compileRuleset(bundle, M2_BOARD_ID);
     const flyingWaveIndex = waveIndexForCreep(ruleset, 'flying');
     const antiairWall = wallInputsFromObservedWave(
       ruleset,
@@ -435,8 +439,8 @@ describe('wave 5 (the appended `flying` wave) — S7 done-criteria, each measure
       { col: 20, row: 9 },
       { col: 20, row: 13 },
     ];
-    const bundle = getBundledRuleset();
-    const ruleset = compileRuleset(bundle, defaultBoardId(bundle));
+    const bundle = getM2Fixture();
+    const ruleset = compileRuleset(bundle, M2_BOARD_ID);
     const flyingWaveIndex = waveIndexForCreep(ruleset, 'flying');
     const slowWall = wallInputsFromObservedWave(ruleset, flyingWaveIndex, slowAnchors, 'slow', 200);
     const inputs = baselineInputs(ruleset, slowWall);
@@ -557,8 +561,8 @@ describe('wave 5 (the appended `flying` wave) — S7 done-criteria, each measure
   );
 
   it("placement over a live `flying` creep's occupied cell succeeds", () => {
-    const bundle = getBundledRuleset();
-    const ruleset = compileRuleset(bundle, defaultBoardId(bundle));
+    const bundle = getM2Fixture();
+    const ruleset = compileRuleset(bundle, M2_BOARD_ID);
     const inputs = baselineInputs(ruleset, () => []);
     const flyingWaveIndex = waveIndexForCreep(ruleset, 'flying');
     let state: SimState = createInitialState(SCENARIO_SEED, ruleset);

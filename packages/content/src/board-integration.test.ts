@@ -1,11 +1,15 @@
 // board-integration.test.ts — proves the shipped ruleset (field-01) builds a
-// valid, solvable grid AND compiles for the sim, loaded the same way a real
-// consumer does: through the registry. It lives on the CONTENT side (content →
+// valid, solvable grid AND compiles for the sim, parsed by the same
+// `parseRulesetJson` the registry runs. It lives on the CONTENT side (content →
 // sim) because the repo's dependency graph flows one way
 // (types ← engine ← sim ← content); @wynding/sim is now a RUNTIME dependency of
 // this package (M2-S1: the registry itself calls `parseRulesetJson`), not merely a
 // test-only devDependency, so this test exercises a real production edge rather
 // than a test-only shortcut.
+//
+// M3 story 4: this file runs the FROZEN M2 bundle (`m2-fixture.ts` — `field-01` and M2's ten
+// waves), not the shipped one, which is now the crossing board. "Shipped" in the prose below
+// means as M2 shipped it; every pinned value is unchanged.
 
 import { describe, it, expect } from 'vitest';
 import {
@@ -18,10 +22,10 @@ import {
   GridError,
   type BoardSpec,
 } from '@wynding/sim';
-import { getBundledRuleset, defaultBoardId } from './registry';
+import { getM2Fixture, M2_BOARD_ID } from './m2-fixture';
 
-const ruleset = getBundledRuleset();
-const boardId = defaultBoardId(ruleset);
+const ruleset = getM2Fixture();
+const boardId = M2_BOARD_ID;
 // field-01 is one entrance → exit pair in format 3 (`west` → `east`), as the sim's
 // `BoardSpec` sees it: cells by index, the destination as exit indices.
 const shippedPair = ruleset.boards[0]!;

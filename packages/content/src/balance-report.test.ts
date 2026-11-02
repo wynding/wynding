@@ -6,13 +6,13 @@
 
 import { describe, it, expect } from 'vitest';
 import { compileRuleset, createInitialState, type SimState } from '@wynding/sim';
-import { getBundledRuleset } from './registry';
+import { getM2Fixture, loadRulesetOrM2Fixture, M2_BOARD_ID } from './m2-fixture';
 import { balanceReport, closestText, strongest } from './balance-report';
 import type { BuildRun } from './balance-run';
 import { drawGrid, type ReferenceBuild, type ReferenceSet } from './reference-build';
 import { M2_PINNED_LOSER, M2_SHOWCASE, M2_WINNER_A, M2_WINNER_B } from './reference-builds';
 
-const ruleset = compileRuleset(getBundledRuleset('wynding-core'), 'field-01');
+const ruleset = compileRuleset(getM2Fixture(), M2_BOARD_ID); // M2's board, frozen in M3 story 4
 
 /** `grid` (as authored) with one more tower drawn over it. */
 function withTower(grid: string, col: number, row: number, letter: string): string {
@@ -77,8 +77,8 @@ describe('the balance report', () => {
     'reports sells, how many came with creeps alive, and that no build won',
     { timeout: 120_000 },
     () => {
-      const { text, failures } = balanceReport([LOSING_SET], getBundledRuleset);
-      expect(text).toContain('== probe: wynding-core / field-01, seed 0x5eed ==');
+      const { text, failures } = balanceReport([LOSING_SET], loadRulesetOrM2Fixture);
+      expect(text).toContain('== probe: m2-fixture / field-01, seed 0x5eed ==');
       expect(text).toMatch(
         /undefended — nothing built\n {2}lost · .* · last tower never · lost to 1 normal from wave 1 while on wave 2\n/,
       );
@@ -95,7 +95,7 @@ describe('the balance report', () => {
     'never names a juggler the strongest build, says when the strongest plan is incomplete, and fails on it',
     { timeout: 120_000 },
     () => {
-      const { text, failures } = balanceReport([WINNING_SET], getBundledRuleset);
+      const { text, failures } = balanceReport([WINNING_SET], loadRulesetOrM2Fixture);
       // The juggler wins on 10 lives too, and is registered first: without the rule it
       // would be the strongest.
       expect(text).toMatch(
@@ -109,7 +109,7 @@ describe('the balance report', () => {
   );
 
   it('fails when no reference set is registered', () => {
-    expect(balanceReport([], getBundledRuleset).failures).toEqual([
+    expect(balanceReport([], loadRulesetOrM2Fixture).failures).toEqual([
       'no reference sets are registered',
     ]);
   });
@@ -149,7 +149,7 @@ describe('the report’s small rules', () => {
 
   it('fails a registered set with no builds', () => {
     const empty: ReferenceSet = { ...M2_SHOWCASE, id: 'empty', builds: [] };
-    expect(balanceReport([empty], getBundledRuleset).failures).toEqual([
+    expect(balanceReport([empty], loadRulesetOrM2Fixture).failures).toEqual([
       'empty: the set has no builds',
     ]);
   });

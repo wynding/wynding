@@ -1,5 +1,9 @@
 // story-showcase.test.ts — M2 Story 11 P4: the balance pass's centre.
 //
+// M3 story 4: this file runs the FROZEN M2 bundle (`m2-fixture.ts` — `field-01` and M2's ten
+// waves), not the shipped one, which is now the crossing board. "Shipped" in the prose below
+// means as M2 shipped it; every pinned value is unchanged.
+//
 // Two WINNING builds, structurally distinct by construction, plus one selected LOSING
 // build, all three run as pinned input scripts against the REAL shipped `wynding-core`
 // bundle (`compileRuleset` -> `createInitialState` -> `step`) — never a hand-assembled
@@ -34,7 +38,7 @@ import {
   type SimState,
   type CompiledRuleset,
 } from '@wynding/sim';
-import { getBundledRuleset, defaultBoardId } from './registry';
+import { getM2Fixture, M2_BOARD_ID } from './m2-fixture';
 import { waveIndexForCreep } from './wave-lookup';
 import { WINNER_A, WINNER_B, LOSER, type Placement } from './showcase-builds';
 import { runBuildScript } from './script-runner';
@@ -118,8 +122,8 @@ interface BuildResult {
  * harness flips `attributionExact` false rather than being silently approximated.
  */
 function runBuild(plan: readonly Placement[]): BuildResult {
-  const bundle = getBundledRuleset();
-  const ruleset = compileRuleset(bundle, defaultBoardId(bundle));
+  const bundle = getM2Fixture();
+  const ruleset = compileRuleset(bundle, M2_BOARD_ID);
 
   // The UNBUFFED authored amount per tower id, read off the compiled catalog — the
   // baseline the beacon's support-added damage is measured against. A fire-time

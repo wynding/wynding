@@ -86,6 +86,11 @@ export interface ShellHud {
 export interface ShellPreview {
   readonly root: HTMLElement;
   readonly title: HTMLElement;
+  /** The wave's hit-point clause (M3), hidden while a wave's creeps have the catalog's: its
+   *  full sentence (`hpFull`, for assistive tech) and its aria-hidden glance (`hpGlance`). */
+  readonly hp: HTMLElement;
+  readonly hpFull: HTMLElement;
+  readonly hpGlance: HTMLElement;
   readonly list: HTMLUListElement;
 }
 
@@ -490,15 +495,33 @@ export function createShell(
   // inside the status region and off the projected grid entirely, in both layouts.
   preview.setAttribute(REGION_ATTR, 'preview');
   preview.hidden = true;
+  // The head: the title, then the wave's hit-point clause (M3 creep HP growth) under it — one
+  // box, so the Standard strip can stack the two inside its one fixed line and the clause takes
+  // no room from the rows (`ui.css`). In the Compact column it is an ordinary block.
+  const previewHead = doc.createElement('div');
+  previewHead.className = 'wy-wave-preview-head';
   const previewTitle = doc.createElement('p');
   previewTitle.className = 'wy-wave-preview-title';
+  // The clause: a full sentence for assistive tech and an aria-hidden glance, as each row has.
+  // Hidden at the catalog's 100 — every wave until M3's later blocks.
+  const previewHp = doc.createElement('p');
+  previewHp.className = 'wy-wave-preview-hp';
+  previewHp.hidden = true;
+  const previewHpFull = doc.createElement('span');
+  // Its own class, not a row's `wy-preview-full`: the rows' sentences are read by that class.
+  previewHpFull.className = 'wy-preview-hp-full';
+  const previewHpGlance = doc.createElement('span');
+  previewHpGlance.className = 'wy-preview-hp-glance';
+  previewHpGlance.setAttribute('aria-hidden', 'true');
+  previewHp.append(previewHpFull, previewHpGlance);
   const previewList = doc.createElement('ul');
   previewList.className = 'wy-wave-preview-list';
   // Explicit, not implied: WebKit drops a list's semantics once it is styled `list-style: none`
   // and laid out as a flex row — exactly the strip's form — so VoiceOver would read the
   // entries as loose text. The role restores "list, N items".
   previewList.setAttribute('role', 'list');
-  preview.append(previewTitle, previewList);
+  previewHead.append(previewTitle, previewHp);
+  preview.append(previewHead, previewList);
 
   // --- The pollable board summary (#79). A haircut taken on evidence rather than
   // preference: the owner playtest established that nothing in the design requires a
@@ -728,7 +751,14 @@ export function createShell(
     hudBox,
     hud: { lives, bounty, score, wave, stars },
     statusSummary,
-    preview: { root: preview, title: previewTitle, list: previewList },
+    preview: {
+      root: preview,
+      title: previewTitle,
+      hp: previewHp,
+      hpFull: previewHpFull,
+      hpGlance: previewHpGlance,
+      list: previewList,
+    },
     dock: {
       root: dock,
       pause: pauseBtn,

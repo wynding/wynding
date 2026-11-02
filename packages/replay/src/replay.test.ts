@@ -26,9 +26,9 @@ import {
 } from './index';
 import { DEFENSE_PLAN } from './test-support';
 
-const m1Ruleset = getBundledRuleset();
-const M1_BOARD_ID = defaultBoardId(m1Ruleset);
-const HASH = currentRulesetHash(m1Ruleset);
+const shippedRuleset = getBundledRuleset();
+const SHIPPED_BOARD_ID = defaultBoardId(shippedRuleset);
+const HASH = currentRulesetHash(shippedRuleset);
 const HEX64 = /^[0-9a-f]{64}$/;
 
 // Several tests here re-simulate whole runs synchronously. Yield a macrotask after each so
@@ -40,7 +40,7 @@ afterEach(() => new Promise<void>((r) => setImmediate(r)));
 function makeReplay(overrides: Partial<Replay> = {}): Replay {
   return {
     seed: 12345,
-    boardId: M1_BOARD_ID,
+    boardId: SHIPPED_BOARD_ID,
     rulesetHash: HASH,
     simVersion: SIM_VERSION,
     // Launch the wave; with no defense every creep leaks → the validator drives empty
@@ -52,14 +52,14 @@ function makeReplay(overrides: Partial<Replay> = {}): Replay {
 
 describe('replay validate() — terminal re-simulation + score', () => {
   it('re-simulates to a stable terminal hash, score, and stars', () => {
-    const first = validate(makeReplay(), m1Ruleset);
-    const again = validate(makeReplay(), m1Ruleset);
+    const first = validate(makeReplay(), shippedRuleset);
+    const again = validate(makeReplay(), shippedRuleset);
     expect(first.ok).toBe(true);
     expect(first.finalHash).toBeDefined();
     expect(first.finalHash).toBe(again.finalHash);
     expect(first.score).toBe(again.score);
     expect(first.stars).toBe(again.stars);
-    // Undefended M1: the wave leaks out → a loss, which since sv16 (#25) grades 0 on both
+    // The undefended shipped board: the wave leaks out → a loss, which since sv16 (#25) grades 0 on both
     // readouts regardless of what it banked. This fixture banks nothing either (no tower,
     // no kills), so it reaches 0 by both routes at once; `packages/sim`'s wave-multi loss
     // branch and `packages/content`'s registry invariant are where the two are told apart.
@@ -76,44 +76,44 @@ describe('replay validate() — terminal re-simulation + score', () => {
 describe('replay validate() — envelope structural validation', () => {
   it('rejects a non-negative-safe-integer seed', () => {
     for (const seed of [-1, 1.5, Number.MAX_SAFE_INTEGER + 1] as number[]) {
-      const r = validate(makeReplay({ seed }), m1Ruleset);
+      const r = validate(makeReplay({ seed }), shippedRuleset);
       expect(r.ok).toBe(false);
       expect(r.reason).toContain('seed');
     }
   });
 
   it('rejects a non-object replay', () => {
-    const r = validate(null as unknown as Replay, m1Ruleset);
+    const r = validate(null as unknown as Replay, shippedRuleset);
     expect(r.ok).toBe(false);
     expect(r.reason).toContain('replay must be an object');
   });
 
   it('rejects an empty / non-string boardId', () => {
-    const r = validate(makeReplay({ boardId: '' }), m1Ruleset);
+    const r = validate(makeReplay({ boardId: '' }), shippedRuleset);
     expect(r.ok).toBe(false);
     expect(r.reason).toContain('boardId');
   });
 
   it('rejects a replay recorded under a different sim version', () => {
-    const r = validate(makeReplay({ simVersion: 999 }), m1Ruleset);
+    const r = validate(makeReplay({ simVersion: 999 }), shippedRuleset);
     expect(r.ok).toBe(false);
     expect(r.reason).toContain('sim version mismatch');
   });
 
   it('rejects a rulesetHash that is not a 64-hex digest', () => {
-    const r = validate(makeReplay({ rulesetHash: 'deadbeef' }), m1Ruleset);
+    const r = validate(makeReplay({ rulesetHash: 'deadbeef' }), shippedRuleset);
     expect(r.ok).toBe(false);
     expect(r.reason).toContain('64-char hex');
   });
 
   it('rejects a 64-hex rulesetHash that does not match the bundle', () => {
-    const r = validate(makeReplay({ rulesetHash: '0'.repeat(64) }), m1Ruleset);
+    const r = validate(makeReplay({ rulesetHash: '0'.repeat(64) }), shippedRuleset);
     expect(r.ok).toBe(false);
     expect(r.reason).toContain('ruleset hash mismatch');
   });
 
   it('rejects an unknown boardId (the bundle cannot resolve it)', () => {
-    const r = validate(makeReplay({ boardId: 'no-such-board' }), m1Ruleset);
+    const r = validate(makeReplay({ boardId: 'no-such-board' }), shippedRuleset);
     expect(r.ok).toBe(false);
     expect(r.reason).toContain('boardId');
   });
@@ -127,7 +127,7 @@ describe('replay validate() — re-simulation budget caps', { timeout: 120_000 }
     expect(MAX_MATCH_TICKS).toBe(72_000);
     const r = validate(
       makeReplay({ tickInputs: Array.from({ length: 72_001 }, () => []) }),
-      m1Ruleset,
+      shippedRuleset,
     );
     expect(r.ok).toBe(false);
     expect(r.reason).toBe('too many ticks: 72001 exceeds limit 72000');
@@ -135,7 +135,7 @@ describe('replay validate() — re-simulation budget caps', { timeout: 120_000 }
     // log runs on long after the run ends — but as padding, not for its length.
     const atCap = validate(
       makeReplay({ tickInputs: Array.from({ length: 72_000 }, () => []) }),
-      m1Ruleset,
+      shippedRuleset,
     );
     expect(atCap.ok).toBe(false);
     expect(atCap.reason).toMatch(/^tick \d+ is logged past match termination$/);
@@ -143,7 +143,7 @@ describe('replay validate() — re-simulation budget caps', { timeout: 120_000 }
 
   it('rejects a replay with too many inputs on a single tick', () => {
     const burst: SimInput[] = Array.from({ length: 65 }, () => ({ kind: 'noop' }));
-    const r = validate(makeReplay({ tickInputs: [burst] }), m1Ruleset);
+    const r = validate(makeReplay({ tickInputs: [burst] }), shippedRuleset);
     expect(r.ok).toBe(false);
     expect(r.reason).toContain('too many inputs');
   });
@@ -161,7 +161,7 @@ describe('replay validate() — re-simulation budget caps', { timeout: 120_000 }
     expect(MAX_TOWER_PLACEMENTS).toBe(1_000);
     const r = validate(
       makeReplay({ tickInputs: Array.from({ length: 1_001 }, () => [placeAt(1, 1)]) }),
-      m1Ruleset,
+      shippedRuleset,
     );
     expect(r.ok).toBe(false);
     expect(r.reason).toBe('too many tower placements: exceeds limit 1000');
@@ -173,13 +173,14 @@ describe('replay validate() — re-simulation budget caps', { timeout: 120_000 }
       ...Array.from({ length: 1_000 }, () => [placeAt(1, 1)]),
       ...Array.from({ length: 1_001 }, () => [sell]),
     ];
-    const r = validate(makeReplay({ tickInputs }), m1Ruleset);
+    const r = validate(makeReplay({ tickInputs }), shippedRuleset);
     expect(r.ok).toBe(false);
     expect(r.reason).toBe('too many tower commands: exceeds limit 2000');
   });
 
   /**
-   * Play a juggling build on M2's own board and validate its log: `kept` basics placed and
+   * Play a juggling build on the shipped board and validate its log (it doesn't depend on the
+   * board's shape): `kept` basics placed and
    * kept, then `flips` sell-and-rebuild flips of one more, every command committed and paid
    * for (5 a placement, 5 − 3 a flip). The bundle starts with enough bounty and a long first
    * countdown that the whole script plays before a creep exists, so nothing blocks an anchor.
@@ -262,7 +263,7 @@ describe('replay validate() — command-union validation (ADR 0006 §4)', () => 
   it('rejects a malformed input element without throwing', () => {
     const r = validate(
       makeReplay({ tickInputs: [[null]] as unknown as Replay['tickInputs'] }),
-      m1Ruleset,
+      shippedRuleset,
     );
     expect(r.ok).toBe(false);
     expect(r.reason).toContain('malformed');
@@ -270,52 +271,56 @@ describe('replay validate() — command-union validation (ADR 0006 §4)', () => 
 
   it('rejects a non-array tickInputs and a non-array tick', () => {
     expect(
-      validate(makeReplay({ tickInputs: 'x' as unknown as Replay['tickInputs'] }), m1Ruleset)
+      validate(makeReplay({ tickInputs: 'x' as unknown as Replay['tickInputs'] }), shippedRuleset)
         .reason,
     ).toContain('tickInputs must be an array');
     expect(
-      validate(makeReplay({ tickInputs: ['x'] as unknown as Replay['tickInputs'] }), m1Ruleset)
+      validate(makeReplay({ tickInputs: ['x'] as unknown as Replay['tickInputs'] }), shippedRuleset)
         .reason,
     ).toContain('inputs must be an array');
   });
 
   it('rejects an unknown command kind', () => {
-    expect(validate(withInput({ kind: 'teleportCreep' }), m1Ruleset).reason).toContain(
+    expect(validate(withInput({ kind: 'teleportCreep' }), shippedRuleset).reason).toContain(
       'unknown command kind',
     );
   });
 
   it('rejects a removed spawnCreep command as an unknown command (spawns come from the schedule)', () => {
-    const r = validate(withInput({ kind: 'spawnCreep', hp: 10 }), m1Ruleset);
+    const r = validate(withInput({ kind: 'spawnCreep', hp: 10 }), shippedRuleset);
     expect(r.ok).toBe(false);
     expect(r.reason).toContain('unknown command kind');
   });
 
   it('rejects a sellTower whose id is not a safe integer', () => {
     for (const tower of ['x', 1.5, null, NaN]) {
-      expect(validate(withInput({ kind: 'sellTower', tower }), m1Ruleset).reason).toContain(
+      expect(validate(withInput({ kind: 'sellTower', tower }), shippedRuleset).reason).toContain(
         'sellTower.tower',
       );
     }
   });
 
   it('rejects a placeTower whose anchor is malformed or out of bounds', () => {
-    expect(validate(withInput({ kind: 'placeTower', anchor: null }), m1Ruleset).reason).toContain(
-      'placeTower.anchor must be a cell',
-    );
     expect(
-      validate(withInput({ kind: 'placeTower', anchor: { col: 0.5, row: 1 } }), m1Ruleset).reason,
+      validate(withInput({ kind: 'placeTower', anchor: null }), shippedRuleset).reason,
+    ).toContain('placeTower.anchor must be a cell');
+    expect(
+      validate(withInput({ kind: 'placeTower', anchor: { col: 0.5, row: 1 } }), shippedRuleset)
+        .reason,
     ).toContain('placeTower.anchor');
     expect(
-      validate(withInput({ kind: 'placeTower', anchor: { col: -1, row: 1 } }), m1Ruleset).reason,
+      validate(withInput({ kind: 'placeTower', anchor: { col: -1, row: 1 } }), shippedRuleset)
+        .reason,
     ).toContain('out of bounds');
   });
 
   it('rejects a placeTower whose towerId does not name a catalog tower', () => {
     for (const towerId of ['no-such-tower', 1, null, undefined]) {
       expect(
-        validate(withInput({ kind: 'placeTower', anchor: { col: 1, row: 1 }, towerId }), m1Ruleset)
-          .reason,
+        validate(
+          withInput({ kind: 'placeTower', anchor: { col: 1, row: 1 }, towerId }),
+          shippedRuleset,
+        ).reason,
       ).toContain('placeTower.towerId must name a catalog tower');
     }
   });
@@ -333,7 +338,7 @@ describe('replay validate() — command-union validation (ADR 0006 §4)', () => 
           ],
         ],
       }),
-      m1Ruleset,
+      shippedRuleset,
     );
     expect(r.ok).toBe(true);
   });
@@ -357,7 +362,7 @@ describe('replay validate() — terminal contract (ADR 0006)', () => {
       const inputs: SimInput[][] = Array.from({ length: 900 }, () => []);
       inputs[0] = [{ kind: 'callWaveEarly' }];
       inputs[800] = trailing;
-      const r = validate(makeReplay({ tickInputs: inputs }), m1Ruleset);
+      const r = validate(makeReplay({ tickInputs: inputs }), shippedRuleset);
       expect(r.ok).toBe(false);
       expect(r.reason).toContain('past match termination');
     }
@@ -367,7 +372,7 @@ describe('replay validate() — terminal contract (ADR 0006)', () => {
     // An unplayable board (interior, non-border entrance) makes loadBoard throw a
     // GridError inside compileRuleset; validate must surface it as a rejection, not
     // let it escape as an unhandled 500.
-    const badGeometry = JSON.parse(JSON.stringify(m1Ruleset)) as Ruleset;
+    const badGeometry = JSON.parse(JSON.stringify(shippedRuleset)) as Ruleset;
     (badGeometry.boards[0]!.entrances[0] as { cell: { col: number; row: number } }).cell = {
       col: 5,
       row: 5,
@@ -375,7 +380,7 @@ describe('replay validate() — terminal contract (ADR 0006)', () => {
     const r1 = validate(
       {
         seed: 1,
-        boardId: M1_BOARD_ID,
+        boardId: SHIPPED_BOARD_ID,
         rulesetHash: '0'.repeat(64),
         simVersion: SIM_VERSION,
         tickInputs: [],
@@ -389,12 +394,12 @@ describe('replay validate() — terminal contract (ADR 0006)', () => {
     // `validateRulesetShape` — the NEW validate-first stage (Codex R2-1) — before the
     // digest is even taken, re-targeting the v1-era "a float trips canonicalJson" case
     // to the v2 field that now carries per-creep tuning (decision 6).
-    const badFloat = JSON.parse(JSON.stringify(m1Ruleset)) as Ruleset;
+    const badFloat = JSON.parse(JSON.stringify(shippedRuleset)) as Ruleset;
     (badFloat.creepCatalog[0] as { leakCost: number }).leakCost = 1.5;
     const r2 = validate(
       {
         seed: 1,
-        boardId: M1_BOARD_ID,
+        boardId: SHIPPED_BOARD_ID,
         rulesetHash: '0'.repeat(64),
         simVersion: SIM_VERSION,
         tickInputs: [],

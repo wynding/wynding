@@ -204,6 +204,85 @@ test('wave 1 and the real wave 9, at 1280×720, 1440×900, 1920×1080 and 1080×
   expect(audit.violations, JSON.stringify(audit.violations, null, 2)).toEqual([]);
 });
 
+test('under a wide font, the densest waves keep the strip’s line at the four desktop sizes, with room to spare (M3)', async ({
+  page,
+}) => {
+  // The strip's type is `system-ui`, which a Linux machine draws in a wider face than macOS
+  // does: CI's ran wave 9's line 2px past the strip at 1080×810 while every Mac had room. So
+  // the fit is pinned under a WIDE face: Verdana where it is installed (macOS; wider than CI's
+  // face, so conservative), DejaVu Sans where it is not (Linux, CI's own face). Two waves, on
+  // the waves harness, each under its real title: the shipped wave 9, and m3.md's densest arc
+  // wave the strip will show — wave 29, four streams on both routes at +170% hit points, its
+  // clause stacked under the title. Each keeps its line with 16px to spare at every size on one
+  // status line: the margin a further stream's growth spends before the strip takes its scroll
+  // form (measured on macOS at 1080×810: 31px for each).
+  test.setTimeout(90_000);
+  const HARNESS = 'http://localhost:4176/e2e-harness/waves.html';
+  const WIDE = '* { font-family: Verdana, "DejaVu Sans", sans-serif !important; }';
+  const VIEWS = [
+    { width: 1280, height: 720 },
+    { width: 1440, height: 900 },
+    { width: 1920, height: 1080 },
+    { width: 1080, height: 810 },
+  ];
+  const WAVES = [
+    { name: 'the shipped wave 9', query: 'wave=9&as=9/10', title: 'Wave 9 of 10', hp: null },
+    {
+      name: 'the arc’s wave 29',
+      query:
+        'as=29/30&hp=270&streams=armored-flyer:west:8,armored-flyer:north:6,armored:north:8,swarm:west:8',
+      title: 'Wave 29 of 30',
+      hp: '+170% hit points',
+    },
+  ];
+  const titleWidth = (): Promise<number> =>
+    page.evaluate(() => {
+      const range = document.createRange();
+      range.selectNodeContents(document.querySelector('.wy-wave-preview-title')!);
+      return range.getBoundingClientRect().width;
+    });
+  for (const wave of WAVES) {
+    await page.setViewportSize(VIEWS[0]!);
+    await page.goto(`${HARNESS}?${wave.query}`);
+    const strip = page.locator('.wy-wave-preview');
+    await expect(strip.locator('.wy-wave-preview-title')).toHaveText(wave.title);
+    await expect(strip.locator('li')).toHaveCount(4);
+    if (wave.hp !== null) await expect(strip.locator('.wy-preview-hp-glance')).toHaveText(wave.hp);
+    // Two routes, each arrow drawn once (`overlay.ts`'s `byRoute`).
+    await expect(strip.locator('.wy-preview-arrow')).toHaveText(['→', '↓']);
+    // The premise: the forced face is at least as wide as the one the page draws by default —
+    // where neither Verdana nor DejaVu Sans exists, a narrower fallback would prove nothing.
+    const usual = await titleWidth();
+    await page.addStyleTag({ content: WIDE });
+    expect(
+      await titleWidth(),
+      `${wave.name}: the forced face is a wide one`,
+    ).toBeGreaterThanOrEqual(usual - 0.5);
+    for (const view of VIEWS) {
+      await page.setViewportSize(view);
+      await settle(page);
+      const at = `${wave.name} at ${view.width}×${view.height}`;
+      const status = (await regionRect(page, 'status')) as Rect;
+      expect(status.height, `${at}: one status line`).toBeLessThanOrEqual(
+        view.width === 1080 ? 64 : 56,
+      );
+      const m = await page.evaluate(() => {
+        const el = document.querySelector<HTMLElement>('.wy-wave-preview')!;
+        const b = el.getBoundingClientRect();
+        const end =
+          b.left + el.clientLeft + el.clientWidth - parseFloat(getComputedStyle(el).paddingRight);
+        const list = document.querySelector('.wy-wave-preview-list')!.getBoundingClientRect();
+        return {
+          slack: end - list.right,
+          scrollForm: el.classList.contains('wy-wave-preview--scroll'),
+        };
+      });
+      expect(m.scrollForm, `${at}: the strip needed its scroll form`).toBe(false);
+      expect(m.slack, `${at}: px to spare at the line's end`).toBeGreaterThanOrEqual(16);
+    }
+  }
+});
+
 test('a strip whose line runs past its edge fades that edge, follows the scroll and costs no width', async ({
   page,
 }) => {
@@ -553,7 +632,9 @@ async function compactColumn(page: Page): Promise<{
     const bottom = h.bottom - parseFloat(getComputedStyle(hud).borderBottomWidth);
     const items = [
       ...hud.querySelectorAll<HTMLElement>(
-        ':scope > .wy-chip, :scope > .wy-wave-preview .wy-wave-preview-title, :scope > .wy-wave-preview .wy-preview-entry',
+        // `hud-cut.ts`'s items, the wave's hit-point clause (M3) among them: hidden on every
+        // shipped wave, so it adds nothing here until a wave grows.
+        ':scope > .wy-chip, :scope > .wy-wave-preview .wy-wave-preview-title, :scope > .wy-wave-preview .wy-wave-preview-hp, :scope > .wy-wave-preview .wy-preview-entry',
       ),
     ]
       .map((el) => ({ el, r: el.getBoundingClientRect() }))
@@ -564,10 +645,14 @@ async function compactColumn(page: Page): Promise<{
       const b = el.getBoundingClientRect();
       return [b.x, b.y, b.width, b.height].map((v) => v.toFixed(3)).join(',');
     };
-    // Each item's painted lines, from its visible form: a chip's glance, a strip line's glance, the
-    // title itself — never a visually hidden sentence, whose 1px box is not painted.
+    // Each item's painted lines, from its visible form: a chip's glance, a strip line's or the
+    // hit-point clause's glance, the title itself — never a visually hidden sentence, whose 1px
+    // box is not painted.
     const lines = (el: HTMLElement): DOMRect[] => {
-      const shown = el.querySelector<HTMLElement>('.wy-chip-glance, .wy-preview-glance') ?? el;
+      const shown =
+        el.querySelector<HTMLElement>(
+          '.wy-chip-glance, .wy-preview-glance, .wy-preview-hp-glance',
+        ) ?? el;
       const out = [...shown.querySelectorAll('svg')].map((svg) => svg.getBoundingClientRect());
       const walker = document.createTreeWalker(shown, NodeFilter.SHOW_TEXT);
       for (let n = walker.nextNode(); n; n = walker.nextNode()) {
@@ -1419,8 +1504,8 @@ async function stripRowsRead(
 
 /** What each phase's strip reads aloud: wave 1 before Start, wave 2 once Start claims wave 1. */
 const SPOKEN = {
-  'pre-start': ['10 × Creep — ground, armor 0, leak cost 1, no immunities'],
-  started: ['16 × Swarm Creep — ground, armor 0, leak cost 1, no immunities'],
+  'pre-start': ['10 × Creep — west to east, ground, armor 0, leak cost 1, no immunities'],
+  started: ['16 × Swarm Creep — west to east, ground, armor 0, leak cost 1, no immunities'],
 } as const;
 
 // The column's track is vw-capped and does not grow with the text, so a one-line row ran its

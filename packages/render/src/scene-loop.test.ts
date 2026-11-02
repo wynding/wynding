@@ -159,7 +159,12 @@ vi.mock('./board-frame', async (importActual) => ({
 import { mount } from './scene';
 import type { RenderHandle, RenderOverlay, RenderVM, SparkPoint } from './types';
 
-const GEOMETRY = { cols: 10, rows: 10, entrance: { col: 0, row: 5 }, exit: { col: 9, row: 5 } };
+const GEOMETRY = {
+  cols: 10,
+  rows: 10,
+  entrances: [{ col: 0, row: 5 }],
+  exits: [{ col: 9, row: 5 }],
+};
 const board = { getBoundingClientRect: () => ({ left: 0, top: 0, width: 280, height: 240 }) };
 const vm: RenderVM = { tick: 1, phase: 'running', creeps: [], towers: [] };
 const overlay = (sparks: readonly SparkPoint[] = []): RenderOverlay => ({
@@ -172,7 +177,7 @@ const overlay = (sparks: readonly SparkPoint[] = []): RenderOverlay => ({
   reducedMotion: false,
   tracers: [],
   kills: [],
-  leaks: 0,
+  leaks: [],
 });
 const SPARK: SparkPoint = { x: 3 * 256, y: 4 * 256, radiusFp: 256 };
 

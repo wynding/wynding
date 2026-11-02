@@ -15,13 +15,13 @@ import {
   type SimState,
 } from '@wynding/sim';
 import type { Ruleset } from '@wynding/types';
-import { getBundledRuleset } from './registry';
+import { getM2Fixture, M2_BOARD_ID } from './m2-fixture';
 import { FIELD_UNITS_PER_CELL, remainingFraction, runReferenceBuild } from './balance-run';
 import { runBuildScript, type ScriptStep } from './script-runner';
 import { compileReferenceBuild, drawGrid, type ReferenceBuild } from './reference-build';
 import { WINNER_A } from './showcase-builds';
 
-const ruleset = compileRuleset(getBundledRuleset('wynding-core'), 'field-01');
+const ruleset = compileRuleset(getM2Fixture(), M2_BOARD_ID); // M2's board, frozen in M3 story 4
 const SEED = 0x5eed;
 
 /** A state holding one creep of `creepId`, on its way from cell `from` to cell `head`. */
@@ -100,13 +100,13 @@ describe('remaining fraction — the closest-approach measure, per creep', () =>
   it('refuses a destination two entrances share: the creep’s own entrance is not recorded', () => {
     // field-01 plus a second entrance bound for the same exit — which entrance a creep
     // left is what its empty-board distance needs, and the sim keeps only its destination.
-    const b = structuredClone(getBundledRuleset('wynding-core')) as Ruleset;
+    const b = structuredClone(getM2Fixture()) as Ruleset;
     (b.boards[0]!.entrances as unknown as object[]).push({
       id: 'west-lo',
       cell: { col: 0, row: 20 },
       destination: ['east'],
     });
-    const shared = compileRuleset(b, 'field-01');
+    const shared = compileRuleset(b, M2_BOARD_ID);
     const state = createInitialState(SEED, shared);
     state.creeps = oneCreep('normal', [13, 11], [14, 11], 128).creeps;
     expect(() => remainingFraction(shared, state, 0, shared.board.fields)).toThrow(

@@ -4131,7 +4131,7 @@ describe('main — the lives chip’s leak cue, wired to a real run (#181 C1)', 
     for (let i = 0; i < 100_000 && count() > 1; i++) {
       const was = { lives: count(), cued: cued() };
       sched.frame((clock += FRAME_MS));
-      boardLeaks += vi.mocked(fakeHandle.draw).mock.calls.at(-1)?.[3]?.leaks ?? 0;
+      boardLeaks += vi.mocked(fakeHandle.draw).mock.calls.at(-1)?.[3]?.leaks.length ?? 0;
       const dropped = count() < was.lives;
       if (dropped && drops++ === 0) expect(cued(), 'the first leak cues at once').toBe(true);
       if (cued() && !was.cued) {

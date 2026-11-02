@@ -15,12 +15,18 @@ import {
   SIM_VERSION,
   type SimInput,
 } from '@wynding/sim';
-import { getBundledRuleset } from '@wynding/content';
 import type { Ruleset } from '@wynding/types';
+// M2's catalog and economy, which the synthetic arc stands on (`test-support.ts`): the
+// frozen M2 bundle since M3 story 4, when the shipped one became the crossing board, read
+// from disk by the content package's tooling loader (reached by relative path, as
+// `apps/server`'s replay-parity test reaches its test support; the bundle's own `?raw`
+// loader is Vite-only and does not type-check here).
+import { loadArtifactRuleset } from '../../content/src/balance-artifacts';
+import { M2_FIXTURE_KEY } from '../../content/src/m2-fixture-key';
 import { validate, currentRulesetHash } from './index';
 import { DEFENSE_PLAN, playScript, thirtyWaveBundle, THIRTY_WAVE_BOARD_ID } from './test-support';
 
-const M2 = getBundledRuleset();
+const M2 = loadArtifactRuleset(M2_FIXTURE_KEY);
 const SV16_CAP = 36_000;
 
 // Several tests here re-simulate whole runs synchronously. Yield a macrotask after each so

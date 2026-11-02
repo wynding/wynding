@@ -72,9 +72,10 @@
 //     none is imported today, and data carries no behaviour, but it is a gap, not a guarantee. Nor
 //     is harness support code outside the directory covered: `apps/web/src/scripted-run.ts`
 //     (test support the results harness shares with `controller.test.ts`),
-//     `packages/content/src/showcase-builds.ts` and `packages/replay/src/test-support.ts` (which
-//     that harness reaches by relative path, the second for its 30-wave run) carry no hook and no
-//     fake transport, and nothing here would see shipped code import them. The
+//     `packages/content/src/showcase-builds.ts`, `packages/content/src/m2-fixture.ts` and
+//     `packages/replay/src/test-support.ts` (which that harness reaches by relative path, the
+//     last for its 30-wave run) carry no hook and no fake transport, and nothing here would see
+//     shipped code import them. The
 //     markers are reached from the module's top-level side effects, so any graph that imports the
 //     module keeps them. A refactor that moves a marker behind a call shipped code never makes lets
 //     Rollup drop it, and the module could then ship unseen — the same limit as `stats.ts` above.
@@ -216,6 +217,12 @@ const MARKERS = [
     module: 'apps/web/e2e-harness/',
     emittedBy: 'apps/web/e2e-harness/results-entry.ts',
     why: "the results harness entry's failure message for a scripted run that never ends (apps/web/e2e-harness/results-entry.ts, #181 H2) — an ordinary string literal in the controller factory that the module's top-level `createApp` call passes, so any graph that imports the module keeps it",
+  },
+  {
+    text: 'waves harness: the board has no wave',
+    module: 'apps/web/e2e-harness/',
+    emittedBy: 'apps/web/e2e-harness/waves-entry.ts',
+    why: "the waves harness entry's failure message for a `?wave=` the board does not have (apps/web/e2e-harness/waves-entry.ts, M3 story 4) — an ordinary string literal at the module's top level, so any graph that imports the module keeps it",
   },
   {
     text: '__wyTurnedHeads',
