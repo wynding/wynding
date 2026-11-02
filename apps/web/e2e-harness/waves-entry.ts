@@ -3,15 +3,15 @@
 // `dist-e2e`, a directory nothing that ships reads.
 //
 // Why a harness: the wave strip states a wave's hit points when its creeps do not have the
-// catalog's ("+70% hit points"), and no shipped wave does yet — every wave of the crossing
-// board's placeholder schedule is at 100, until stories 5–7 author the ones that grow. So this
-// page boots the REAL app (the real scene, overlay and `main.ts`'s requestAnimationFrame
-// scheduler) on the shipped bundle with its waves changed, through the controller's content
-// seam, and the strip shows the clause from the first frame:
+// catalog's ("+70% hit points"), and no shipped wave does yet — block 1's are all at 100, until
+// stories 6–7 author the ones that grow; nor does block 1 carry a wave of more than two
+// streams, where the arc's densest carry four. So this page boots the REAL app (the real scene,
+// overlay and `main.ts`'s requestAnimationFrame scheduler) on the shipped bundle with its waves
+// changed, through the controller's content seam, and the strip shows them from the first frame:
 //
 // - `?hp=<percent>` sets every wave's `hpPercent` (default 100, the shipped value);
-// - `&wave=<n>` gives wave 1 wave n's streams, so a dense wave (9's four streams on two routes)
-//   is what the strip shows before Start.
+// - `&wave=<n>[,<m>…]` gives wave 1 the streams of waves n, m, … in that order, so a dense line
+//   (`8,9`: four streams on two routes) is what the strip shows before Start.
 //
 // Nothing else changes: the board, the catalog and the rest of each wave are the shipped ones.
 
@@ -22,16 +22,19 @@ import { createController } from '../src/controller';
 
 const params = new URLSearchParams(window.location.search);
 const hp = Number(params.get('hp') ?? '100');
-const from = Number(params.get('wave') ?? '1');
+const from = (params.get('wave') ?? '1').split(',').map(Number);
 
 const bundle = structuredClone(getBundledRuleset()) as Ruleset;
 const board = bundle.boards[0] as unknown as {
   waves: { hpPercent: number; entries: unknown[] }[];
 };
-const source = board.waves[from - 1];
-// The message is also `check:build-layering`'s marker for this module: rename it there too.
-if (source === undefined) throw new Error(`waves harness: the board has no wave ${String(from)}`);
-board.waves[0]!.entries = structuredClone(source.entries);
+const streams = from.flatMap((n) => {
+  const source = board.waves[n - 1];
+  // The message is also `check:build-layering`'s marker for this module: rename it there too.
+  if (source === undefined) throw new Error(`waves harness: the board has no wave ${String(n)}`);
+  return source.entries;
+});
+board.waves[0]!.entries = structuredClone(streams);
 for (const wave of board.waves) wave.hpPercent = hp;
 const content = { bundle, boardId: defaultBoardId(bundle) } as const;
 

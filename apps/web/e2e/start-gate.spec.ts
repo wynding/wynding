@@ -111,11 +111,8 @@ test('holds at tick 0 until Start, commits a Pending pre-start build, and Play-a
   // "Call wave") — wave 1 already launched on Start above, so this calls 2 through 10,
   // keeping the spec deterministic and fast rather than waiting out nine full natural
   // countdowns (smoke.spec.ts exercises the identical flow end-to-end, with the preview
-  // + axe). The bundle carries ten waves — M2-S6 appended index 4 (`resolute`+`fast`),
-  // M2-S7 appended index 5 (8 × `flying`), M2-S10 appended indices 6 and 7
-  // (`armored-flyer` and the boss wave), and M2-S11 inserted two further rows (a second
-  // `normal`+`swarm` wave and the arc's four-entry densest tick) — so this early-calls
-  // nine, not three.
+  // + axe). The bundle carries ten waves — block 1 of M3's arc (M3 story 5) — so this
+  // early-calls nine.
   for (let waveNumber = 2; waveNumber <= 10; waveNumber++) {
     // Gate each press on LAUNCH-specific state, not the free-running sim heartbeat:
     // a tick boundary can fall between a tick-read and the click, so a tick-poll

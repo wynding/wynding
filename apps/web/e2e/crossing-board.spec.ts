@@ -147,12 +147,19 @@ test('the strip names each stream’s route — in words beside a lone stream, b
   await expect(preview.locator('.wy-preview-route-name')).toBeVisible();
   await page.getByRole('button', { name: 'Start' }).click();
   await page.getByRole('button', { name: 'Pause' }).click();
-  // Start claims wave 1, so the calls launch waves 2–4 and wave 5 — the north route's first — is next.
-  for (let wave = 2; wave <= 4; wave++) await callWavePaced(page, titleAfterCall(wave, 10));
-  await expect(preview.locator('.wy-wave-preview-title')).toHaveText('Wave 5 of 10');
+  // Start claims wave 1, so calling wave 2 brings up wave 3 — the north route's first, a lone
+  // stream: its own arrow, and its route in words.
+  await callWavePaced(page, titleAfterCall(2, 10));
+  await expect(preview.locator('.wy-wave-preview-title')).toHaveText('Wave 3 of 10');
+  await expect(preview.locator('.wy-preview-arrow')).toHaveText(['↓']);
+  await expect(preview.locator('.wy-preview-route-name')).toHaveText(['north to south']);
+  await expect(preview.locator('.wy-preview-route-name')).toBeVisible();
+  // Wave 4 is the first on both routes: one creep kind, a stream down each.
+  await callWavePaced(page, titleAfterCall(3, 10));
+  await expect(preview.locator('.wy-wave-preview-title')).toHaveText('Wave 4 of 10');
   await expect(preview.locator('.wy-preview-full')).toHaveText([
-    '12 × Creep — west to east, ground, armor 0, leak cost 1, no immunities',
-    '6 × Swarm Creep — north to south, ground, armor 0, leak cost 1, no immunities',
+    '8 × Fast Creep — west to east, ground, armor 0, leak cost 1, no immunities',
+    '6 × Fast Creep — north to south, ground, armor 0, leak cost 1, no immunities',
   ]);
   // Two streams: each row's arrow carries its route; the line has no room for words.
   await expect(preview.locator('.wy-preview-arrow')).toHaveText(['→', '↓']);
@@ -246,8 +253,9 @@ for (const { name, insets, floor } of INSET_CASES) {
 // --- The wave's hit-point clause, in a browser (M3) -----------------------------------------
 // No shipped wave changes its creeps' hit points yet, so these run on the waves harness
 // (`e2e-harness/waves-entry.ts`): the real app on the shipped bundle with every wave's
-// `hpPercent` set (`?hp=`), and wave 1 given wave 9's four streams on two routes (`&wave=9`),
-// the densest line the strip shows.
+// `hpPercent` set (`?hp=`), and wave 1 given waves 8 and 9's streams (`&wave=8,9`): four
+// streams on two routes, the densest line the strip shows (block 1's own waves carry two at
+// most; the arc's four-stream waves come with blocks 2–3).
 
 const WAVES = 'http://localhost:4176/e2e-harness/waves.html';
 
@@ -311,9 +319,9 @@ for (const [zoom, hp, glance, sentence] of [
     page,
   }) => {
     await page.setViewportSize({ width: 1280, height: 720 });
-    await openWaves(page, 'hp=100&wave=9', zoom);
+    await openWaves(page, 'hp=100&wave=8,9', zoom);
     const plain = await stripHead(page);
-    await openWaves(page, `hp=${String(hp)}&wave=9`, zoom);
+    await openWaves(page, `hp=${String(hp)}&wave=8,9`, zoom);
     const strip = page.locator('.wy-wave-preview');
     await expect(strip.locator('.wy-preview-hp-glance')).toHaveText(glance);
     await expect(strip.locator('.wy-preview-hp-glance')).toBeVisible();
@@ -356,7 +364,7 @@ for (const zoom of [100, 200] as const) {
     page,
   }) => {
     await page.setViewportSize(PHONE);
-    await openWaves(page, 'hp=80&wave=9', zoom);
+    await openWaves(page, 'hp=80&wave=8,9', zoom);
     await expect(page.locator('.wy-preview-hp-full')).toHaveText(
       'Every creep in this wave has 20% fewer hit points',
     );
@@ -415,7 +423,7 @@ test('Compact: the column rests on its last whole item, the hit-point clause one
   let restsOnClause = 0;
   for (let height = 320; height <= 500; height += 10) {
     await page.setViewportSize({ width: 740, height });
-    await openWaves(page, 'hp=80&wave=9', 100);
+    await openWaves(page, 'hp=80&wave=8,9', 100);
     const at = await page.evaluate(() => {
       const hud = document.querySelector<HTMLElement>('.wy-hud')!;
       hud.scrollTop = 0; // at rest

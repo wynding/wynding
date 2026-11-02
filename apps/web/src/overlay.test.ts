@@ -4763,14 +4763,16 @@ describe('overlay — the countdown dial and the early-call note (#181 H1)', () 
       expect(primary.getAttribute('title'), `${s}s`).toBe(paysAt(s) ? NOTE : null);
     }
     // The boundary the accessibility checklist states for shipped content — the note falls
-    // silent from 3s — held unconditionally, so a retune of the divisor fails HERE and the
+    // silent from 5s — held unconditionally, so a retune of the divisor fails HERE and the
     // checklist is re-stated, rather than the claim going stale behind a skipped assertion.
+    // Re-stated M3 story 5: the divisor 50 → 100 moved it from 3s (6s holds 101–120 ticks,
+    // every one paying; 5s holds 81–100, and 81 pays nothing).
     let firstPaying = 1;
     while (!paysAt(firstPaying)) firstPaying++;
     expect(
       { divisor, msPerTick: MS_PER_TICK, firstPaying },
-      'docs/accessibility-checklist.md: "shipped content: from 3s" — re-state it on a retune',
-    ).toEqual({ divisor: 50, msPerTick: 50, firstPaying: 4 });
+      'docs/accessibility-checklist.md: "shipped content: from 5s" — re-state it on a retune',
+    ).toEqual({ divisor: 100, msPerTick: 50, firstPaying: 6 });
   });
 
   it('notes the bonus iff EVERY tick count the shown second can hold would pay one — enumerated, across divisors', () => {

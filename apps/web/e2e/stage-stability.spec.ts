@@ -690,8 +690,9 @@ test('1000×720, walking to wave 9: the board never re-projects — the strip is
   const gridBefore = await projectedGrid(page);
   const statusBefore = await statusHeight(page);
 
-  // The real walk, not an injected fixture: wave 9 is the arc's densest preview (four
-  // entries), so this measures the width the shipped content actually demands.
+  // The real walk, not an injected fixture: every wave the shipped run previews, wave 9 —
+  // block 1's wall, two entries, one of them airborne — last, so this measures the width the
+  // shipped content actually demands.
   const previewTitle = page.locator('.wy-wave-preview .wy-wave-preview-title');
   await page.getByRole('button', { name: 'Start' }).click(); // Start claims wave 1 (#70)
   await expect(previewTitle).toHaveText('Wave 2 of 10');
@@ -700,7 +701,7 @@ test('1000×720, walking to wave 9: the board never re-projects — the strip is
     await callWavePaced(page, titleAfterCall(waveNumber, 10));
   }
   await expect(previewTitle).toHaveText('Wave 9 of 10');
-  await expect(page.locator('.wy-wave-preview li')).toHaveCount(4);
+  await expect(page.locator('.wy-wave-preview li')).toHaveCount(2);
 
   expect(await statusHeight(page), 'wave 9 resized the status row').toBe(statusBefore);
   expect(await projectedGrid(page), 'wave 9 re-projected the board').toEqual(gridBefore);
@@ -721,8 +722,8 @@ test('1512×854, wave 9 pending: a tower built in the corner the preview used to
 }) => {
   // The #101 regression case, at the reported viewport, in the reported situation. The
   // owner's words were "I rarely build in that corner, though — but I could! Except I can't
-  // because it's in the way" — so this builds there, walks the run to wave 9 (the arc's
-  // densest preview, four entries), and proves the strip and the tower do not share a pixel —
+  // because it's in the way" — so this builds there, walks the run to wave 9 (block 1's wall,
+  // two entries), and proves the strip and the tower do not share a pixel —
   // nor the strip and ANY cell of the board, since #181 put it in the status row for good.
   //
   // Above the sum of this test's budgets — seven paced calls at a 5s in-page deadline each
@@ -763,7 +764,7 @@ test('1512×854, wave 9 pending: a tower built in the corner the preview used to
     await callWavePaced(page, titleAfterCall(waveNumber, 10));
   }
   await expect(previewTitle).toHaveText('Wave 9 of 10');
-  await expect(page.locator('.wy-wave-preview li')).toHaveCount(4);
+  await expect(page.locator('.wy-wave-preview li')).toHaveCount(2);
 
   // The tower's own 2×2 footprint in page coordinates, and the strip's box. Not one pixel
   // of overlap — the whole complaint was that the corner was unusable because the card was

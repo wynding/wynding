@@ -119,12 +119,11 @@ test('1080×810 at 200% text: the strip shares the wrapped chips’ second line 
   expect(m.status, 'two lines of status row').toBeLessThanOrEqual(190);
 });
 
-test('wave 1 and the real wave 9, at 1280×720, 1440×900, 1920×1080 and 1080×810: one status line, the strip whole inside it, unclipped, clear of the board', async ({
+test('wave 1 and a four-stream line, at 1280×720, 1440×900, 1920×1080 and 1080×810: one status line, the strip whole inside it, unclipped, clear of the board', async ({
   page,
 }) => {
-  // Seven paced calls at a 5s in-page deadline each, plus four viewports measured twice and an
-  // axe audit — above the 60s config default (the marathon specs' budget-coherence rule).
-  test.setTimeout(150_000);
+  // Four viewports measured twice and an axe audit — above the 60s config default.
+  test.setTimeout(120_000);
   const VIEWS = [
     { width: 1280, height: 720 },
     { width: 1440, height: 900 },
@@ -189,17 +188,16 @@ test('wave 1 and the real wave 9, at 1280×720, 1440×900, 1920×1080 and 1080×
     await expect(page.locator('.wy-wave-preview .wy-preview-name')).toHaveText('Creep');
   }
 
+  // The densest line: four streams on two routes. Block 1's own waves carry two at most (the
+  // arc's four-stream waves come with blocks 2–3), so it is wave 1 on the waves harness
+  // (`e2e-harness/waves-entry.ts`), given waves 8 and 9's streams.
   await page.setViewportSize(VIEWS[0]!);
-  await page.getByRole('button', { name: 'Start' }).click(); // Start claims wave 1 (#70)
-  await expect(previewTitle).toHaveText('Wave 2 of 10');
-  await page.getByRole('button', { name: 'Pause' }).click();
-  for (let waveNumber = 2; waveNumber <= 8; waveNumber++) {
-    await callWavePaced(page, titleAfterCall(waveNumber, 10));
-  }
-  await expect(previewTitle).toHaveText('Wave 9 of 10');
+  await page.goto('http://localhost:4176/e2e-harness/waves.html?wave=8,9');
+  await expect(page.locator('.wy-board')).toBeVisible();
+  await expect(previewTitle).toHaveText('Wave 1 of 10');
   await expect(page.locator('.wy-wave-preview li')).toHaveCount(4);
-  await assertStrip('wave 9');
-  // The densest wave on screen: axe-clean, the strip and its four icons included.
+  await assertStrip('four streams');
+  // The densest line on screen: axe-clean, the strip and its four icons included.
   const audit = await new AxeBuilder({ page }).include('#app').analyze();
   expect(audit.violations, JSON.stringify(audit.violations, null, 2)).toEqual([]);
 });
@@ -207,7 +205,7 @@ test('wave 1 and the real wave 9, at 1280×720, 1440×900, 1920×1080 and 1080×
 test('a strip whose line runs past its edge fades that edge, follows the scroll and costs no width', async ({
   page,
 }) => {
-  // 360×640 (portrait Standard) gives the strip 203px beside the home link, and wave 5 is the
+  // 360×640 (portrait Standard) gives the strip 203px beside the home link, and wave 4 is the
   // first real two-entry wave — a line longer than that on any font stack (asserted below, so
   // the test cannot pass vacuously on one whose line happens to fit).
   test.setTimeout(90_000);
@@ -217,10 +215,10 @@ test('a strip whose line runs past its edge fades that edge, follows the scroll 
   await page.getByRole('button', { name: 'Start' }).click(); // Start claims wave 1 (#70)
   await expect(previewTitle).toHaveText('Wave 2 of 10');
   await page.getByRole('button', { name: 'Pause' }).click();
-  for (let waveNumber = 2; waveNumber <= 4; waveNumber++) {
+  for (let waveNumber = 2; waveNumber <= 3; waveNumber++) {
     await callWavePaced(page, titleAfterCall(waveNumber, 10));
   }
-  await expect(previewTitle).toHaveText('Wave 5 of 10');
+  await expect(previewTitle).toHaveText('Wave 4 of 10');
   await expect(strip.locator('li')).toHaveCount(2);
   await settle(page);
 
@@ -246,7 +244,7 @@ test('a strip whose line runs past its edge fades that edge, follows the scroll 
     });
 
   const rest = await read();
-  expect(rest.overflows, 'the premise: wave 5 overflows the strip here').toBe(true);
+  expect(rest.overflows, 'the premise: wave 4 overflows the strip here').toBe(true);
   expect(rest.scrollForm).toBe(true);
   // At rest the line continues past the trailing edge only.
   expect([rest.before, rest.after]).toEqual(['0', '1']);
@@ -871,26 +869,23 @@ test('no hidden sentence or hidden chip becomes PAGE scroll range — the page n
   }
 });
 
-test('360×640, the real wave 9: no page scroll range, a reader’s move to a row scrolls the STRIP, and a plain wheel scrolls it until it can go no further', async ({
+test('360×640, a four-stream line: no page scroll range, a reader’s move to a row scrolls the STRIP, and a plain wheel scrolls it until it can go no further', async ({
   page,
 }) => {
-  test.setTimeout(120_000); // seven paced calls (the marathon specs' budget-coherence rule)
   await gotoAt(page, { width: 360, height: 640 });
   await settle(page);
   expect(await pageScrollRange(page), 'wave 1, before Start').toEqual({ x: 0, y: 0 });
-  await page.getByRole('button', { name: 'Start' }).click();
-  await expect(page.locator('.wy-wave-preview .wy-wave-preview-title')).toHaveText('Wave 2 of 10');
-  await page.getByRole('button', { name: 'Pause' }).click();
-  for (let waveNumber = 2; waveNumber <= 8; waveNumber++) {
-    await callWavePaced(page, titleAfterCall(waveNumber, 10));
-  }
+  // Four streams, the arc's densest line: block 1's own waves carry two at most (its four-stream
+  // waves come with blocks 2–3), so wave 1 on the waves harness, given waves 8 and 9's streams.
+  await page.goto('http://localhost:4176/e2e-harness/waves.html?wave=8,9');
+  await expect(page.locator('.wy-board')).toBeVisible();
   await expect(page.locator('.wy-wave-preview li')).toHaveCount(4);
   await settle(page);
   const strip = page.locator('.wy-wave-preview');
   await expect(strip, 'the premise: four entries scroll in a phone’s strip').toHaveClass(
     /wy-wave-preview--scroll/,
   );
-  expect(await pageScrollRange(page), 'wave 9').toEqual({ x: 0, y: 0 });
+  expect(await pageScrollRange(page), 'four streams').toEqual({ x: 0, y: 0 });
 
   // A screen reader moving to the last row's sentence brings it into view by scrolling the
   // STRIP — its containing block is the row now — never the page, which nothing could pan back.
@@ -1170,7 +1165,7 @@ async function measureStrip(
   }, restyle);
 }
 
-test('Compact: an air entry’s wings are never cut by the column — waves 6, 8 and 9, at 658×320 and 568×320 (#181 R4 QC)', async ({
+test('Compact: an air entry’s wings are never cut by the column — waves 6 and 9, at 658×320 and 568×320 (#181 R4 QC)', async ({
   page,
 }) => {
   // The wings reach past the icon's box by design (`ui.css`'s `overflow: visible`), so whatever
@@ -1187,7 +1182,7 @@ test('Compact: an air entry’s wings are never cut by the column — waves 6, 8
   for (let waveNumber = 2; waveNumber <= 8; waveNumber++) {
     await callWavePaced(page, titleAfterCall(waveNumber, 10));
     const next = waveNumber + 1; // the wave the strip now previews
-    if (next !== 6 && next !== 8 && next !== 9) continue; // the flyer, the armored flyer, wave 9's flyer
+    if (next !== 6 && next !== 9) continue; // block 1's air: the flyer, the armored flyer
     for (const size of [PHONE, { width: 568, height: 320 }]) {
       await page.setViewportSize(size);
       await settle(page);
@@ -1215,7 +1210,7 @@ test('Compact: an air entry’s wings are never cut by the column — waves 6, 8
     await page.setViewportSize(PHONE);
     await settle(page);
   }
-  expect(measured).toBe(6);
+  expect(measured).toBe(4);
 });
 
 test('forced colors: an air entry’s wings are outlines in the user’s text colour on the background, apart from its solid body (#181 R4 QC)', async ({
@@ -1561,25 +1556,25 @@ test('Compact: in a wave of several creeps each count stays with its own icon �
   page,
 }) => {
   // Waves 1 and 2, which the per-phone tests read, have one entry each, so no wrapped count
-  // there has another entry's icon under it. Wave 9 has four, the last of them airborne.
-  test.setTimeout(240_000); // seven paced calls, then four windows at five text sizes
-  await gotoAt(page, PHONE);
+  // there has another entry's icon under it. Block 1's waves carry two at most, so this reads
+  // the arc's densest line on the waves harness (`e2e-harness/waves-entry.ts`): wave 1 given
+  // waves 8 and 9's streams, four entries, the third airborne.
+  test.setTimeout(180_000); // four windows at five text sizes
+  await page.setViewportSize(PHONE);
+  await stubFullscreen(page);
+  await page.goto('http://localhost:4176/e2e-harness/waves.html?wave=8,9');
+  await expect(page.locator('.wy-board')).toBeVisible();
   expect(await page.evaluate((q) => matchMedia(q).matches, COMPACT_QUERY)).toBe(true);
   const previewTitle = page.locator('.wy-wave-preview .wy-wave-preview-title');
-  await page.getByRole('button', { name: 'Start', exact: true }).click(); // Start claims wave 1 (#70)
-  await expect(previewTitle).toHaveText('Wave 2 of 10');
-  await page.getByRole('button', { name: 'Pause' }).click();
-  for (let waveNumber = 2; waveNumber <= 8; waveNumber++) {
-    await callWavePaced(page, titleAfterCall(waveNumber, 10));
-  }
-  await expect(previewTitle).toHaveText('Wave 9 of 10');
+  await expect(previewTitle).toHaveText('Wave 1 of 10');
+  await expect(page.locator('.wy-wave-preview li')).toHaveCount(4);
   let underAboveNext = 0;
   for (const size of STRIP_PHONES) {
     await page.setViewportSize(size);
     for (const percent of [100, 125, 150, 175, 200]) {
       await setTextSize(page, percent);
       await settle(page);
-      const what = `wave 9, ${size.width}×${size.height} at ${percent}%`;
+      const what = `four streams, ${size.width}×${size.height} at ${percent}%`;
       expect(
         await page.evaluate((q) => matchMedia(q).matches, COMPACT_QUERY),
         `${what}: Compact`,

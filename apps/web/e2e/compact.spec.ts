@@ -14,7 +14,6 @@ import {
 } from './layout-probe';
 import { firePrompt, installPromptFactory, stubIosPlatform } from './install-stub';
 import { stubFullscreen } from './fullscreen-stub';
-import { callWavePaced, titleAfterCall } from './paced-call';
 import { COMPACT_QUERY } from '../src/layout';
 import { TARGET_MIN_PX } from './targets';
 
@@ -314,86 +313,52 @@ test.describe('Compact layout (PLAN.md P1 / two-layouts contract)', () => {
     await expect(entries.first()).toBeInViewport();
   });
 
-  // M2-S11 P1b: the arc's densest tick (wave index 8, "Wave 9 of 10") carries FOUR
-  // concurrent creep streams — the preview's row count grows from a maximum of 2 rows
-  // (M2-S6's `resolute`+`fast`) to 4. `home.spec.ts`'s `STANDARD_ROW_MAX_PX` flag covers
-  // the HORIZONTAL axis (a wider per-entry string); this is the first test of the
+  // M2-S11 P1b: the arc's densest ticks carry FOUR concurrent creep streams — the preview's
+  // row count grows from a maximum of 2 rows to 4. `home.spec.ts`'s `STANDARD_ROW_MAX_PX` flag
+  // covers the HORIZONTAL axis (a wider per-entry string); this is the first test of the
   // VERTICAL axis. The preview already lives inside `.wy-hud`'s bounded, keyboard-scrollable
   // box (contract §1) — the mechanism the test above proves generalizes to overflow content
   // — so this measures whether that SAME mechanism holds up honestly with 4× the rows: no
-  // clipping, every row reachable by keyboard, and axe-clean, at the real compiled
-  // wave-index-8 composition rather than a synthetic stand-in.
-  test("658×320: the four-row wave-9 preview (M2-S11, the arc's densest tick) fits accessibly inside the bounded scrollport", async ({
+  // clipping, every row reachable by keyboard, and axe-clean.
+  // M3 story 5: block 1's waves carry two streams at most (the arc's four-stream waves come
+  // with blocks 2–3), so this runs on the waves harness (`e2e-harness/waves-entry.ts`): the real
+  // app on the shipped bundle, wave 1 given waves 8 and 9's streams — four rows on two routes,
+  // the real catalog compiled by the real ruleset. Held before Start, nothing launches under
+  // the assertion tail.
+  test("658×320: a four-row preview (the arc's densest line) fits accessibly inside the bounded scrollport", async ({
     page,
   }) => {
-    // Above the sum of this test's declared worst-case budgets — seven paced calls
-    // (#70: wave 1 now launches on Start itself, not through this loop) carrying a 5s
-    // in-page deadline each (paced-call.ts) plus the axe/geometry/keyboard tail — which
-    // the 60s config default cannot hold (same budget-coherence rule as the two marathon
-    // specs, CodeRabbit #117). The budget itself is unchanged — one fewer paced call
-    // only widens the margin.
-    test.setTimeout(120_000);
-    await gotoAt(page, PHONE);
+    await page.setViewportSize(PHONE);
+    await stubFullscreen(page);
+    await page.goto('http://localhost:4176/e2e-harness/waves.html?wave=8,9');
+    await expect(page.locator('.wy-board')).toBeVisible();
     const preview = page.locator('.wy-wave-preview');
     const previewTitle = preview.locator('.wy-wave-preview-title');
     const entries = preview.locator('li');
-    const callWave = page.getByRole('button', { name: 'Call wave' });
+    await expect(previewTitle).toHaveText('Wave 1 of 10');
 
-    // Start CLAIMS wave 1 as well as unholding the run (#70) — settle on the wave-2
-    // preview + a call-ready control before the Pause press below, so the claim itself
-    // is a named assertion rather than an incidental side effect of what follows.
-    await page.getByRole('button', { name: 'Start' }).click();
-    // The settle window itself runs UNPAUSED — the claim can only be consumed by a real
-    // tick, so it cannot be waited for under pause. Bounded, not unbounded: two awaited
-    // assertions at 1x against ~450 ticks before this undefended run's first leak, so the
-    // #97 lag class has orders of magnitude of headroom here even though this is, strictly,
-    // a window the old same-tick Start->Pause did not have.
-    await expect(previewTitle).toHaveText('Wave 2 of 10');
-    await expect(callWave).toHaveAttribute('aria-disabled', 'false');
-
-    // Early-call through the REMAINING waves 2..8 to bring wave 9 (index 8, the
-    // four-stream wave) into the preview slot — the same gate-each-press-on-aria
-    // pattern smoke.spec.ts / start-gate.spec.ts use, so a same-tick-deduped press
-    // cannot silently short the loop.
-    // #97: the same undefended-marathon pacing the smoke/start-gate loops use — enter
-    // the loop PAUSED so runner lag between iterations stalls a frozen sim instead of
-    // leaking creeps (this loop free-ran eight calls, the same class that lost runs
-    // mid-loop in those specs, just at 1× with a shorter horizon).
-    await page.getByRole('button', { name: 'Pause' }).click();
-    for (let waveNumber = 2; waveNumber <= 8; waveNumber++) {
-      await expect(previewTitle).toHaveText(`Wave ${waveNumber} of 10`);
-      await expect(callWave).toHaveAttribute('aria-disabled', 'false');
-      await callWavePaced(page, titleAfterCall(waveNumber, 10));
-    }
-    await expect(previewTitle).toHaveText('Wave 9 of 10');
-    // The loop exits paused (callWavePaced's contract), and the tail below NEEDS that
-    // freeze — wave 9's own 300-tick countdown would otherwise keep running under the
-    // long assertion tail (axe + geometry + keyboard-scroll — observed flaking once the
-    // tail crossed the auto-launch boundary on a loaded machine). Paused pins the
-    // preview on wave 9 for the whole tail; the preview reflects Pending state under
-    // pause by design, so nothing measured changes.
     await expect(entries).toHaveCount(4);
     await expect(preview.locator('.wy-preview-full')).toHaveText([
-      '10 × Swarm Creep — north to south, ground, armor 0, leak cost 1, no immunities',
+      '6 × Resolute Creep — north to south, ground, armor 0, leak cost 1, slow',
       '6 × Fast Creep — west to east, ground, armor 0, leak cost 1, no immunities',
-      '4 × Armored Creep — north to south, ground, armor 6 (subtracted from each direct hit; damage over time ignores it), leak cost 1, no immunities',
-      '4 × Flying Creep — west to east, air, armor 0, leak cost 1, no immunities',
+      '6 × Armored Flyer — west to east, air, armor 5 (subtracted from each direct hit; damage over time ignores it), leak cost 1, no immunities',
+      '8 × Creep — north to south, ground, armor 0, leak cost 1, no immunities',
     ]);
-    // The arc's densest wave, in the form a player actually reads it (#181): each row is the
-    // creep's own board art and its count — the shapes tell the four kinds apart (the
-    // armored hexagon among them), and the board's wings ride on the flyer alone, which is
-    // precisely the "is air next?" question the surface is scanned for.
-    await expect(preview.locator('.wy-preview-count')).toHaveText(['×10', '×6', '×4', '×4']);
+    // The densest line, in the form a player actually reads it (#181): each row is the creep's
+    // own board art and its count — the shapes tell the four kinds apart, and the board's wings
+    // ride on the flyer alone, which is precisely the "is air next?" question the surface is
+    // scanned for.
+    await expect(preview.locator('.wy-preview-count')).toHaveText(['×6', '×6', '×6', '×8']);
     const icons = preview.locator('svg.wy-creep-icon');
     await expect(icons).toHaveCount(4);
     expect(
       await icons.evaluateAll((els) => els.map((el) => el.getAttribute('data-wy-shape'))),
-    ).toEqual(['swarm', 'fast', 'armored', 'flying'].map((id) => creepShapeFor(id)));
+    ).toEqual(['resolute', 'fast', 'armored-flyer', 'normal'].map((id) => creepShapeFor(id)));
     expect(
       await icons.evaluateAll((els) =>
         els.map((el) => el.querySelector('.wy-creep-wing') !== null),
       ),
-    ).toEqual([false, false, false, true]);
+    ).toEqual([false, false, true, false]);
     for (const icon of await icons.all()) await expect(icon).toBeVisible();
 
     // axe audit with all 4 rows showing — the standard bar every other HUD content is
@@ -401,13 +366,9 @@ test.describe('Compact layout (PLAN.md P1 / two-layouts contract)', () => {
     const audit = await new AxeBuilder({ page }).include('#app').analyze();
     expect(audit.violations, JSON.stringify(audit.violations, null, 2)).toEqual([]);
 
-    // GUARD: the paused sim (the loop's #97 exit state) is what pins this title — wave
-    // 9's 300-tick countdown would otherwise auto-launch under this tail (~15 s at 1×)
-    // and flip the preview to wave 10's two-row composition, going stale on the 4
-    // materialized entry locators (boundingBox() null). Re-asserting the title keeps
-    // that a NAMED failure if the freeze is ever lost, instead of a mystery null
-    // dereference on a slow runner.
-    await expect(previewTitle).toHaveText('Wave 9 of 10');
+    // GUARD: held before Start, the title cannot move under this tail; re-asserting it keeps
+    // a lost hold a NAMED failure rather than a stale-locator mystery below.
+    await expect(previewTitle).toHaveText('Wave 1 of 10');
 
     // No clipping: the preview's rendered box, and every one of its 4 rows, stays within
     // the Compact column's own width — never spilling past it or off the viewport (a
