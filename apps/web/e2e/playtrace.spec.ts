@@ -63,7 +63,7 @@ const ALLOWED_FIELDS = [
 async function playToResults(page: import('@playwright/test').Page): Promise<void> {
   await page.getByRole('button', { name: 'Start' }).click();
   const callWave = page.getByRole('button', { name: 'Call wave' });
-  await expect(page.locator('.wy-wave-preview .wy-wave-preview-title')).toHaveText('Wave 2 of 20');
+  await expect(page.locator('.wy-wave-preview .wy-wave-preview-title')).toHaveText('Wave 2 of 30');
   await expect(callWave).toHaveAttribute('aria-disabled', 'false');
   await callWave.click();
   await expect(page.locator('.wy-results')).toBeVisible({ timeout: 60_000 });

@@ -303,7 +303,7 @@ test.describe('home affordance — Standard layout', () => {
     // far longer before a single creep even spawns).
     const callWave = page.getByRole('button', { name: 'Call wave' });
     await expect(page.locator('.wy-wave-preview .wy-wave-preview-title')).toHaveText(
-      'Wave 2 of 20',
+      'Wave 2 of 30',
     );
     await expect(callWave).toHaveAttribute('aria-disabled', 'false');
     await callWave.click();

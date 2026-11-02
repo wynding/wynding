@@ -149,14 +149,14 @@ test('the strip names each stream’s route — in words beside a lone stream, b
   await page.getByRole('button', { name: 'Pause' }).click();
   // Start claims wave 1, so calling wave 2 brings up wave 3 — the north route's first, a lone
   // stream: its own arrow, and its route in words.
-  await callWavePaced(page, titleAfterCall(2, 20));
-  await expect(preview.locator('.wy-wave-preview-title')).toHaveText('Wave 3 of 20');
+  await callWavePaced(page, titleAfterCall(2, 30));
+  await expect(preview.locator('.wy-wave-preview-title')).toHaveText('Wave 3 of 30');
   await expect(preview.locator('.wy-preview-arrow')).toHaveText(['↓']);
   await expect(preview.locator('.wy-preview-route-name')).toHaveText(['north to south']);
   await expect(preview.locator('.wy-preview-route-name')).toBeVisible();
   // Wave 4 is the first on both routes: one creep kind, a stream down each.
-  await callWavePaced(page, titleAfterCall(3, 20));
-  await expect(preview.locator('.wy-wave-preview-title')).toHaveText('Wave 4 of 20');
+  await callWavePaced(page, titleAfterCall(3, 30));
+  await expect(preview.locator('.wy-wave-preview-title')).toHaveText('Wave 4 of 30');
   await expect(preview.locator('.wy-preview-full')).toHaveText([
     '8 × Fast Creep — west to east, ground, armor 0, leak cost 1, no immunities',
     '6 × Fast Creep — north to south, ground, armor 0, leak cost 1, no immunities',
@@ -262,7 +262,7 @@ const WAVES = 'http://localhost:4176/e2e-harness/waves.html';
 async function openWaves(page: Page, query: string, zoom: 100 | 200): Promise<void> {
   await page.goto(`${WAVES}?${query}`);
   if (zoom === 200) await page.addStyleTag({ content: ':root { font-size: 200% }' });
-  await expect(page.locator('.wy-wave-preview-title')).toHaveText('Wave 1 of 20');
+  await expect(page.locator('.wy-wave-preview-title')).toHaveText('Wave 1 of 30');
   await expect(page.locator('.wy-wave-preview li')).toHaveCount(4);
   await page.evaluate(
     () => new Promise<void>((r) => requestAnimationFrame(() => requestAnimationFrame(() => r()))),
