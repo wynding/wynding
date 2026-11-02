@@ -15,9 +15,9 @@ export default defineConfig({
     // package that opts into the instrumentation also states the budget it needs. Generous
     // on purpose (4x the worst CI reading, a quarter of what `m2-golden.test.ts` grants its
     // goldens): a slow cold runner must not red a suite that is merely doing its job.
-    // Since M3 story 6 the arc is twenty waves, about 11,700 ticks a run, about 2s each under
-    // coverage locally; every leg that plays it states its own 120s budget, so this default
-    // covers the rest of the package.
+    // Since M3 story 7 the arc is thirty waves, about 19,500 ticks a run, about 4s each under
+    // coverage locally (the longest leg simulates it twice, about 8.5s); every leg that plays
+    // it states its own 120s budget, so this default covers the rest of the package.
     testTimeout: 30_000,
     coverage: {
       provider: 'v8',
