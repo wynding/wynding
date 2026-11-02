@@ -11,7 +11,7 @@
 // seam, and the strip shows them from the first frame:
 //
 // - `?hp=<percent>` sets every wave's `hpPercent` (absent, each wave keeps its shipped one);
-// - `&wave=<n>[,<m>…]` gives wave 1 the streams of waves n, m, … in that order, so a dense line
+// - `wave=<n>[,<m>…]` gives wave 1 the streams of waves n, m, … in that order, so a dense line
 //   (`8,9`: four streams on two routes) is what the strip shows before Start.
 //
 // Nothing else changes: the board, the catalog and the rest of each wave are the shipped ones.

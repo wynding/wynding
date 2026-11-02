@@ -1313,7 +1313,9 @@ test('Compact: the room the wings take moves no count, and no wing runs onto one
   // the page — beside the icon, the old check exactly; a count on the line under it sits below
   // the wings, whatever their reach across. Both forms are measured (the premises at the end).
   // Whether a count fits the column at all is the wrap's, pinned by the per-phone tests below.
-  test.setTimeout(360_000); // twenty previews, two windows and four text sizes; generous for slow cores
+  // Twenty previews, two windows and four text sizes: 26s on a fast core with block 2's ten
+  // previews added (M3 story 6). Generous for slow cores.
+  test.setTimeout(360_000);
   await gotoAt(page, PHONE);
   expect(await page.evaluate((q) => matchMedia(q).matches, COMPACT_QUERY)).toBe(true);
   const previewTitle = page.locator('.wy-wave-preview .wy-wave-preview-title');
@@ -1388,12 +1390,14 @@ test('Compact: the room the wings take moves no count, and no wing runs onto one
   console.log(
     `[hud-strip] the wings' room, each count's largest shift against main's strip: ${[...worst]
       .map(([where, px]) => `${where} ${px.toFixed(4)}px`)
-      .join(', ')}`,
+      .join(', ')} (${String(measured)} entries measured)`,
   );
+  // The twenty previews hold 39 entries (16 in block 1, 23 in block 2), each measured at the
+  // two windows and four text sizes.
   expect(
     measured,
     'the premise: every entry of every preview, at both windows and every text size',
-  ).toBeGreaterThan(80);
+  ).toBe(39 * 8);
   // Both forms, so neither half of the difference is vacuous: a count beside its icon, where R4
   // gives its margin back from the gap (658×320 at 100%), and one under it.
   expect(beside, 'the premise: a count beside its icon').toBeGreaterThan(0);

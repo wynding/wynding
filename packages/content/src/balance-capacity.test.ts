@@ -1,13 +1,14 @@
 // balance-capacity.test.ts — M3 story 5: the capacity arithmetic (`balance-capacity.ts`) on
 // small drawings and the shipped schedule, each branch on both sides; the check that the sim
-// takes a drawing as drawn; and the report's capacity lines when the schedule's income does
-// cover a drawing and when it falls short, and its failure when the sim refuses one. The
-// registered capacity drawing is `balance-crossing.test.ts`'s.
+// takes a drawing as drawn, and that it draws the strongest build; and the report's capacity
+// lines when the schedule's income does cover a drawing and when it falls short, and its
+// failure when the sim refuses one or it draws another build. The registered capacity
+// drawing is `balance-crossing.test.ts`'s.
 
 import { describe, it, expect } from 'vitest';
 import { compileRuleset } from '@wynding/sim';
 import { loadRulesetOrM2Fixture } from './m2-fixture';
-import { drawGrid, type ReferenceSet } from './reference-build';
+import { drawGrid, type ReferenceBuild, type ReferenceSet } from './reference-build';
 import {
   M3_CROSSING,
   M3_SERPENTINE,
@@ -21,7 +22,7 @@ import {
   placeCapacityDrawing,
   scheduleIncome,
 } from './balance-capacity';
-import { balanceReport } from './balance-report';
+import { balanceReport, checkDrawsStrongest } from './balance-report';
 
 const bundle = loadRulesetOrM2Fixture(M3_CROSSING.rulesetId);
 const ruleset = compileRuleset(bundle, M3_CROSSING.boardId);
@@ -113,6 +114,50 @@ describe('a capacity drawing, placed', () => {
   });
 });
 
+describe('a capacity drawing of the strongest build', () => {
+  /** A reference build drawing the towers `order` places. */
+  const drawing = (id: string, order: string): ReferenceBuild => {
+    const anchors = new Map<string, readonly [number, number, string]>();
+    for (const token of order.split(' ')) {
+      const m = /^(-?)([a-z])(\d+),(\d+)/.exec(token)!;
+      if (m[1] === '') anchors.set(`${m[3]},${m[4]}`, [Number(m[3]), Number(m[4]), m[2]!]);
+    }
+    return { id, summary: id, grid: drawGrid(ruleset, [...anchors.values()]), order };
+  };
+  const check = (built: string, drawn: string) =>
+    checkDrawsStrongest(
+      'probe',
+      drawing('full', drawn),
+      { build: drawing('best', built) },
+      ruleset,
+    );
+  const BUILT = 'b2,10 v4,10 b6,10';
+  const FAILED = [
+    "probe: the capacity drawing does not draw the strongest build, best — its towers do not begin with that build's",
+  ];
+
+  it('passes the build itself, and a drawing that goes on past it', () => {
+    expect(check(BUILT, BUILT)).toEqual([]);
+    expect(check(BUILT, 'b2,10 v4,10 b6,10 b8,10 v10,10')).toEqual([]);
+  });
+
+  it('reads the towers, not their timing or a juggle', () => {
+    expect(check(BUILT, 'b2,10@600 v4,10 b6,10@900')).toEqual([]);
+    expect(check('b2,10 v4,10 -v4,10@700 v4,10 b6,10', BUILT)).toEqual([]);
+  });
+
+  it('fails one that stops short of it, leaves it late, changes a tower or reorders it', () => {
+    expect(check(BUILT, 'b2,10 v4,10')).toEqual(FAILED);
+    expect(check(BUILT, 'b2,10 v4,10 b8,10 b6,10')).toEqual(FAILED);
+    expect(check(BUILT, 'b2,10 b4,10 b6,10')).toEqual(FAILED);
+    expect(check(BUILT, 'v4,10 b2,10 b6,10')).toEqual(FAILED);
+  });
+
+  it('has nothing to check when no build is strongest', () => {
+    expect(checkDrawsStrongest('probe', M3_SERPENTINE, null, ruleset)).toEqual([]);
+  });
+});
+
 describe('a schedule’s income', () => {
   it('adds each wave’s kill bounty and clear bonus to the starting bounty, and the early calls beside it', () => {
     // Waves 1–3: 10 normals, 16 swarm, 10 normals (1 bounty each), 2 a clear.
@@ -199,7 +244,7 @@ describe('the report’s capacity lines', () => {
         fullBoard: M3_SERPENTINE,
       };
       expect(balanceReport([set], loadRulesetOrM2Fixture).failures).toEqual([
-        "probe/m3-serpentine: the capacity drawing does not draw the strongest build, m3-two-mazes — its plan does not begin with that build's",
+        "probe/m3-serpentine: the capacity drawing does not draw the strongest build, m3-two-mazes — its towers do not begin with that build's",
       ]);
     },
   );

@@ -144,23 +144,35 @@ function boardFullLine(
   return `board-full: the strongest build, ${best.build.id} (won on ${run.state.lives} lives), ${where}`;
 }
 
-/** What makes `full` no drawing of the strongest build, `best`: its plan must begin with
- *  that build's, step for step, so the capacity priced is that build's maze at its mix (the
- *  build itself, once its plan fills the board). Nothing to check when no build is strongest
- *  — the board-full line already says so. */
-function checkDrawsStrongest(
+/** The towers `build` places, each anchor once, in the order it first builds on them — its
+ *  maze, without the timing or a juggle's sell and re-place. */
+function mazeOrder(build: ReferenceBuild, ruleset: CompiledRuleset): string[] {
+  const order: string[] = [];
+  for (const step of compileReferenceBuild(build, ruleset)) {
+    if (step.kind === 'sell') continue;
+    const key = `${step.towerId} ${step.col},${step.row}`;
+    if (!order.includes(key)) order.push(key);
+  }
+  return order;
+}
+
+/** What makes `full` no drawing of the strongest build, `best`: the towers it places must
+ *  begin with that build's, tower for tower and in order (each anchor once, its timing
+ *  ignored), so the capacity priced is a drawing of that build's maze — the build itself,
+ *  once its plan fills the board. Nothing to check when no build is strongest; the
+ *  board-full line already says so. */
+export function checkDrawsStrongest(
   label: string,
   full: ReferenceBuild,
   best: { readonly build: ReferenceBuild } | null,
   ruleset: CompiledRuleset,
 ): string[] {
   if (best === null) return [];
-  const key = (steps: readonly unknown[]): string[] => steps.map((s) => JSON.stringify(s));
-  const drawn = key(compileReferenceBuild(full, ruleset));
-  const built = key(compileReferenceBuild(best.build, ruleset));
-  if (built.every((step, i) => drawn[i] === step)) return [];
+  const drawn = mazeOrder(full, ruleset);
+  const built = mazeOrder(best.build, ruleset);
+  if (built.length <= drawn.length && built.every((tower, i) => drawn[i] === tower)) return [];
   return [
-    `${label}: the capacity drawing does not draw the strongest build, ${best.build.id} — its plan does not begin with that build's`,
+    `${label}: the capacity drawing does not draw the strongest build, ${best.build.id} — its towers do not begin with that build's`,
   ];
 }
 
