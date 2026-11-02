@@ -383,7 +383,7 @@
           "countdownTicks": 550,
           "clearBonus": 3,
           "hpPercent": 155,
-          "entries": [{ "creepId": "flying", "entrance": "north", "count": 10, "spacingTicks": 12 }]
+          "entries": [{ "creepId": "flying", "entrance": "north", "count": 12, "spacingTicks": 8 }]
         },
         {
           "index": 16,
@@ -411,12 +411,12 @@
           "clearBonus": 3,
           "hpPercent": 170,
           "entries": [
-            { "creepId": "armored-flyer", "entrance": "west", "count": 8, "spacingTicks": 18 },
+            { "creepId": "armored-flyer", "entrance": "west", "count": 10, "spacingTicks": 18 },
             { "creepId": "armored", "entrance": "north", "count": 8, "spacingTicks": 20 },
             {
               "creepId": "swarm",
               "entrance": "north",
-              "count": 10,
+              "count": 4,
               "spacingTicks": 5,
               "offsetTicks": 120
             }
@@ -486,7 +486,7 @@
           "index": 23,
           "countdownTicks": 550,
           "clearBonus": 4,
-          "hpPercent": 255,
+          "hpPercent": 270,
           "entries": [
             { "creepId": "armored", "entrance": "west", "count": 8, "spacingTicks": 20 },
             { "creepId": "armored", "entrance": "north", "count": 8, "spacingTicks": 20 }
