@@ -359,7 +359,9 @@ export const M3_NO_ANTI_AIR: ReferenceBuild = {
 };
 
 /** M3's set on the shipped crossing board: the two winners of blocks 1–2, then their three
- *  losers. The serpentine fills the board by wave 20, so it is its own capacity drawing. */
+ *  losers. The winners tie on lives and score, so the first listed, the serpentine, is the
+ *  strongest; it fills the board by wave 20, so it is its own capacity drawing (list the other
+ *  first and the report fails that drawing). */
 export const M3_CROSSING: ReferenceSet = {
   id: 'm3-crossing',
   rulesetId: 'wynding-core',

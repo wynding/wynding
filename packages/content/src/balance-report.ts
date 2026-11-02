@@ -159,9 +159,8 @@ function mazeOrder(build: ReferenceBuild, ruleset: CompiledRuleset): string[] {
 
 /** What makes `full` no drawing of the strongest build, `best`: the towers it places must
  *  begin with that build's, tower for tower and in order (each anchor once, its timing
- *  ignored), so the capacity priced is a drawing of that build's maze — the build itself,
- *  once its plan fills the board. Nothing to check when no build is strongest; the
- *  board-full line already says so. */
+ *  ignored), so the capacity priced is a drawing of that build's maze. Nothing to check when
+ *  no build is strongest; the board-full line already says so. */
 export function checkDrawsStrongest(
   label: string,
   full: ReferenceBuild,
