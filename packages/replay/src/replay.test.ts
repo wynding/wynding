@@ -2,7 +2,7 @@
 // derives a trusted score, binding the replay to a content-derived ruleset digest
 // (ADR 0006 anti-cheat spine).
 
-import { describe, it, expect } from 'vitest';
+import { afterEach, describe, it, expect } from 'vitest';
 import {
   compileRuleset,
   createInitialState,
@@ -30,6 +30,12 @@ const shippedRuleset = getBundledRuleset();
 const SHIPPED_BOARD_ID = defaultBoardId(shippedRuleset);
 const HASH = currentRulesetHash(shippedRuleset);
 const HEX64 = /^[0-9a-f]{64}$/;
+
+// Several tests here re-simulate whole runs synchronously. Yield a macrotask after each so
+// the worker reads Vitest's RPC replies between them: birpc times a reply out at 60 s, so
+// each test alone must still finish inside that. The yield sits between runs, never in one.
+// eslint-disable-next-line no-restricted-globals -- yield between tests, not inside a run
+afterEach(() => new Promise<void>((r) => setImmediate(r)));
 
 function makeReplay(overrides: Partial<Replay> = {}): Replay {
   return {
