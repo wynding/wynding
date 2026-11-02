@@ -2177,6 +2177,19 @@ export function createOverlay(
     return route === undefined ? '' : HEADING_ARROW[route.heading];
   }
 
+  /** Each entrance's place in the board's order — the order the strip groups routes in. */
+  const ROUTE_ORDER = new Map([...routes.keys()].map((id, i) => [id, i] as const));
+  /** A wave's streams GROUPED BY ROUTE, in the board's entrance order, each route's streams
+   *  in the order the wave lists them (a stable sort; an entrance the board lacks goes last).
+   *  The strip draws each route's arrow once, on its group's first row: a route's arrow per
+   *  row cost a four-stream wave its fit at 1080×810 under a wide font (CI's), and a wave's
+   *  streams run on two routes at most, so the arrows' cost stops growing with the streams.
+   *  The rows' sentences read in the same order. */
+  function byRoute(entries: readonly PreviewEntryVM[]): readonly PreviewEntryVM[] {
+    const at = (e: PreviewEntryVM): number => ROUTE_ORDER.get(e.entrance) ?? ROUTE_ORDER.size;
+    return [...entries].sort((a, b) => at(a) - at(b));
+  }
+
   /** The wave's creep hit points, said once per wave when they are not the catalog's (M3 creep
    *  HP growth): the full sentence and the glance, or null at 100. Two literal keys per sign,
    *  for `i18n-check.mjs`'s extractor (see `previewEntryFull`). */
@@ -2520,8 +2533,9 @@ export function createOverlay(
       preview.kind === 'lastWave'
         ? t('hud.preview.lastWave')
         : t('hud.preview.title', { waveNumber: preview.waveNumber, waveCount: preview.waveCount });
-    const firstEntry = preview.kind === 'upcoming' ? preview.entries[0] : undefined;
-    const single = preview.kind === 'upcoming' && preview.entries.length === 1;
+    const entries = preview.kind === 'upcoming' ? byRoute(preview.entries) : [];
+    const firstEntry = entries[0];
+    const single = entries.length === 1;
     // `textContent` on a row concatenates BOTH forms in document order (full, then glance
     // — the append order below), so this sentinel covers every catalog key either form
     // reads. Comparing one side alone would let a locale swap self-heal that form while
@@ -2564,7 +2578,7 @@ export function createOverlay(
     renderHp(hpClause(preview.hpPercent));
     clearChildren(previewEl.list);
     warnUnmappedCreeps(preview.entries); // dev diagnostic — rebuild path only
-    for (const entry of preview.entries) {
+    for (const [i, entry] of entries.entries()) {
       const li = doc.createElement('li');
       li.className = 'wy-preview-entry';
       // Dual-form row, mirroring `shell.ts`'s `chip()` exactly: both nodes always exist,
@@ -2577,12 +2591,15 @@ export function createOverlay(
       full.className = 'wy-preview-full';
       full.textContent = sentence;
       li.append(full);
-      // The route's arrow leads the row (M3 story 4): the heading the board draws on this
-      // stream's entrance and exit. Its own aria-hidden node, outside the glance, so the
-      // glance's layout — Compact's icon-above-count wrap — is the one it has always had,
-      // only narrower. The words are the full sentence's, and the single-entry detail's.
+      // The route's arrow leads its group's first row (M3 story 4; `byRoute`): the heading the
+      // board draws on this stream's entrance and exit. Its own aria-hidden node, outside the
+      // glance, so the glance's layout — Compact's icon-above-count wrap — is the one it has
+      // always had, only narrower. The words are the full sentence's, and the single-entry
+      // detail's. A row continuing its route's group has no arrow (`ui.css` sets it closer).
       const arrowText = routeArrow(entry);
-      if (arrowText !== '') {
+      const leadsRoute = i === 0 || entries[i - 1]!.entrance !== entry.entrance;
+      if (!leadsRoute) li.classList.add('wy-preview-entry--continues');
+      if (arrowText !== '' && leadsRoute) {
         const arrow = doc.createElement('span');
         arrow.className = 'wy-preview-arrow';
         arrow.setAttribute('aria-hidden', 'true');

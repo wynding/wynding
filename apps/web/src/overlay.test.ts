@@ -4575,6 +4575,54 @@ describe('overlay — routes, hit points and the wave counter on the crossing bo
     ]);
   });
 
+  it('groups the rows by route, in the board’s entrance order, and draws each route’s arrow once — on its group’s first row', () => {
+    const { overlay, shell } = setup();
+    // The shipped wave 9's streams, in the wave's own order: north, west, north, west.
+    show(overlay, [
+      north({ creepId: 'swarm', count: 10 }),
+      entry({ creepId: 'fast', count: 6 }),
+      north({ creepId: 'armored', count: 4, armor: 6 }),
+      entry({ creepId: 'flying', count: 4, domain: 'air' }),
+    ]);
+    const li = rows(shell);
+    // West first (the board's first entrance), each route's streams in the wave's order — the
+    // sentences read in the order the rows are drawn.
+    expect(li.map((r) => fullOf(r).replace(/,.*$/, ''))).toEqual([
+      '6 × Fast Creep — west to east',
+      '4 × Flying Creep — west to east',
+      '10 × Swarm Creep — north to south',
+      '4 × Armored Creep — north to south',
+    ]);
+    // One arrow per route, on the row that begins it; a row continuing its route has none and
+    // is marked so (`ui.css` sets it closer).
+    expect(li.map((r) => r.querySelector('.wy-preview-arrow')?.textContent ?? null)).toEqual([
+      '→',
+      null,
+      '↓',
+      null,
+    ]);
+    expect(li.map((r) => r.classList.contains('wy-preview-entry--continues'))).toEqual([
+      false,
+      true,
+      false,
+      true,
+    ]);
+  });
+
+  it('sends an entrance the board does not have to the end of the line, after the board’s routes', () => {
+    const { overlay, shell } = setup();
+    show(overlay, [
+      entry({ entrance: 'gate', destination: ['door'] }),
+      north({ count: 6 }),
+      entry({ count: 4 }),
+    ]);
+    expect(rows(shell).map((r) => fullOf(r).replace(/ — (\w+ to \w+),.*$/, ' $1'))).toEqual([
+      '4 × Creep west to east',
+      '6 × Creep north to south',
+      '10 × Creep gate to door',
+    ]);
+  });
+
   it('names an entrance the board does not have by its ids, with no arrow, rather than dropping the route', () => {
     const { overlay, shell } = setup();
     show(overlay, [entry({ entrance: 'gate', destination: ['door'] })]);

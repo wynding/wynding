@@ -373,27 +373,28 @@ test.describe('Compact layout (PLAN.md P1 / two-layouts contract)', () => {
     // preview on wave 9 for the whole tail; the preview reflects Pending state under
     // pause by design, so nothing measured changes.
     await expect(entries).toHaveCount(4);
+    // Grouped by route, west first (M3 story 4: `overlay.ts`'s `byRoute`).
     await expect(preview.locator('.wy-preview-full')).toHaveText([
-      '10 × Swarm Creep — north to south, ground, armor 0, leak cost 1, no immunities',
       '6 × Fast Creep — west to east, ground, armor 0, leak cost 1, no immunities',
-      '4 × Armored Creep — north to south, ground, armor 6 (subtracted from each direct hit; damage over time ignores it), leak cost 1, no immunities',
       '4 × Flying Creep — west to east, air, armor 0, leak cost 1, no immunities',
+      '10 × Swarm Creep — north to south, ground, armor 0, leak cost 1, no immunities',
+      '4 × Armored Creep — north to south, ground, armor 6 (subtracted from each direct hit; damage over time ignores it), leak cost 1, no immunities',
     ]);
     // The arc's densest wave, in the form a player actually reads it (#181): each row is the
     // creep's own board art and its count — the shapes tell the four kinds apart (the
     // armored hexagon among them), and the board's wings ride on the flyer alone, which is
     // precisely the "is air next?" question the surface is scanned for.
-    await expect(preview.locator('.wy-preview-count')).toHaveText(['×10', '×6', '×4', '×4']);
+    await expect(preview.locator('.wy-preview-count')).toHaveText(['×6', '×4', '×10', '×4']);
     const icons = preview.locator('svg.wy-creep-icon');
     await expect(icons).toHaveCount(4);
     expect(
       await icons.evaluateAll((els) => els.map((el) => el.getAttribute('data-wy-shape'))),
-    ).toEqual(['swarm', 'fast', 'armored', 'flying'].map((id) => creepShapeFor(id)));
+    ).toEqual(['fast', 'flying', 'swarm', 'armored'].map((id) => creepShapeFor(id)));
     expect(
       await icons.evaluateAll((els) =>
         els.map((el) => el.querySelector('.wy-creep-wing') !== null),
       ),
-    ).toEqual([false, false, false, true]);
+    ).toEqual([false, true, false, false]);
     for (const icon of await icons.all()) await expect(icon).toBeVisible();
 
     // axe audit with all 4 rows showing — the standard bar every other HUD content is

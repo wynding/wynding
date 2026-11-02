@@ -204,6 +204,66 @@ test('wave 1 and the real wave 9, at 1280×720, 1440×900, 1920×1080 and 1080×
   expect(audit.violations, JSON.stringify(audit.violations, null, 2)).toEqual([]);
 });
 
+test('under a wide font, the densest waves keep the strip’s line at the four desktop sizes, with room to spare (M3)', async ({
+  page,
+}) => {
+  // The strip's type is `system-ui`, which a Linux machine draws in a wider face than macOS
+  // does: CI's ran wave 9's line 2px past the strip at 1080×810 while every Mac had room. So
+  // the fit is pinned under a WIDE face, the same everywhere this runs: Verdana where it is
+  // installed (macOS; wider than CI's face, so conservative), DejaVu Sans where it is not
+  // (Linux). Two waves, on the waves harness: the shipped wave 9, and m3.md's densest arc wave
+  // the strip will show — wave 29, four streams on both routes at +170% hit points, its clause
+  // stacked under the title. Each keeps its line with 16px to spare at every size, the margin
+  // a further stream's growth spends before the strip takes its scroll form (measured on
+  // macOS at 1080×810: 31px and 33px).
+  test.setTimeout(90_000);
+  const HARNESS = 'http://localhost:4176/e2e-harness/waves.html';
+  const WIDE = '* { font-family: Verdana, "DejaVu Sans", sans-serif !important; }';
+  const VIEWS = [
+    { width: 1280, height: 720 },
+    { width: 1440, height: 900 },
+    { width: 1920, height: 1080 },
+    { width: 1080, height: 810 },
+  ];
+  const WAVES = [
+    { name: 'the shipped wave 9', query: 'wave=9' },
+    {
+      name: 'the arc’s wave 29',
+      query:
+        'hp=270&streams=armored-flyer:west:8,armored-flyer:north:6,armored:north:8,swarm:west:8',
+    },
+  ];
+  for (const wave of WAVES) {
+    await page.setViewportSize(VIEWS[0]!);
+    await page.goto(`${HARNESS}?${wave.query}`);
+    await page.addStyleTag({ content: WIDE });
+    await expect(page.locator('.wy-wave-preview li')).toHaveCount(4);
+    // Two routes, each arrow drawn once (`overlay.ts`'s `byRoute`).
+    await expect(page.locator('.wy-wave-preview .wy-preview-arrow')).toHaveText(['→', '↓']);
+    for (const view of VIEWS) {
+      await page.setViewportSize(view);
+      await settle(page);
+      const at = `${wave.name} at ${view.width}×${view.height}`;
+      const m = await page.evaluate(() => {
+        const strip = document.querySelector<HTMLElement>('.wy-wave-preview')!;
+        const b = strip.getBoundingClientRect();
+        const end =
+          b.left +
+          strip.clientLeft +
+          strip.clientWidth -
+          parseFloat(getComputedStyle(strip).paddingRight);
+        const list = document.querySelector('.wy-wave-preview-list')!.getBoundingClientRect();
+        return {
+          slack: end - list.right,
+          scrollForm: strip.classList.contains('wy-wave-preview--scroll'),
+        };
+      });
+      expect(m.scrollForm, `${at}: the strip needed its scroll form`).toBe(false);
+      expect(m.slack, `${at}: px to spare at the line's end`).toBeGreaterThanOrEqual(16);
+    }
+  }
+});
+
 test('a strip whose line runs past its edge fades that edge, follows the scroll and costs no width', async ({
   page,
 }) => {

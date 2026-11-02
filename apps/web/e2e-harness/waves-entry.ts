@@ -11,7 +11,9 @@
 //
 // - `?hp=<percent>` sets every wave's `hpPercent` (default 100, the shipped value);
 // - `&wave=<n>` gives wave 1 wave n's streams, so a dense wave (9's four streams on two routes)
-//   is what the strip shows before Start.
+//   is what the strip shows before Start;
+// - `&streams=<creep>:<entrance>:<count>,…` gives wave 1 those streams instead (20 ticks apart),
+//   so a spec can show a wave the shipped schedule does not have yet — m3.md's arc, say.
 //
 // Nothing else changes: the board, the catalog and the rest of each wave are the shipped ones.
 
@@ -32,6 +34,13 @@ const source = board.waves[from - 1];
 // The message is also `check:build-layering`'s marker for this module: rename it there too.
 if (source === undefined) throw new Error(`waves harness: the board has no wave ${String(from)}`);
 board.waves[0]!.entries = structuredClone(source.entries);
+const streams = params.get('streams');
+if (streams !== null) {
+  board.waves[0]!.entries = streams.split(',').map((stream) => {
+    const [creepId, entrance, count] = stream.split(':');
+    return { creepId, entrance, count: Number(count), spacingTicks: 20 };
+  });
+}
 for (const wave of board.waves) wave.hpPercent = hp;
 const content = { bundle, boardId: defaultBoardId(bundle) } as const;
 

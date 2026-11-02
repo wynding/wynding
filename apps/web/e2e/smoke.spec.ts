@@ -912,11 +912,12 @@ test('supports player-started runs, pause / speed controls, launches wave 1 on S
     8: [
       '6 × Armored Flyer — west to east, air, armor 5 (subtracted from each direct hit; damage over time ignores it), leak cost 1, no immunities',
     ],
+    // Grouped by route, west first (M3 story 4: `overlay.ts`'s `byRoute`).
     9: [
-      '10 × Swarm Creep — north to south, ground, armor 0, leak cost 1, no immunities',
       '6 × Fast Creep — west to east, ground, armor 0, leak cost 1, no immunities',
-      '4 × Armored Creep — north to south, ground, armor 6 (subtracted from each direct hit; damage over time ignores it), leak cost 1, no immunities',
       '4 × Flying Creep — west to east, air, armor 0, leak cost 1, no immunities',
+      '10 × Swarm Creep — north to south, ground, armor 0, leak cost 1, no immunities',
+      '4 × Armored Creep — north to south, ground, armor 6 (subtracted from each direct hit; damage over time ignores it), leak cost 1, no immunities',
     ],
     10: [
       // The ONLY row in the arc carrying a role, and the only one whose accessible text
