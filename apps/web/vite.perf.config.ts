@@ -24,7 +24,7 @@ import { defineConfig, type Plugin } from 'vite';
 // ONE CI CONSUMER EXISTS, and it is not a gate on these numbers. Since #129,
 // `scripts/check-build-layering.mjs` BUILDS this config in the e2e job and uses `dist-perf`
 // as the positive control for the markers of its three package arms (the e2e harnesses'
-// `dist-e2e` is the other control): because these two entry points deliberately reach
+// `dist-e2e` is the other control): because these entry points deliberately reach
 // `@wynding/perf`, `@wynding/content/stress` and `./catalog`, they are where the check proves
 // those markers still match something before asserting they are absent from `dist`.
 // Nothing here is measured or asserted against a budget by that check — but this file is
@@ -37,11 +37,11 @@ import { defineConfig, type Plugin } from 'vite';
  * input beside its source path, so `perf/index.html` lands at `dist-perf/perf/index.html`
  * and a packaged perf build booted to a 404 and a white screen.
  *
- * Emitted as an ASSET rather than added as a third rollup input, and the distinction is
+ * Emitted as an ASSET rather than added as another rollup input, and the distinction is
  * the point twice over. An input would land at `dist-perf/perf/root.html` — still not the
  * root — and it would give the launcher a module graph of its own. It has none: it is
- * static markup with two relative links, so it cannot pull either scene's bundle (or
- * anything else) into the other's graph, and this file's structural guarantee stays exactly
+ * static markup with one relative link per scene, so it cannot pull any scene's bundle (or
+ * anything else) into another's graph, and this file's structural guarantee stays exactly
  * as strong as it was.
  */
 function perfRootEntry(): Plugin {
@@ -75,8 +75,8 @@ export default defineConfig({
       // page keeps the structural guarantee in this file's header intact (no path from
       // the production graph to either scene's bundle). Two entries rather than one page
       // switching on a query parameter so a run of one scene never even downloads the
-      // other's ruleset JSON.
-      input: ['perf/index.html', 'perf/catalog.html'],
+      // other's ruleset JSON. M3 story 8 adds a third, the campaign scene, on the same terms.
+      input: ['perf/index.html', 'perf/catalog.html', 'perf/campaign.html'],
     },
   },
 });

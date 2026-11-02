@@ -1,0 +1,18 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <!-- The same viewport metadata the play `index.html` and the other perf pages carry (#148) —
+         see `perf/index.html` for why it is load-bearing on a device rather than cosmetic. -->
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+    <!-- The CAMPAIGN scene's perf page (M3 story 8): the shipped arc, played by the strongest
+         reference build, timed over its densest stretch. A third page beside `index.html` and
+         `catalog.html`, for the reason `catalog.html` gives: each scene its own entry module.
+         Perf-only, never shipped — see `vite.perf.config.ts`'s header. -->
+    <title>Wynding perf harness — campaign scene</title>
+  </head>
+  <body>
+    <div id="app"></div>
+    <script type="module" src="./main-perf-campaign.ts"></script>
+  </body>
+</html>

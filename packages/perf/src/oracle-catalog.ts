@@ -27,7 +27,7 @@ import {
   type SimState,
   type StepEvents,
 } from '@wynding/sim';
-import { currentPath } from '@wynding/content';
+import { currentPath } from '@wynding/content/paths'; // not the barrel: see `layout.ts`
 import type { Replay } from '@wynding/replay';
 import type { Ruleset } from '@wynding/types';
 import { CATALOG_BUILD_TICKS } from './scenario';
@@ -103,7 +103,7 @@ export const POST_DETONATION_TOWERS = CATALOG_TOWER_COUNT - CATALOG_DETONATOR_PA
 /** Placements accepted after the build prefix. */
 export const PLACEMENTS_EXACT = CATALOG_TOWER_COUNT;
 /** Bounty left after the build prefix — the placement table's cost is the bundle's entire
- *  `startingBounty` (1,601), so anything but 0 means a placement was silently refused. */
+ *  `startingBounty` (1,983), so anything but 0 means a placement was silently refused. */
 export const LEFTOVER_BOUNTY_EXACT = 0;
 /** The scene's committed route length, inherited from the stress geometry. */
 export const CATALOG_ROUTE_LENGTH = 329;

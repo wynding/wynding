@@ -562,7 +562,7 @@ const OFF_SURFACE: readonly {
       ['140', 1],
       ['144', 3],
       ['149.0', 1],
-      ['1601', 1],
+      ['1983', 1],
       ['160', 1],
       ['2.25', 3],
       ['21', 1],
@@ -589,7 +589,7 @@ const OFF_SURFACE: readonly {
     file: 'packages/perf/src/oracle-catalog.ts',
     holds: [
       ['1055', 3],
-      ['1601', 1],
+      ['1983', 1],
       ['256', 2],
       ['27', 2],
       ['3554', 2],
@@ -649,6 +649,21 @@ const OFF_SURFACE: readonly {
     file: 'packages/perf/src/run-catalog.ts',
     holds: [['27', 1]],
     why: 'The catalog CLI entry point; the pair it holds is a catalog-scene figure.',
+  },
+  {
+    file: 'packages/perf/src/campaign.ts',
+    holds: [],
+    why: "The M3 story 8 campaign scene: the densest-stretch rule and its oracle values, measured on the shipped arc. Recorded and never gated, so none of its figures is a claim the gate's documents restate.",
+  },
+  {
+    file: 'packages/perf/src/campaign.test.ts',
+    holds: [
+      ['10000', 1],
+      ['22', 1],
+      ['26', 1],
+      ['28', 1],
+    ],
+    why: "Its test — the campaign scene's Node oracle and the rule's fixtures, the same recorded-only family as campaign.ts.",
   },
   {
     file: 'packages/perf/src/generate.ts',
@@ -744,6 +759,8 @@ const G = {
  *  sharing its basename and count. */
 const O = {
   buildLayeringAttributionTest: 'packages/perf/src/build-layering-attribution.test.ts',
+  campaignTest: 'packages/perf/src/campaign.test.ts',
+  campaign: 'packages/perf/src/campaign.ts',
   dotBenchTest: 'packages/perf/src/dot-bench.test.ts',
   harnessTest: 'packages/perf/src/harness.test.ts',
   harness: 'packages/perf/src/harness.ts',
@@ -1254,6 +1271,7 @@ const ROWED_CENSUS: readonly {
       [O.run, 1],
       [O.harness, 1],
       [O.layoutTest, 1],
+      [O.campaignTest, 1],
     ],
   },
   {
@@ -1272,6 +1290,8 @@ const ROWED_CENSUS: readonly {
       [O.run, 2],
       [O.harnessTest, 1],
       [O.scenarioTest, 1],
+      [O.campaign, 2],
+      [O.campaignTest, 1],
     ],
   },
   {
@@ -1378,7 +1398,7 @@ const ROWED_CENSUS: readonly {
       [G.adr, 3],
       [G.spike, 1],
       [G.m2, 1],
-      [O.layout, 3],
+      [O.layout, 1],
     ],
   },
   {
@@ -1495,6 +1515,7 @@ const ROWED_CENSUS: readonly {
       [G.m2, 3],
       [O.harness, 2],
       [O.harnessTest, 1],
+      [O.campaign, 1],
     ],
   },
   {
@@ -1655,6 +1676,7 @@ const ROWED_CENSUS: readonly {
       [G.spike, 6],
       [G.m2, 4],
       [O.layoutTest, 2],
+      [O.campaign, 1],
     ],
   },
   {
