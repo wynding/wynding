@@ -1000,8 +1000,8 @@ test('supports player-started runs, pause / speed controls, launches wave 1 on S
     ],
     27: [
       '14 × Swarm Creep — north to south, ground, armor 0, leak cost 1, no immunities',
-      '8 × Fast Creep — north to south, ground, armor 0, leak cost 1, no immunities',
       '6 × Resolute Creep — west to east, ground, armor 0, leak cost 1, slow',
+      '8 × Fast Creep — north to south, ground, armor 0, leak cost 1, no immunities',
     ],
     28: [
       '8 × Armored Creep — west to east, ground, armor 6 (subtracted from each direct hit; damage over time ignores it), leak cost 1, no immunities',
@@ -1017,8 +1017,8 @@ test('supports player-started runs, pause / speed controls, launches wave 1 on S
     30: [
       '2 × Boss — boss, west to east, ground, armor 8 (subtracted from each direct hit; damage over time ignores it), leak cost 3, stun',
       '1 × Boss — boss, north to south, ground, armor 8 (subtracted from each direct hit; damage over time ignores it), leak cost 3, stun',
-      '8 × Armored Flyer — west to east, air, armor 5 (subtracted from each direct hit; damage over time ignores it), leak cost 1, no immunities',
       '8 × Armored Flyer — north to south, air, armor 5 (subtracted from each direct hit; damage over time ignores it), leak cost 1, no immunities',
+      '8 × Armored Flyer — west to east, air, armor 5 (subtracted from each direct hit; damage over time ignores it), leak cost 1, no immunities',
     ],
   };
   // Each wave's hit points as the bundle authors them, from wave 11 on; absent, the catalog's.

@@ -6,10 +6,9 @@
 // catalog's ("+70% hit points"), and the first shipped wave whose creeps do not is wave 11
 // (block 2, M3 story 6); the arc's densest line, four streams on two routes, first comes at
 // wave 20 (then waves 29 and 30). Ten and nineteen calls in, they are slow to reach and hard
-// to hold. So this page
-// boots the REAL app (the real scene, overlay and `main.ts`'s requestAnimationFrame
-// scheduler) on the shipped bundle with its waves changed, through the controller's content
-// seam, and the strip shows them from the first frame:
+// to hold. So this page boots the REAL app (the real scene, overlay and `main.ts`'s
+// requestAnimationFrame scheduler) on the shipped bundle with its waves changed, through the
+// controller's content seam, and the strip shows them from the first frame:
 //
 // - `?hp=<percent>` sets every wave's `hpPercent` (absent, each wave keeps its shipped one);
 // - `wave=<n>[,<m>…]` gives wave 1 the streams of waves n, m, … in that order, so a dense line

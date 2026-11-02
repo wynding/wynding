@@ -96,7 +96,7 @@ function serpentineRun(): ClientRun {
 
 // The legs here re-simulate the whole arc synchronously, inside the handler. Yield a
 // macrotask after each so the worker reads Vitest's RPC replies between them (birpc times a
-// reply out at 60 s), as the replay package's long suites do.
+// reply out at 60 s), as the content package's story-swarm.test.ts does.
 afterEach(() => new Promise<void>((r) => setImmediate(r)));
 
 function replayFor(tickInputs: readonly (readonly SimInput[])[]): Replay {

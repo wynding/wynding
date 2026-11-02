@@ -20,7 +20,8 @@
 //
 // A run of the whole arc is about 19,500 ticks, under a second outside coverage, so they live
 // in the default suite, as M2's calibration does. Each build is run once (the memo below) and
-// every test reads that run, the report's included.
+// every test reads that run, the report's included; only the route checks run a build again,
+// to read where each leaked creep was bound (`leakDestinations`).
 
 import { afterEach, describe, it, expect } from 'vitest';
 import { compileRuleset, deriveStars, type SimState } from '@wynding/sim';
@@ -85,11 +86,30 @@ const NORTH_AIR = ruleset.waves.findIndex((w) =>
 );
 
 /** The first wave that flies both lanes at once — block 3's air headline, located the same
- *  way. Block 3 brings no creep id the arc has not already sent, so a block-3 loss is located
- *  by its fatal creep and this wave, not by a creep's first appearance. */
+ *  way. */
 const BOTH_LANES = ruleset.waves.findIndex(
   (w) => new Set(w.spawns.filter((s) => isAir(s.creepId)).map((s) => s.entrance)).size === 2,
 );
+
+const isBoss = (creepId: string): boolean => ruleset.creepById[creepId]!.role === 'boss';
+
+/** Block 3's wall — the one wave without a boss that flies armored flyers down both lanes —
+ *  and its finale, the arc's last boss wave, located the same way. Block 3 brings no creep id
+ *  the arc has not already sent, so a block-3 loss is located by its fatal creep and these
+ *  waves, not by a creep's first appearance. */
+const WALL = ruleset.waves.findIndex(
+  (w) =>
+    !w.spawns.some((s) => isBoss(s.creepId)) &&
+    new Set(w.spawns.filter((s) => s.creepId === 'armored-flyer').map((s) => s.entrance)).size ===
+      2,
+);
+const FINALE = ruleset.waves.map((w) => w.spawns.some((s) => isBoss(s.creepId))).lastIndexOf(true);
+
+/** A tower anchored at (col, row) reaches a lane: its 2 × 2 footprint's centre stands within
+ *  four cells of the west lane's line (row 11) or the north lane's (column 13), where a ground
+ *  tower's range reaches the lane — the competent corridor's reach. */
+const reachesALane = (col: number, row: number): boolean =>
+  Math.min(Math.abs(row + 1 - 11.5), Math.abs(col + 1 - 13.5)) <= 4;
 
 // Several tests here run the whole arc synchronously. Yield a macrotask after each so the
 // worker reads Vitest's RPC replies between them: birpc times a reply out at 60 s, so each
@@ -128,9 +148,10 @@ function livesLostByWave(run: BuildRun): [number, number][] {
 
 /** A build's spend as a share of all the bounty it had received by the end of the wave whose
  *  window held its last first placement — while it was still building. A build that has
- *  placed every tower it means to banks the rest, the winners as much as the losers: the
- *  first-pass income outruns any board's room (m3.md, the board-full flag), so banking
- *  afterwards is not declining to play. */
+ *  placed every tower its plan holds banks the rest, the winners as much as the losers: the
+ *  first-pass income outruns even the full board (m3.md, the board-full flag). Banking then is
+ *  not declining to play only while the plan has no room left within its reach, which the
+ *  floor's test checks (`openRoom`). */
 function spentShareWhileBuilding(run: BuildRun): number {
   expect(run.stepsDone).toBe(run.stepCount);
   const window = run.waves[run.lastPlacementWave!]!;
@@ -158,6 +179,21 @@ function leakDestinations(build: ReferenceBuild) {
     },
   });
   return { leaked, byWave };
+}
+
+/** `build`'s leaks as `creep@wave route`, in leak order, each creep's route read off where it
+ *  was bound (`leakDestinations`, a second run of the same plan, so the same leaks). */
+function leakRoutes(build: ReferenceBuild): string[] {
+  const { leaked } = leakDestinations(build);
+  const { leaks } = measured(build);
+  expect(leaked).toHaveLength(leaks.length);
+  const routeTo = (destination: number | undefined) =>
+    destination === ruleset.board.entranceDestination[WEST]
+      ? 'west'
+      : destination === ruleset.board.entranceDestination[NORTH]
+        ? 'north'
+        : `destination ${destination}`;
+  return leaks.map(({ creepId, wave }, k) => `${creepId}@${wave + 1} ${routeTo(leaked[k])}`);
 }
 
 /** Every open 2 × 2 on `state`'s board left clear of both routes' paths — room for one more
@@ -218,11 +254,13 @@ describe('M3 stories 5–7 — the reference builds, the whole arc on the crossi
     expect(NORTH_OPENS).toBe(2); // wave 3
     expect(NORTH_AIR).toBe(15); // wave 16
     expect(BOTH_LANES).toBe(25); // wave 26
+    expect([WALL, FINALE]).toEqual([28, 29]); // waves 29 and 30
+    expect(FINALE).toBe(ruleset.waves.length - 1);
   });
 
   // The two winners on fewer lives let a few of block 3's armored flyers and its north boss
-  // through (two mazes) or the north route's first normals and the same block-3 creeps (the
-  // channel); `[wave index, lives]` per wave that took any.
+  // through (two mazes) or one of the north route's first normals and the same block-3 creeps
+  // (the channel); `[wave index, lives]` per wave that took any.
   it.each([
     { build: M3_SERPENTINE, tick: 19549, lives: 20, stars: 3, steps: 83, spend: 648, lost: [] },
     {
@@ -269,40 +307,47 @@ describe('M3 stories 5–7 — the reference builds, the whole arc on the crossi
     },
   );
 
-  it('the winners’ leaks are block 3’s armored flyers and north boss, and one early normal', () => {
-    // Located by creep id: every creep two mazes and the channel let through in block 3 is
-    // an armored flyer or the finale's north boss, all from waves after both lanes first fly
-    // together; the channel's other leak is one of the north route's first normals.
-    const leaks = (build: ReferenceBuild) =>
-      measured(build).leaks.map(({ creepId, wave }) => `${creepId}@${wave + 1}`);
-    expect(leaks(M3_TWO_MAZES)).toEqual([
-      'armored-flyer@29',
-      'armored-flyer@29',
-      'armored-flyer@29',
-      'boss@30',
-      'armored-flyer@30',
-    ]);
-    expect(leaks(M3_CHANNEL)).toEqual([
-      'normal@3',
-      'armored-flyer@29',
-      'armored-flyer@29',
-      'boss@30',
-    ]);
-    for (const build of [M3_TWO_MAZES, M3_CHANNEL]) {
-      for (const l of measured(build).leaks.filter((l) => l.wave > BLOCK_2_LAST)) {
-        expect(l.wave, build.id).toBeGreaterThan(BOTH_LANES);
+  it(
+    'the winners’ leaks are block 3’s armored flyers and north boss, and one early normal',
+    { timeout: 120_000 },
+    () => {
+      // Located by creep id, each on the route it was bound for: every creep two mazes and the
+      // channel let through in block 3 is an armored flyer or the finale's north boss, all from
+      // waves after both lanes first fly together; the channel's other leak is one of the north
+      // route's first normals.
+      expect(leakRoutes(M3_TWO_MAZES)).toEqual([
+        'armored-flyer@29 north',
+        'armored-flyer@29 north',
+        'armored-flyer@29 west',
+        'boss@30 north',
+        'armored-flyer@30 north',
+      ]);
+      expect(leakRoutes(M3_CHANNEL)).toEqual([
+        'normal@3 north',
+        'armored-flyer@29 north',
+        'armored-flyer@29 north',
+        'boss@30 north',
+      ]);
+      for (const build of [M3_TWO_MAZES, M3_CHANNEL]) {
+        for (const l of measured(build).leaks.filter((l) => l.wave > BLOCK_2_LAST)) {
+          expect(l.wave, build.id).toBeGreaterThan(BOTH_LANES);
+        }
       }
-    }
-  });
+    },
+  );
 
-  it('at least one winner wins 3★ and at least one wins ≤ 2★ (m3.md, A1)', () => {
-    const stars = [M3_SERPENTINE, M3_TWO_MAZES, M3_CHANNEL].map((b) =>
-      deriveStars(measured(b).state, ruleset),
-    );
-    expect(stars).toEqual([3, 2, 2]);
-    expect(stars.some((s) => s === 3)).toBe(true);
-    expect(stars.some((s) => s >= 1 && s <= 2)).toBe(true);
-  });
+  it(
+    'at least one winner wins 3★ and at least one wins ≤ 2★ (m3.md, A1)',
+    { timeout: 120_000 },
+    () => {
+      const stars = [M3_SERPENTINE, M3_TWO_MAZES, M3_CHANNEL].map((b) =>
+        deriveStars(measured(b).state, ruleset),
+      );
+      expect(stars).toEqual([3, 2, 2]);
+      expect(stars.some((s) => s === 3)).toBe(true);
+      expect(stars.some((s) => s >= 1 && s <= 2)).toBe(true);
+    },
+  );
 
   it(
     'the serpentine merges the two routes into one maze; two mazes defends them separately',
@@ -563,23 +608,23 @@ describe('M3 stories 5–7 — the reference builds, the whole arc on the crossi
       const run = measured(M3_DAMAGE_ONLY);
       expect(run.state.phase).toBe('lost');
       expect(checkAllStepsRan(M3_DAMAGE_ONLY.id, run)).toEqual([]);
-      // Lost to the armored flyers of the wall that flies both lanes, wave 29 — block 3, after
-      // its air headline (located by content). Without a beacon to lift its antiair or a slow
-      // to hold the flyers in range it lets five of wave 26's through and the wall's six
-      // finish it; with no DoT for their armor it has leaked every boss before that.
+      // Lost to the armored flyers of block 3's wall, wave 29, which flies them down both lanes
+      // (located by content). Without a beacon to lift its antiair or a slow to hold the
+      // flyers in range it lets five of wave 26's through and the wall's six finish it; with
+      // no DoT for their armor it has leaked every boss before that.
       expect(run.state.tick).toBe(16306);
       const loss = locateLoss(run)!;
       expect(loss).toEqual({
         tick: 16305,
-        reachedWave: 28,
-        fatalLeaks: [{ creepId: 'armored-flyer', wave: 28 }],
+        reachedWave: WALL,
+        fatalLeaks: [{ creepId: 'armored-flyer', wave: WALL }],
       });
-      expect(loss.reachedWave).toBeGreaterThan(BOTH_LANES);
+      for (const l of loss.fatalLeaks) expect(l.wave).toBeGreaterThan(BLOCK_2_LAST);
       expect(livesLostByWave(run)).toEqual([
         [9, 3],
         [19, 6],
         [BOTH_LANES, 5],
-        [28, 6],
+        [WALL, 6],
       ]);
       expect(run.leaks.filter((l) => l.creepId === 'boss').map((l) => l.wave)).toEqual([9, 19, 19]);
       expect(run.leaks.filter((l) => l.wave > BLOCK_2_LAST).every((l) => isAir(l.creepId))).toBe(
@@ -593,34 +638,35 @@ describe('M3 stories 5–7 — the reference builds, the whole arc on the crossi
     { timeout: 120_000 },
     () => {
       // No maze: on its finished build both routes are their empty-board lengths, 27 and 23.
-      // Every tower it places stands within four cells of a lane's line (row 11 or column 13,
-      // footprint centre to line), where a ground tower's range reaches the lane.
+      // Every tower it places reaches a lane (`reachesALane`).
       const run = measured(M3_CORRIDOR);
       expect(routes(run.state)).toEqual({ west: 27, north: 23, sharing: 'separate' });
       for (const s of compileReferenceBuild(M3_CORRIDOR, ruleset)) {
-        const toRow = Math.abs(s.row + 1 - 11.5);
-        const toCol = Math.abs(s.col + 1 - 13.5);
-        expect(Math.min(toRow, toCol), `(${s.col},${s.row})`).toBeLessThanOrEqual(4);
+        expect(reachesALane(s.col, s.row), `(${s.col},${s.row})`).toBe(true);
       }
 
       expect(run.state.phase).toBe('lost');
       expect(checkAllStepsRan(M3_CORRIDOR.id, run)).toEqual([]);
       // Lost to the finale's bosses, wave 30. Short lanes give its towers too little time on
       // block 3's hit points: it lets five of wave 26's armored flyers through and ten of the
-      // wall's, and then both routes' bosses walk the length of their lanes.
+      // wall's, and then a boss from each route walks the length of its lane.
       expect(run.state.tick).toBe(17347);
       const loss = locateLoss(run)!;
       expect(loss).toEqual({
         tick: 17346,
-        reachedWave: 29,
-        fatalLeaks: [{ creepId: 'boss', wave: 29 }],
+        reachedWave: FINALE,
+        fatalLeaks: [{ creepId: 'boss', wave: FINALE }],
       });
-      expect(loss.reachedWave).toBeGreaterThan(BOTH_LANES);
+      for (const l of loss.fatalLeaks) expect(l.wave).toBeGreaterThan(BLOCK_2_LAST);
       expect(livesLostByWave(run)).toEqual([
         [8, 1],
         [BOTH_LANES, 5],
-        [28, 10],
-        [29, 6],
+        [WALL, 10],
+        [FINALE, 6],
+      ]);
+      expect(leakRoutes(M3_CORRIDOR).filter((l) => l.startsWith('boss@'))).toEqual([
+        'boss@30 west',
+        'boss@30 north',
       ]);
     },
   );
@@ -633,7 +679,16 @@ describe('M3 stories 5–7 — the reference builds, the whole arc on the crossi
       // arc, three tower kinds or more, and nearly all their income spent while they were still
       // building. Neither finishes with a small bank — both stop placing in block 2, with
       // every tower they draw standing, and bank the rest as the winners do (see
-      // `spentShareWhileBuilding`), so the floor reads their spend up to then.
+      // `spentShareWhileBuilding`), so the floor reads their spend up to then. That bank is
+      // not declining to play because neither has room left within its reach: damage only
+      // stands on the serpentine's full maze, and the corridor leaves no 2 × 2 that reaches a
+      // lane — only room farther out, which its shape does not use.
+      expect(openRoom(measured(M3_DAMAGE_ONLY).state)).toEqual([]);
+      const corridorRoom = openRoom(measured(M3_CORRIDOR).state).map((anchor) =>
+        anchor.split(',').map(Number),
+      );
+      expect(corridorRoom.filter(([col, row]) => reachesALane(col!, row!))).toEqual([]);
+      expect(corridorRoom.length).toBeGreaterThan(0);
       for (const build of [M3_DAMAGE_ONLY, M3_CORRIDOR]) {
         const run = measured(build);
         expect(
@@ -717,23 +772,36 @@ describe('M3 stories 5–7 — the board’s capacity in bounty', () => {
     expect(firstWaveCovering(income, 648, true)).toBe(17);
   });
 
-  it('the strongest build places its last tower in wave 21, three waves before the board-full target', () => {
-    // m3.md's board-full target is wave 24 ± 2; the serpentine, the strongest build, places
-    // its 83rd and last tower in wave 21's window — the wave after its income first covers
-    // the drawing (the runner places a step only once the bounty for it is in hand).
-    const run = measured(M3_SERPENTINE);
-    expect(run.lastPlacementWave).toBe(20);
-    expect(run.waves[20]!.towers).toBe(83);
-  });
+  it(
+    'the strongest build places its last tower in wave 21, three waves before the board-full target',
+    { timeout: 120_000 },
+    () => {
+      // m3.md's board-full target is wave 24 ± 2; the serpentine, the strongest build, places
+      // its 83rd and last tower in wave 21's window — the wave after its income first covers
+      // the drawing (the runner places a step only once the bounty for it is in hand).
+      const run = measured(M3_SERPENTINE);
+      expect(run.lastPlacementWave).toBe(20);
+      expect(run.waves[20]!.towers).toBe(83);
+    },
+  );
 
   it(
     'the balance report runs the M3 set, names the strongest build, and prices the board',
     { timeout: 120_000 },
     () => {
       // The memo's runs, not a second simulation of every build: the report's own runner
-      // would measure the same builds on the same bundle and seed.
-      const { text, failures } = balanceReport([M3_CROSSING], loadRulesetOrM2Fixture, (b) =>
-        measured(b),
+      // would measure the same builds on the same bundle, board and seed — which it checks.
+      const { text, failures } = balanceReport(
+        [M3_CROSSING],
+        loadRulesetOrM2Fixture,
+        (build, compiled, seed) => {
+          expect([compiled.digest, compiled.boardId, seed]).toEqual([
+            ruleset.digest,
+            ruleset.boardId,
+            SEED,
+          ]);
+          return measured(build);
+        },
       );
       expect(failures).toEqual([]);
       for (const build of M3_CROSSING.builds) {

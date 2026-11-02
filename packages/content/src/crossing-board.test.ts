@@ -148,8 +148,9 @@ describe('the arc keeps the spec’s authoring rules (m3.md, "Waves & timing")',
     expect(board.waves[north]!.entries).toEqual([
       { creepId: 'flying', entrance: 'north', count: 10, spacingTicks: 12, offsetTicks: 0 },
     ]);
-    // Both lanes at once is block 3's air headline, wave 26: an armored flyer down each lane's
-    // stream and nothing else. No earlier wave flies both; the wall and the finale after it do.
+    // Both lanes at once is block 3's air headline, wave 26: armored flyers down the west lane,
+    // flyers down the north, and nothing else. No earlier wave flies both; the wall and the
+    // finale after it do.
     const both = flown.findIndex((lanes) => lanes.size === 2);
     expect(both).toBe(25);
     expect(board.waves[both]!.entries).toEqual([

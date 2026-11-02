@@ -151,12 +151,13 @@ export const M2_SHOWCASE: ReferenceSet = {
 // fourth will, its first two placed before the west wall's lower half, so they stand by the
 // first flyers even when towers cost more. Splash at the entrance for the swarm, venom along
 // the corridors for armor and the bosses. Block 2 builds the other five walls, down to the
-// bottom border, which fills the board: no 2 × 2 is left clear of both routes' paths. The
-// three walls across the west lane are its air defence for block 3's armored flyers: row 11
-// alternates antiair and beacons, rows 8 and 14 carry antiair with a slow at the west end
-// of each to hold the flyers in range, and row 17 sets a beacon between two antiair under the
-// north lane. The rest is basic and splash, level by spend, splash along every corridor both
-// routes walk; by spend the whole build is a basic and splash build.
+// bottom border, all but the last tower, which goes down in wave 21; the finished maze fills
+// the board: no 2 × 2 is left clear of both routes' paths. The three walls along the west
+// lane (rows 8, 11 and 14) carry its antiair for block 3's armored flyers: row 11 alternates
+// antiair and beacons, row 8 sets a beacon among its antiair, rows 8 and 14 each have a slow
+// at the west end to hold the flyers in range, and row 17 sets a beacon between two antiair
+// across the north lane. The rest is basic and splash, level by spend, splash along every
+// corridor both routes walk; by spend the whole build is a basic and splash build.
 //
 // TWO MAZES defends the routes separately. Three vertical walls (columns 3–4 and 10–11 from
 // the top border, 7–8 from the bottom) wind the west route; two horizontal walls east of
@@ -165,10 +166,13 @@ export const M2_SHOWCASE: ReferenceSet = {
 // moves no wall: venom fills the pockets the routes pass (south of the west route's long
 // run, over its top turn, beside the north route's east turn), and antiair rings both lanes
 // — a block beside the north lane's south half, a row along the west lane's east half around
-// a beacon, three more at the crossing. Block 3's six towers stand down the north lane above
-// the crossing (two antiair and a beacon) and over the west lane east of it, with a venom
-// beside the west route's last run. It still lets a few of block 3's armored flyers and its
-// north boss through, so it wins on fewer lives. By spend it is a venom and antiair build.
+// a beacon, three more at the crossing; its first two antiair stand before the north maze's
+// last walls, so they are up for the first flyers even when towers cost more. Six more,
+// placed late in block 2 against block 3's air, stand down the north lane above the crossing
+// (two antiair and a beacon) and over the west lane east of it, with a venom beside the west
+// route's last run. It still
+// lets a few of block 3's armored flyers and its north boss through, so it wins on fewer
+// lives. By spend it is a venom and antiair build.
 //
 // THE CHANNEL sends both routes down one straight channel. A wall from the top border
 // (columns 3–4) turns west creeps down at the entrance; a block three towers wide from the
@@ -177,9 +181,9 @@ export const M2_SHOWCASE: ReferenceSet = {
 // sends them out under it, and a wall from the bottom (columns 23–24) up and over to the east
 // exit's column. North creeps walk the channel straight down; west creeps walk it too, beside
 // them, after winding the west half. Each block's middle column is beacons and slows, so the
-// venom, splash and antiair beside the channel are buffed and every creep in it is slowed;
-// where the west lane crosses the blocks (rows 9–14) they are antiair around beacons. By spend
-// it is a slow and beacon build.
+// beacons buff the venom, splash and antiair beside them and every creep in the channel is
+// slowed; where the west lane crosses the blocks (rows 9–14) they are antiair around beacons.
+// By spend it is a slow and beacon build.
 //
 // The three winners share no top-two tower id (m3.md, A1).
 
@@ -460,7 +464,7 @@ export const M3_DAMAGE_ONLY: ReferenceBuild = {
 /** M2's winning shape on this board (m3.md, A2's competent corridor): no maze, each route's
  *  straight empty-board lane lined on both sides — a wall above and below the west lane
  *  (rows 7–10 and 12–15), one left and right of the north lane (columns 9–12 and 14–17) —
- *  with M2's mix along them: venom and basic for the ground, splash, slows and a beacon, and
+ *  with M2's mix along them: venom and basic for the ground, splash, slows and two beacons, and
  *  antiair over both lanes. It places every tower that reaches a lane, by wave 18. */
 export const M3_CORRIDOR: ReferenceBuild = {
   id: 'm3-corridor',

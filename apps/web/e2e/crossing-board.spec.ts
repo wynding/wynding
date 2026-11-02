@@ -255,7 +255,8 @@ for (const { name, insets, floor } of INSET_CASES) {
 // wave is wave 20 (M3 story 6), so these run on the waves harness (`e2e-harness/waves-entry.ts`):
 // the real app on the shipped bundle with every wave's `hpPercent` set (`?hp=`), and wave 1
 // given waves 8 and 9's streams (`&wave=8,9`): four streams on two routes, the densest line the
-// strip shows. `smoke.spec.ts` reads block 2's own clauses, wave by wave, on the shipped run.
+// strip shows. `smoke.spec.ts` reads blocks 2 and 3's own clauses, wave by wave, on the
+// shipped run.
 
 const WAVES = 'http://localhost:4176/e2e-harness/waves.html';
 
