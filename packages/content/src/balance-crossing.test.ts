@@ -1,19 +1,22 @@
-// balance-crossing.test.ts — M3 story 5: the first M3 reference builds, block 1 on the
+// balance-crossing.test.ts — M3 stories 5–6: the M3 reference builds, blocks 1–2 on the
 // shipped crossing board (m3.md, "What tuned means"), and the board's capacity in bounty.
 //
-// Section A as far as block 1 reaches it, each outcome pinned by what the checker measures
+// Section A as far as block 2 reaches it, each outcome pinned by what the checker measures
 // and every loss LOCATED BY CREEP ID (M2's de-indexing):
 //   - two winners — the serpentine, which merges both routes into one maze, and two mazes,
 //     which defends them separately, each by story 1's classifier — win on all 20 lives,
-//     never selling, every creep killed;
+//     never selling, every creep killed, and share neither of their top two tower ids by
+//     spend (A1's distinctness);
 //   - undefended loses by wave 3, to the swarm;
 //   - west only (every tower in columns 1–8) loses to the north route's armored creeps,
-//     within two waves of that route opening, and clears the plausibility floors.
-// Then the capacity drawing: the serpentine drawn to the whole board, a legal maze the sim
-// accepts, priced against block 1's income.
+//     within two waves of that route opening, and clears the plausibility floors;
+//   - no anti-air (no tower that can hit a flyer) loses to the north lane's flyers, the first
+//     air down that lane, by the end of block 2, and clears the plausibility floors.
+// Then the capacity: the serpentine fills the board, a legal maze the sim accepts, priced
+// against the schedule's income.
 //
-// Block-1 runs are short (under 6,000 ticks, a fraction of a second each outside coverage),
-// so they live in the default suite, as M2's calibration does.
+// Runs to wave 20 are about 12,000 ticks, a fraction of a second each outside coverage, so
+// they live in the default suite, as M2's calibration does.
 
 import { describe, it, expect } from 'vitest';
 import { compileRuleset, deriveStars, type SimState } from '@wynding/sim';
@@ -22,8 +25,8 @@ import { compileReferenceBuild, type ReferenceBuild } from './reference-build';
 import {
   M2_SHOWCASE,
   M3_CROSSING,
+  M3_NO_ANTI_AIR,
   M3_SERPENTINE,
-  M3_SERPENTINE_FULL,
   M3_TWO_MAZES,
   M3_UNDEFENDED,
   M3_WEST_ONLY,
@@ -32,10 +35,12 @@ import {
 import { runReferenceBuild, type BuildRun } from './balance-run';
 import {
   checkAllStepsRan,
+  checkDistinctness,
   checkLossWindow,
   checkNoSellWithLiveCreep,
   checkPlausibility,
   classifyPathSharing,
+  idsBySpend,
   locateLoss,
   totalScheduledSpawns,
 } from './balance-checks';
@@ -58,9 +63,19 @@ const NORTH = 1;
 /** M3's section-A budget on creeps alive at once. */
 const PEAK_ALIVE_BUDGET = 200;
 
+const isAir = (creepId: string): boolean => ruleset.creepById[creepId]!.domain === 'air';
+
 /** The first wave that spawns from the north entrance — the route's opening, located by
  *  content rather than typed. */
 const NORTH_OPENS = ruleset.waves.findIndex((w) => w.spawns.some((s) => s.entrance === NORTH));
+
+/** Block 2's last wave, wave 20, as the arc numbers blocks (m3.md, "Waves & timing"). */
+const BLOCK_2_LAST = 19;
+
+/** The first wave that flies the north lane — where it joins, located the same way. */
+const NORTH_AIR = ruleset.waves.findIndex((w) =>
+  w.spawns.some((s) => s.entrance === NORTH && isAir(s.creepId)),
+);
 
 // Lazy memo (the calibration file's pattern): each run happens inside the first test that
 // needs it, under that test's own timeout, never at collection time.
@@ -143,25 +158,26 @@ function openRoom(state: SimState): string[] {
   return room;
 }
 
-describe('M3 story 5 — the first reference builds, block 1 on the crossing board', () => {
+describe('M3 stories 5–6 — the reference builds, blocks 1–2 on the crossing board', () => {
   it('registers M3’s set on the shipped crossing board, beside M2’s on its fixture', () => {
     expect(REFERENCE_SETS).toEqual([M2_SHOWCASE, M3_CROSSING]);
     expect(M3_CROSSING).toMatchObject({
       rulesetId: 'wynding-core',
       boardId: 'crossing-medium',
       seed: 0x5eed,
-      builds: [M3_SERPENTINE, M3_TWO_MAZES, M3_UNDEFENDED, M3_WEST_ONLY],
-      fullBoard: M3_SERPENTINE_FULL,
+      builds: [M3_SERPENTINE, M3_TWO_MAZES, M3_UNDEFENDED, M3_WEST_ONLY, M3_NO_ANTI_AIR],
+      fullBoard: M3_SERPENTINE,
     });
-    expect(ruleset.waves).toHaveLength(10);
+    expect(ruleset.waves).toHaveLength(20);
     expect(NORTH_OPENS).toBe(2); // wave 3
+    expect(NORTH_AIR).toBe(15); // wave 16
   });
 
   it.each([
-    { build: M3_SERPENTINE, tick: 5990, steps: 45, spend: 297 },
-    { build: M3_TWO_MAZES, tick: 5958, steps: 43, spend: 289 },
+    { build: M3_SERPENTINE, tick: 11710, steps: 83, spend: 613 },
+    { build: M3_TWO_MAZES, tick: 11717, steps: 69, spend: 505 },
   ])(
-    '$build.id wins block 1 on all 20 lives, 3★, every creep killed, every step run, never selling',
+    '$build.id wins blocks 1–2 on all 20 lives, 3★, every creep killed, every step run, never selling',
     { timeout: 120_000 },
     ({ build, tick, steps, spend }) => {
       const run = measured(build);
@@ -171,7 +187,7 @@ describe('M3 story 5 — the first reference builds, block 1 on the crossing boa
       expect(deriveStars(run.state, ruleset)).toBe(3);
       expect(run.leaks).toEqual([]);
       expect(run.kills).toBe(totalScheduledSpawns(ruleset));
-      expect(run.kills).toBe(129);
+      expect(run.kills).toBe(323);
       expect([run.stepsDone, run.spend]).toEqual([steps, spend]);
       expect(checkAllStepsRan(build.id, run)).toEqual([]);
       expect(run.sells).toEqual([]);
@@ -185,17 +201,51 @@ describe('M3 story 5 — the first reference builds, block 1 on the crossing boa
     { timeout: 120_000 },
     () => {
       // Story 1's classifier on each build's final maze. The serpentine sends both routes
-      // through the same corridors (west 88 tiles, north 49, against 27 and 23 empty); two
+      // through the same corridors (west 167 tiles, north 143, against 27 and 23 empty); two
       // mazes winds each its own way and they cross once (west 54, north 42).
       expect(routes(measured(M3_SERPENTINE).state)).toEqual({
-        west: 88,
-        north: 49,
+        west: 167,
+        north: 143,
         sharing: 'merged',
       });
       expect(routes(measured(M3_TWO_MAZES).state)).toEqual({
         west: 54,
         north: 42,
         sharing: 'separate',
+      });
+    },
+  );
+
+  it(
+    'the two winners share neither of their top two tower ids by spend, each at least 25% of its build’s spend',
+    { timeout: 120_000 },
+    () => {
+      // A1's distinctness, M2's rule. The serpentine is walled in basic and fights the
+      // shared corridors with splash; two mazes adds no basic past block 1, and venom and
+      // antiair overtake it.
+      const winners = [M3_SERPENTINE, M3_TWO_MAZES].map((b) => ({
+        id: b.id,
+        spendById: measured(b).spendById,
+      }));
+      expect(checkDistinctness(winners)).toEqual([]);
+      expect(winners.map((w) => idsBySpend(w.spendById).slice(0, 2))).toEqual([
+        ['basic', 'splash'],
+        ['venom', 'antiair'],
+      ]);
+      expect(measured(M3_SERPENTINE).spendById).toEqual({
+        basic: 215,
+        splash: 192,
+        venom: 90,
+        antiair: 70,
+        beacon: 30,
+        slow: 16,
+      });
+      expect(measured(M3_TWO_MAZES).spendById).toEqual({
+        venom: 189,
+        antiair: 133,
+        basic: 120,
+        splash: 48,
+        beacon: 15,
       });
     },
   );
@@ -276,7 +326,73 @@ describe('M3 story 5 — the first reference builds, block 1 on the crossing boa
     },
   );
 
-  it('keeps block 1 inside section A’s budgets', { timeout: 120_000 }, () => {
+  it(
+    'no anti-air places nothing that can hit a flyer, and loses by the end of block 2 to the north lane’s flyers, located by creep id',
+    { timeout: 120_000 },
+    () => {
+      // Every tower it places attacks the ground alone: the serpentine's maze with venom for
+      // its antiair and basic for its slow, the two kinds that reach the air.
+      const plan = compileReferenceBuild(M3_NO_ANTI_AIR, ruleset);
+      const kinds = new Set(plan.flatMap((s) => (s.kind === 'sell' ? [] : [s.towerId])));
+      expect(plan.every((s) => s.kind !== 'sell')).toBe(true);
+      expect([...kinds].sort()).toEqual(['basic', 'splash', 'venom']);
+      for (const id of kinds) expect(ruleset.towerById[id]!.attack?.domain, id).toBe('ground');
+
+      const run = measured(M3_NO_ANTI_AIR);
+      expect(run.state.phase).toBe('lost');
+      expect(checkAllStepsRan(M3_NO_ANTI_AIR.id, run)).toEqual([]);
+      // Lost to the first flyers down the north lane — `flying`, in the wave the lane joins —
+      // inside block 2, which ends at wave 20.
+      const flying = ruleset.waves[NORTH_AIR]!.spawns;
+      expect(new Set(flying.map((s) => s.creepId))).toEqual(new Set(['flying']));
+      expect(NORTH_AIR).toBeLessThanOrEqual(BLOCK_2_LAST);
+      expect(checkLossWindow(M3_NO_ANTI_AIR.id, run, ruleset, { fromWaveOf: 'flying' })).toEqual(
+        [],
+      );
+      expect(run.state.tick).toBe(8707);
+      expect(locateLoss(run)).toEqual({
+        tick: 8706,
+        reachedWave: NORTH_AIR,
+        fatalLeaks: [{ creepId: 'flying', wave: NORTH_AIR }],
+      });
+      // Every life it lost, it lost to the air: block 1's two air waves down the west lane
+      // (8 + 6 lives), then six of the north lane's ten. Its ground maze let nothing through.
+      expect(run.leaks.every((l) => isAir(l.creepId))).toBe(true);
+      expect(run.waves.filter((w) => w.livesLost > 0).map((w) => [w.wave, w.livesLost])).toEqual([
+        [waveIndexForCreep(ruleset, 'flying'), 8],
+        [waveIndexForCreep(ruleset, 'armored-flyer'), 6],
+        [NORTH_AIR, 6],
+      ]);
+    },
+  );
+
+  it(
+    'no anti-air clears the plausibility floors: it spends its income and kills every ground creep it meets',
+    { timeout: 120_000 },
+    () => {
+      // Floors chosen for this story: nearly every bounty it received spent, three tower
+      // kinds, and the 211 ground creeps of waves 1–15 all killed.
+      const run = measured(M3_NO_ANTI_AIR);
+      expect(
+        checkPlausibility(M3_NO_ANTI_AIR.id, run, ruleset, {
+          minSpend: 400,
+          minSpentShare: 0.95,
+          minTowerKinds: 3,
+          minKills: 211,
+          reachesWaveOf: 'armored-flyer',
+        }),
+      ).toEqual([]);
+      const groundSpawns = ruleset.waves
+        .slice(0, NORTH_AIR)
+        .flatMap((w) => w.spawns)
+        .filter((s) => !isAir(s.creepId)).length;
+      expect([run.kills, groundSpawns]).toEqual([211, 211]);
+      expect([run.spend, run.state.bounty, run.stepsDone]).toEqual([427, 7, 61]);
+    },
+  );
+
+  it('keeps blocks 1–2 inside section A’s budgets', { timeout: 120_000 }, () => {
+    expect(totalScheduledSpawns(ruleset)).toBe(323);
     expect(totalScheduledSpawns(ruleset)).toBeLessThanOrEqual(2000);
     for (const build of M3_CROSSING.builds) {
       expect(measured(build).peakAlive, build.id).toBeLessThanOrEqual(PEAK_ALIVE_BUDGET);
@@ -284,42 +400,44 @@ describe('M3 story 5 — the first reference builds, block 1 on the crossing boa
   });
 });
 
-describe('M3 story 5 — the board’s capacity in bounty', () => {
-  const full = compileReferenceBuild(M3_SERPENTINE_FULL, ruleset);
-
-  it('draws the block-1 serpentine to the whole board: its plan first, tower for tower', () => {
-    const block1 = compileReferenceBuild(M3_SERPENTINE, ruleset);
-    expect(full.slice(0, block1.length)).toEqual(block1);
-  });
-
-  it('is a maze the sim accepts tower by tower, still one both routes walk, with no 2 × 2 left clear of their paths', () => {
+describe('M3 stories 5–6 — the board’s capacity in bounty', () => {
+  it('the serpentine is its own capacity drawing: a maze the sim accepts tower by tower, still one both routes walk, with no 2 × 2 left clear of their paths', () => {
     // One placement a tick before wave 1, each accepted — the maze invariant never refuses
     // one (the report's own check, `placeCapacityDrawing`).
-    const { state, failures } = placeCapacityDrawing('full', M3_SERPENTINE_FULL, ruleset, SEED);
+    expect(M3_CROSSING.fullBoard).toBe(M3_SERPENTINE);
+    const { state, failures } = placeCapacityDrawing('full', M3_SERPENTINE, ruleset, SEED);
     expect(failures).toEqual([]);
-    expect(state.towers.id.length).toBe(full.length);
+    expect(state.towers.id.length).toBe(compileReferenceBuild(M3_SERPENTINE, ruleset).length);
     expect(routes(state)).toEqual({ west: 167, north: 143, sharing: 'merged' });
 
-    // "Every tower the maze holds": no open 2 × 2 is left off both routes' paths — where the
-    // block-1 serpentine, five horizontal walls short, leaves room (the scan can find some).
+    // "Every tower the maze holds": no open 2 × 2 is left off both routes' paths — where two
+    // mazes, which leaves the board's corners and middle open, leaves room (the scan can
+    // find some).
     expect(openRoom(state)).toEqual([]);
-    const block1 = placeCapacityDrawing('block 1', M3_SERPENTINE, ruleset, SEED);
-    expect(block1.failures).toEqual([]);
-    expect(openRoom(block1.state).length).toBeGreaterThan(0);
+    const open = placeCapacityDrawing('two mazes', M3_TWO_MAZES, ruleset, SEED);
+    expect(open.failures).toEqual([]);
+    expect(openRoom(open.state).length).toBeGreaterThan(0);
   });
 
-  it('prices at 83 towers, 569 bounty, beyond what block 1 earns', () => {
-    expect(drawnCapacity(M3_SERPENTINE_FULL, ruleset)).toEqual({
+  it('prices at 83 towers, 613 bounty, which the schedule’s income covers by wave 19 — wave 17 with every early call', () => {
+    expect(drawnCapacity(M3_SERPENTINE, ruleset)).toEqual({
       towers: 83,
-      bounty: 569,
-      spendById: { basic: 225, splash: 96, venom: 162, antiair: 70, slow: 16 },
+      bounty: 613,
+      spendById: { basic: 215, splash: 192, venom: 90, antiair: 70, beacon: 30, slow: 16 },
     });
-    // Block 1 earns 315 by wave 10 (80 + 211 in kills + 24 in clear bonuses), 361 with every
-    // early call at its maximum (+5 a call on a 500-tick countdown, +6 on wave 10's 600).
+    // Blocks 1–2 earn 715 by wave 20 (80 + 577 in kills + 58 in clear bonuses), 815 with
+    // every early call at its maximum. 613 is covered by wave 19's 642 (581 by wave 18), and
+    // with the calls by wave 17's 621 (573 by wave 16).
     const income = scheduleIncome(ruleset);
-    expect(income[9]).toEqual({ wave: 9, earned: 315, earnedWithCalls: 361 });
-    expect(firstWaveCovering(income, 569, false)).toBeNull();
-    expect(firstWaveCovering(income, 569, true)).toBeNull();
+    expect(income[19]).toEqual({ wave: 19, earned: 715, earnedWithCalls: 815 });
+    expect(income.slice(15, 19).map((r) => [r.earned, r.earnedWithCalls])).toEqual([
+      [495, 573],
+      [538, 621],
+      [581, 669],
+      [642, 735],
+    ]);
+    expect(firstWaveCovering(income, 613, false)).toBe(18);
+    expect(firstWaveCovering(income, 613, true)).toBe(16);
   });
 
   it(
@@ -331,18 +449,21 @@ describe('M3 story 5 — the board’s capacity in bounty', () => {
       for (const build of M3_CROSSING.builds) {
         expect(text).toContain(`${build.id} — ${build.summary}`);
       }
-      expect(text).toContain('won · tick 5990 · lives 20 · score 711 · 3★ · steps 45/45');
+      expect(text).toContain('won · tick 11710 · lives 20 · score 1077 · 3★ · steps 83/83');
+      expect(text).toContain('won · tick 11717 · lives 20 · score 1077 · 3★ · steps 69/69');
       expect(text).toContain('lost to 1 swarm from wave 2 while on wave 2');
       expect(text).toContain('lost to 1 armored from wave 5 while on wave 5');
+      expect(text).toContain('lost to 1 flying from wave 16 while on wave 16');
       // The two winners tie on lives and score; the first registered is the strongest.
       expect(text).toContain(
-        'board-full: the strongest build, m3-serpentine (won on 20 lives), placed its last tower in wave 10',
+        'board-full: the strongest build, m3-serpentine (won on 20 lives), placed its last tower in wave 19',
       );
       expect(text).toContain(
-        'capacity: m3-serpentine-full draws 83 towers worth 569 bounty — basic 225, venom 162, splash 96, antiair 70, slow 16',
+        'capacity: m3-serpentine draws 83 towers worth 613 bounty — basic 215, splash 192, venom 90, antiair 70, beacon 30, slow 16',
       );
+      expect(text).toContain('income (every kill and clear bonus) covers it by the end of wave 19');
       expect(text).toContain(
-        'income (every kill and clear bonus) reaches 315 by the end of wave 10, short of it',
+        'income with every early call at its maximum covers it by the end of wave 17',
       );
     },
   );

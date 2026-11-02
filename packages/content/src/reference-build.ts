@@ -73,8 +73,9 @@ export interface ReferenceSet {
   readonly seed: number;
   readonly builds: readonly ReferenceBuild[];
   /** The board's capacity (m3.md, "Economy": the board-full target): the strongest
-   *  winner's maze drawn to the whole board, every tower it holds at its mix. Never run —
-   *  the report prices it and the schedule's income against it (`balance-capacity.ts`). */
+   *  winner's maze drawn to the whole board, every tower it holds at its mix — that winner
+   *  itself once its plan fills the board. Priced, never run as a drawing: the report
+   *  prices it and the schedule's income against it (`balance-capacity.ts`). */
   readonly fullBoard?: ReferenceBuild;
 }
 

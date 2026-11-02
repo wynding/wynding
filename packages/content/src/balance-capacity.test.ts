@@ -1,14 +1,14 @@
 // balance-capacity.test.ts — M3 story 5: the capacity arithmetic (`balance-capacity.ts`) on
 // small drawings and the shipped schedule, each branch on both sides; the check that the sim
 // takes a drawing as drawn; and the report's capacity lines when the schedule's income does
-// cover a drawing, and its failure when the sim refuses one. The registered capacity drawing
-// is `balance-crossing.test.ts`'s.
+// cover a drawing and when it falls short, and its failure when the sim refuses one. The
+// registered capacity drawing is `balance-crossing.test.ts`'s.
 
 import { describe, it, expect } from 'vitest';
 import { compileRuleset } from '@wynding/sim';
 import { loadRulesetOrM2Fixture } from './m2-fixture';
 import { drawGrid, type ReferenceSet } from './reference-build';
-import { M3_CROSSING, M3_UNDEFENDED, M3_WEST_ONLY } from './reference-builds';
+import { M3_CROSSING, M3_SERPENTINE, M3_UNDEFENDED, M3_WEST_ONLY } from './reference-builds';
 import {
   drawnCapacity,
   firstWaveCovering,
@@ -109,7 +109,7 @@ describe('a capacity drawing, placed', () => {
 
 describe('a schedule’s income', () => {
   it('adds each wave’s kill bounty and clear bonus to the starting bounty, and the early calls beside it', () => {
-    // Waves 1–3 of block 1: 10 normals, 16 swarm, 10 normals (1 bounty each), 2 a clear.
+    // Waves 1–3: 10 normals, 16 swarm, 10 normals (1 bounty each), 2 a clear.
     // Wave 1's call pays nothing (Start claims it); a 500-tick countdown pays ⌊500 / 100⌋.
     expect(scheduleIncome(ruleset).slice(0, 3)).toEqual([
       { wave: 0, earned: 92, earnedWithCalls: 92 },
@@ -131,8 +131,12 @@ describe('a schedule’s income', () => {
     expect(firstWaveCovering(income, 92, false)).toBe(0);
     expect(firstWaveCovering(income, 123, false)).toBe(3); // 122 by wave 3, 152 by wave 4
     expect(firstWaveCovering(income, 123, true)).toBe(2); // 132 by wave 3
-    expect(firstWaveCovering(income, 316, false)).toBeNull();
-    expect(firstWaveCovering(income, 362, true)).toBeNull();
+    // One past what the whole schedule earns, with or without the calls: no wave covers it.
+    const last = income[income.length - 1]!;
+    expect(firstWaveCovering(income, last.earned, false)).toBe(last.wave);
+    expect(firstWaveCovering(income, last.earned + 1, false)).toBeNull();
+    expect(firstWaveCovering(income, last.earnedWithCalls, true)).toBe(last.wave);
+    expect(firstWaveCovering(income, last.earnedWithCalls + 1, true)).toBeNull();
   });
 });
 
@@ -153,6 +157,26 @@ describe('the report’s capacity lines', () => {
     expect(text).toContain('income (every kill and clear bonus) covers it by the end of wave 4');
     expect(text).toContain(
       'income with every early call at its maximum covers it by the end of wave 3',
+    );
+  });
+
+  it('say how far short the schedule’s income falls of a drawing it cannot pay for', () => {
+    // The serpentine's 613 against block 1 alone: ten waves earn 315, 361 with every call.
+    const board = bundle.boards[0]!;
+    const blockOne = { ...bundle, boards: [{ ...board, waves: board.waves.slice(0, 10) }] };
+    const set: ReferenceSet = {
+      ...M3_CROSSING,
+      id: 'probe',
+      builds: [M3_UNDEFENDED],
+      fullBoard: M3_SERPENTINE,
+    };
+    const { text, failures } = balanceReport([set], () => blockOne);
+    expect(failures).toEqual([]);
+    expect(text).toContain(
+      'income (every kill and clear bonus) reaches 315 by the end of wave 10, short of it',
+    );
+    expect(text).toContain(
+      'income with every early call at its maximum reaches 361 by the end of wave 10, short of it',
     );
   });
 
