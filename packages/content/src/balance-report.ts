@@ -13,11 +13,12 @@
 // (`balance-capacity.ts`): where the strongest build would place its last tower once the
 // schedule is long enough to fill the board.
 //
-// Beside the text it returns what makes the report untrustworthy — no set registered, a
-// build whose plan didn't finish or whose run never ended, or a capacity drawing the sim
-// will not take as drawn (`placeCapacityDrawing`: a sell, a refused tower, a creep on the
-// board before it stands) or that does not draw the strongest build (its plan must begin
-// with that build's), whose price is still printed — so the command can fail.
+// Beside the text it returns what makes the report untrustworthy — no set registered, a set
+// with no builds, a build whose plan didn't finish or whose run never ended, or a capacity
+// drawing the sim will not take as drawn (`placeCapacityDrawing`: a sell, a refused tower, a
+// creep on the board before it stands) or that does not draw the strongest build (the towers
+// it places must begin with that build's), whose price is still printed — so the command can
+// fail.
 
 import { compileRuleset, deriveScore, deriveStars, type CompiledRuleset } from '@wynding/sim';
 import type { Ruleset } from '@wynding/types';
@@ -170,7 +171,7 @@ export function checkDrawsStrongest(
   if (best === null) return [];
   const drawn = mazeOrder(full, ruleset);
   const built = mazeOrder(best.build, ruleset);
-  if (built.length <= drawn.length && built.every((tower, i) => drawn[i] === tower)) return [];
+  if (built.every((tower, i) => drawn[i] === tower)) return [];
   return [
     `${label}: the capacity drawing does not draw the strongest build, ${best.build.id} — its towers do not begin with that build's`,
   ];
