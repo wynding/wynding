@@ -1662,7 +1662,7 @@ describe('controller — armed/selection state machine (PLAN.md P2 table)', () =
   it("armed: click a cell rejected for INSUFFICIENT BOUNTY reports reason 'bounty'", () => {
     const c = createController(1);
     c.start(); // PLAN.md P4: advance() no-ops while held
-    // Drain the starting 80 Bounty exactly: 16 builds × cost 5, all queued into the SAME
+    // Drain the starting 96 Bounty exactly: 16 builds × cost 6, all queued into the SAME
     // tick's buffer (placement validity is evaluated against the cumulative pending
     // preview, so no tick needs to elapse between them).
     const cells: Array<[number, number]> = [];
@@ -1683,8 +1683,8 @@ describe('controller — armed/selection state machine (PLAN.md P2 table)', () =
   it('the aim memo key includes the armed tower id — same cell, basic affordable, slow not: switching arms MUST re-evaluate (Codex R1-3)', () => {
     const c = createController(1);
     c.start(); // PLAN.md P4: advance() no-ops while held
-    // Drain the starting 80 Bounty to exactly 5 (15 basic builds × cost 5) — affordable
-    // for `basic` (cost 5) but NOT for `slow` (cost 8), all queued into this one tick's
+    // Drain the starting 96 Bounty to exactly 6 (15 basic builds × cost 6) — affordable
+    // for `basic` (cost 6) but NOT for `slow` (cost 10), all queued into this one tick's
     // buffer (placement validity reads the cumulative pending preview).
     const cells: Array<[number, number]> = [];
     for (const row of [2, 5])
@@ -1697,14 +1697,14 @@ describe('controller — armed/selection state machine (PLAN.md P2 table)', () =
     const FRESH: [number, number] = [2, 8]; // an otherwise-buildable, never-touched cell
     c.armTower('basic');
     const basicAim = c.aimAt(...FRESH);
-    expect(basicAim).toMatchObject({ kind: 'ghost', valid: true }); // basic: affordable (5 == 5)
+    expect(basicAim).toMatchObject({ kind: 'ghost', valid: true }); // basic: affordable (6 == 6)
     // Switch armed to `slow` on the SAME cell in the SAME tick — the aim memo key must
     // include the armed id, or the affordable-basic verdict would leak onto the
     // unaffordable-slow candidate (a stale `true` reused from the basic memo entry).
     c.armTower('slow'); // different id → switches in one action (not a toggle-off)
     expect(c.uiState().armed).toBe('slow');
     const slowAim = c.aimAt(...FRESH);
-    expect(slowAim).toMatchObject({ kind: 'ghost', valid: false }); // slow: unaffordable (5 < 8)
+    expect(slowAim).toMatchObject({ kind: 'ghost', valid: false }); // slow: unaffordable (6 < 10)
   });
 
   it('armed: document-scope Escape disarms; the ghost clears immediately', () => {

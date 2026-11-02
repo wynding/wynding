@@ -79,6 +79,8 @@ export interface CampaignPerfHarness {
 declare global {
   interface Window {
     wyndingPerfCampaign?: CampaignPerfHarness;
+    /** Set when `main()` throws, so the spec stops waiting and reports why. */
+    wyndingPerfCampaignError?: string;
   }
 }
 
@@ -208,6 +210,9 @@ function main(): void {
 try {
   main();
 } catch (err: unknown) {
+  // Recorded for the spec, which would otherwise wait out its whole setup timeout on a page
+  // that will never be ready, then rethrown as a page error as the other scenes do.
+  window.wyndingPerfCampaignError = err instanceof Error ? err.message : String(err);
   setTimeout(() => {
     throw err;
   });

@@ -158,6 +158,10 @@ describe('every step ran', { timeout: 120_000 }, () => {
     expect(checkAllStepsRan('blocked', blocked)).toEqual([
       'blocked: step 11 was rejected by the sim and never ran',
     ]);
+    // Every rejected send of that eleventh basic is a command a replay of the run carries,
+    // so the count the replay budgets read runs well past the ten placements accepted.
+    expect(blocked.commands.sell).toBe(0);
+    expect(blocked.commands.place).toBeGreaterThan(blocked.stepsDone + 1);
   });
 });
 

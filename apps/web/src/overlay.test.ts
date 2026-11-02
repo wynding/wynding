@@ -5078,7 +5078,7 @@ describe('overlay — the Rail’s Cards and docked Panel (#181 H3/L2)', () => {
     // `aria-pressed`.
     atBounty(overlay, 7);
     expect(observer.takeRecords()).toEqual([]);
-    // A Bounty that changes some shortfalls rewrites only those Cards: basic (5) is affordable
+    // A Bounty that changes some shortfalls rewrites only those Cards: basic (6) is affordable
     // at 7 and at 6, so it is never touched.
     atBounty(overlay, 6);
     const records = observer.takeRecords();

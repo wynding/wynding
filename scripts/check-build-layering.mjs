@@ -75,7 +75,9 @@
 //     `packages/content/src/showcase-builds.ts`, `packages/content/src/m2-fixture.ts` and
 //     `packages/replay/src/test-support.ts` (which that harness reaches by relative path, the
 //     last for its 30-wave run) carry no hook and no fake transport, and nothing here would see
-//     shipped code import them. The
+//     shipped code import them — nor `reference-build.ts`, `reference-builds.ts` and
+//     `script-runner.ts` in `packages/content/src`, which the perf build's campaign scene reaches
+//     the same way (M3 story 8). The
 //     markers are reached from the module's top-level side effects, so any graph that imports the
 //     module keeps them. A refactor that moves a marker behind a call shipped code never makes lets
 //     Rollup drop it, and the module could then ship unseen — the same limit as `stats.ts` above.
@@ -87,9 +89,9 @@
 // nothing in the thing it forbids proves nothing: rename `STRESS_RULESET_ID` and this file
 // would go on passing forever, having tested that a string nobody emits is not emitted. So
 // every marker below must be found in its module's POSITIVE CONTROL — a build that reaches
-// that module on purpose. There are two: `dist-perf`, the perf-only build, whose two entry
-// points (`apps/web/perf/main-perf.ts`, `main-perf-catalog.ts`) import the three package
-// modules; and `dist-e2e`, the e2e build, whose three pages (`apps/web/e2e-harness/survey.html`,
+// that module on purpose. There are two: `dist-perf`, the perf-only build, whose entry points
+// (`apps/web/perf/main-perf.ts`, `main-perf-catalog.ts`, and since M3 story 8
+// `main-perf-campaign.ts`) reach the three package modules; and `dist-e2e`, the e2e build, whose three pages (`apps/web/e2e-harness/survey.html`,
 // `results.html` and `turned-heads.html`) load the harness modules. A marker missing from its
 // control fails the run just as loudly as a marker found in `dist`. Presence alone is not the whole
 // control, though: a marker must also be EMITTED BY the module it is bound to, read off the control

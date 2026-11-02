@@ -203,18 +203,66 @@ describe('the report’s section-B lines (M3 story 8)', () => {
     };
   }
   const build = (id: string): ReferenceBuild => ({ id, summary: id, grid: '', order: '' });
-  /** The report on `set`, each build measured by `runs` (by id) rather than run. */
-  const report = (set: ReferenceSet, runs: Readonly<Record<string, BuildRun>>) =>
-    balanceReport([set], loadRulesetOrM2Fixture, (b) => runs[b.id]!);
+  /** The report on `set`, each build measured by `runs` (by id) rather than run — and the
+   *  centre-only build's run with lives to spare by `spare`. */
+  const report = (
+    set: ReferenceSet,
+    runs: Readonly<Record<string, BuildRun>>,
+    spare: Readonly<Record<string, BuildRun>> = {},
+  ) =>
+    balanceReport([set], loadRulesetOrM2Fixture, (b, on) =>
+      on.balance.startingLives > crossing.balance.startingLives ? spare[b.id]! : runs[b.id]!,
+    );
+  const cost = (id: string) => crossing.towerById[id]!.cost;
+  const pct = (part: number, whole: number) => `${Math.round((part * 100) / whole)}%`;
 
-  it('gives each honest winner’s anti-air share, and none when nothing won honestly', () => {
+  /** `state` with `placed` standing, `[towerId, col, row]` each, at their catalog cost. */
+  function standing(placed: readonly (readonly [string, number, number])[]): Partial<SimState> {
+    const base = createInitialState(0, crossing).towers;
+    return {
+      towers: {
+        ...base,
+        id: placed.map((_, i) => i + 1),
+        towerId: placed.map(([id]) => id),
+        col: placed.map(([, col]) => col),
+        row: placed.map(([, , row]) => row),
+        spend: placed.map(([id]) => cost(id)),
+      } as SimState['towers'],
+    };
+  }
+
+  it('gives each honest winner’s anti-air share, with the beacons that lift only flyer-only towers, and none when nothing won honestly', () => {
     const winner = build('winner');
     const juggler = build('juggler');
+    // The beacon at (10,4) lifts the two antiair sharing its edges; the one at (10,10) lifts
+    // an antiair and a basic; the one at (20,4) lifts nothing (the antiair at (22,6) only
+    // touches its corner). Only the first counts as anti-air spend.
+    const towers: [string, number, number][] = [
+      ['antiair', 8, 4],
+      ['beacon', 10, 4],
+      ['antiair', 12, 4],
+      ['basic', 8, 10],
+      ['beacon', 10, 10],
+      ['antiair', 12, 10],
+      ['beacon', 20, 4],
+      ['antiair', 22, 6],
+      ['slow', 16, 16],
+    ];
+    const spend = towers.reduce((n, [id]) => n + cost(id), 0);
+    const aa = 4 * cost('antiair');
     const { text } = report(crossingSet([winner, juggler], {}), {
       winner: fake(
         crossing,
-        { phase: 'won', lives: 20 },
-        { spendById: { antiair: 18, slow: 10, basic: 72 }, spend: 100 },
+        { phase: 'won', lives: 20, ...standing(towers) },
+        {
+          spendById: {
+            antiair: aa,
+            beacon: 3 * cost('beacon'),
+            basic: cost('basic'),
+            slow: cost('slow'),
+          },
+          spend,
+        },
       ),
       juggler: fake(
         crossing,
@@ -226,11 +274,14 @@ describe('the report’s section-B lines (M3 story 8)', () => {
         },
       ),
     });
-    // `antiair` hits only flyers; `slow` hits both; `basic` only the ground. The juggler,
-    // on a live sell, is no honest winner.
+    // `antiair` hits only flyers; `slow` hits both; `basic` only the ground.
+    const lifted = aa + cost('beacon');
+    const any = aa + cost('slow');
     expect(text).toContain(
-      'anti-air share of spend — on towers that hit only flyers, then on every tower that can hit one:\n  winner: 18 of 100 (18%), 28 (28%)\n',
+      `anti-air share of spend (towers that hit only flyers; with the beacons that lift nothing else; every tower that can hit a flyer):\n  winner: ${aa} of ${spend} (${pct(aa, spend)}); ${lifted} (${pct(lifted, spend)}); ${any} (${pct(any, spend)})\n`,
     );
+    // The juggler, on a live sell, is no honest winner.
+    expect(text).not.toContain('  juggler:');
     const losing = report(crossingSet([winner], {}), {
       winner: fake(crossing, { phase: 'lost', lives: 0 }),
     });
@@ -294,16 +345,38 @@ describe('the report’s section-B lines (M3 story 8)', () => {
     ]);
   });
 
-  it('says whether the centre-only build survives the waves that fly two lanes at once, lost before them, or that no wave does', () => {
+  it('measures the two-lane air on the centre-only build’s run with lives to spare, beside the lives its own run met it on', () => {
     const centre = build('centre');
     const set = crossingSet([centre], { centreAntiAir: centre });
     const leak = (creepId: string, wave: number) => ({ tick: 15_000, creepId, wave });
-    // A flyer before wave 26 and a ground creep after it are not counted.
-    expect(
-      report(set, {
+    /** Profile rows whose `lives` is `held` through wave 25's window, `after` from there. */
+    const rows = (held: number, after: number): BuildRun['waves'] =>
+      Array.from({ length: 30 }, (_, wave) => ({
+        wave,
+        leaks: 0,
+        livesLost: 0,
+        closestApproach: null,
+        lives: wave < 25 ? held : after,
+        towers: 0,
+        unspent: 0,
+        placed: 0,
+        peakAlive: 0,
+      }));
+    // Its own run met wave 26 on 18 lives; with lives to spare, that air takes 3. A flyer
+    // before wave 26 and a ground creep after it are not counted.
+    const survives = report(
+      set,
+      {
         centre: fake(
           crossing,
-          { phase: 'won', lives: 14 },
+          { phase: 'won', lives: 14, waveCursor: 30 },
+          { waves: rows(18, 14) },
+        ),
+      },
+      {
+        centre: fake(
+          crossing,
+          { phase: 'won', lives: 999_990, waveCursor: 30 },
           {
             leaks: [
               leak('armored-flyer', 8),
@@ -314,19 +387,47 @@ describe('the report’s section-B lines (M3 story 8)', () => {
             ],
           },
         ),
-      }).text,
-    ).toContain(
-      'centre-only anti-air: centre won on 14 lives — it survives the air down two lanes at once from wave 26\n  lives its flyers took from wave 26 on: wave 26: 1, wave 29: 2\n',
+      },
     );
-    const early = report(set, {
-      centre: fake(
-        crossing,
-        { phase: 'lost', lives: 0, tick: 1376, waveCursor: 2 },
-        { leaks: [{ tick: 1375, creepId: 'swarm', wave: 1 }] },
-      ),
-    });
+    expect(survives.failures).toEqual([]);
+    expect(survives.text).toContain(
+      'centre-only anti-air: centre won on 14 lives; it met the air down two lanes at once, from wave 26, on 18 lives\n  with lives to spare, the flyers from wave 26 on take 3 (wave 26: 1, wave 29: 2) — fewer than it met that air on: it survives it\n',
+    );
+    // Lost before wave 26: its own run never met that air; the spare run says what it costs.
+    const early = report(
+      set,
+      {
+        centre: fake(
+          crossing,
+          { phase: 'lost', lives: 0, tick: 1376, waveCursor: 2 },
+          { leaks: [{ tick: 1375, creepId: 'swarm', wave: 1 }] },
+        ),
+      },
+      { centre: fake(crossing, { phase: 'won', lives: 999_999, waveCursor: 30 }) },
+    );
     expect(early.text).toContain(
-      'centre-only anti-air: centre lost on wave 2, before the air down two lanes at once from wave 26\n  lives its flyers took from wave 26 on: none\n',
+      'centre-only anti-air: centre lost to 1 swarm from wave 2 while on wave 2; it never met the air down two lanes at once, from wave 26\n  with lives to spare, the flyers from wave 26 on take 0 (none) — fewer than the 20 a run starts with: it survives that air if it meets it on more than 0\n',
+    );
+    // An air that takes a whole run's lives beats any build like it, however it meets it.
+    const overwhelmed = report(
+      set,
+      {
+        centre: fake(
+          crossing,
+          { phase: 'lost', lives: 0, tick: 16_000, waveCursor: 26 },
+          { waves: rows(20, 0), leaks: [{ tick: 15_999, creepId: 'armored-flyer', wave: 25 }] },
+        ),
+      },
+      {
+        centre: fake(
+          crossing,
+          { phase: 'won', lives: 999_980, waveCursor: 30 },
+          { leaks: Array.from({ length: 20 }, () => leak('flying', 25)) },
+        ),
+      },
+    );
+    expect(overwhelmed.text).toContain(
+      'centre-only anti-air: centre lost to 1 armored-flyer from wave 26 while on wave 26; it met the air down two lanes at once, from wave 26, on 20 lives\n  with lives to spare, the flyers from wave 26 on take 20 (wave 26: 20) — at least the 20 a run starts with: no build like it survives that air\n',
     );
     // M2's board has one entrance, so no wave there flies two lanes.
     const m2: ReferenceSet = { ...M2_SHOWCASE, id: 'm2', builds: [centre], centreAntiAir: centre };

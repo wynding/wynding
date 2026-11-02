@@ -219,7 +219,7 @@ test.describe('#181 H3: the Panel docked below the Cards', () => {
       expect(m.roleVisible).toBe(true);
       // Label-value rows: the label on the left, the value at the right edge.
       expect(m.rows.map((r) => [r.label, r.value])).toEqual([
-        ['Cost', '9'],
+        ['Cost', '11'],
         ['Damage', '2'],
         ['Range', '4.0 tiles'],
         ['Fire rate', '0.7/s'],

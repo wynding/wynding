@@ -11,7 +11,8 @@
 // placement, unless its plan never finished. Then each honest winner's share of spend on
 // anti-air (M3 story 8), and, where the set names them, its juggling build's result beside
 // the honest winners' (`juggling`) and whether its centre-only anti-air build survives the
-// waves that fly two lanes at once (`centreAntiAir`). A set that draws its board full
+// waves that fly two lanes at once (`centreAntiAir`) — measured also on a second run of it
+// with lives to spare, so the earlier waves' leaks don't decide it. A set that draws its board full
 // (`fullBoard`) then gets the board's capacity in bounty and the wave whose income first
 // covers it (`balance-capacity.ts`): where the strongest build would place its last tower
 // once the schedule is long enough to fill the board.
@@ -19,17 +20,22 @@
 // Beside the text it returns what makes the report untrustworthy — no set registered, a set
 // with no builds, a build whose plan didn't finish or whose run never ended, a juggling or
 // centre-only build that is not one of the set's builds, a juggling build that never sold
-// with a creep alive, or a capacity drawing the sim will not take as drawn
+// with a creep alive or that goes over the replay validator's command budgets
+// (`checkCommandBudgets`), or a capacity drawing the sim will not take as drawn
 // (`placeCapacityDrawing`: a sell, a refused tower, a creep on the board before it stands)
 // or that does not draw the strongest build (the towers it places must begin with that
 // build's), whose price is still printed — so the command can fail.
 
 import {
+  auraMulFor,
+  buildAuraIndex,
   compileRuleset,
   deriveScore,
   deriveStars,
   resolveCreepLeakCost,
+  SUPPORT_MUL_IDENTITY,
   type CompiledRuleset,
+  type SimState,
 } from '@wynding/sim';
 import type { Ruleset } from '@wynding/types';
 import { compileReferenceBuild, type ReferenceBuild, type ReferenceSet } from './reference-build';
@@ -74,16 +80,19 @@ function summaryLine(run: BuildRun, ruleset: CompiledRuleset): string {
     parts.push(`sells ${run.sells.length} (${live} with creeps alive)`);
   }
   const loss = locateLoss(run);
-  if (loss !== null) {
-    const counts = new Map<string, number>();
-    for (const l of loss.fatalLeaks) {
-      const key = `${l.creepId} from wave ${l.wave + 1}`;
-      counts.set(key, (counts.get(key) ?? 0) + 1);
-    }
-    const fatal = [...counts].map(([key, n]) => `${n} ${key}`).join(', ');
-    parts.push(`lost to ${fatal} while on wave ${loss.reachedWave + 1}`);
-  }
+  if (loss !== null) parts.push(lossText(loss));
   return parts.join(' · ');
+}
+
+/** A loss as the creeps that ended it and the wave the run had reached. */
+function lossText(loss: NonNullable<ReturnType<typeof locateLoss>>): string {
+  const counts = new Map<string, number>();
+  for (const l of loss.fatalLeaks) {
+    const key = `${l.creepId} from wave ${l.wave + 1}`;
+    counts.set(key, (counts.get(key) ?? 0) + 1);
+  }
+  const fatal = [...counts].map(([key, n]) => `${n} ${key}`).join(', ');
+  return `lost to ${fatal} while on wave ${loss.reachedWave + 1}`;
 }
 
 const COLUMNS = ['wave', 'leaks', 'lost', 'lives', 'closest', 'towers', 'unspent', 'peak'];
@@ -170,9 +179,48 @@ function percent(part: number, whole: number): string {
   return `${whole > 0 ? Math.round((part * 100) / whole) : 0}%`;
 }
 
-/** How much of each honest winner's spend went on anti-air — the towers that hit only
- *  flyers, then every tower that can hit one (m3.md's flag that every winner carries
- *  `antiair`; the owner asked how heavily winning leans on it). */
+/** What `state`'s support towers cost where every attacking tower one lifts hits only
+ *  flyers — support that serves anti-air and nothing else. Judged one beacon at a time by the
+ *  sim's own aura rule (`buildAuraIndex` over a board holding that beacon alone), so it can
+ *  never disagree with the buff the sim applies. */
+function airOnlySupportSpend(state: SimState, ruleset: CompiledRuleset): number {
+  const { towers } = state;
+  const { grid } = ruleset.board;
+  let spent = 0;
+  for (let b = 0; b < towers.id.length; b++) {
+    const beacon = ruleset.towerById[towers.towerId[b]!];
+    if (beacon?.support === undefined) continue;
+    const alone = buildAuraIndex(
+      grid,
+      {
+        id: [towers.id[b]!],
+        col: [towers.col[b]!],
+        row: [towers.row[b]!],
+        spend: [towers.spend[b]!],
+        towerId: [towers.towerId[b]!],
+      },
+      ruleset.towerById,
+    );
+    const lifted: string[] = [];
+    for (let i = 0; i < towers.id.length; i++) {
+      const domain = ruleset.towerById[towers.towerId[i]!]?.attack?.domain;
+      if (
+        domain !== undefined &&
+        auraMulFor(alone, grid, towers.col[i]!, towers.row[i]!) > SUPPORT_MUL_IDENTITY
+      ) {
+        lifted.push(domain);
+      }
+    }
+    if (lifted.length > 0 && lifted.every((d) => d === 'air')) spent += beacon.cost;
+  }
+  return spent;
+}
+
+/** How much of each honest winner's spend went on anti-air (m3.md's flag that every winner
+ *  carries `antiair`; the owner asked how heavily winning leans on it): the towers that hit
+ *  only flyers; those with the beacons that lift nothing else, on the winner's finished board
+ *  (an honest winner never sells, so every beacon it bought stands there); and every tower that
+ *  can hit a flyer, beacons aside. */
 function antiAirLines(runs: readonly Entry[], ruleset: CompiledRuleset): string[] {
   const winners = honestWinners(runs);
   if (winners.length === 0) return [];
@@ -180,19 +228,21 @@ function antiAirLines(runs: readonly Entry[], ruleset: CompiledRuleset): string[
     Object.entries(run.spendById)
       .filter(([id]) => domains.includes(ruleset.towerById[id]?.attack?.domain ?? 'none'))
       .reduce((n, [, spend]) => n + spend, 0);
+  const share = (part: number, run: BuildRun) => `${part} (${percent(part, run.spend)})`;
   return [
-    'anti-air share of spend — on towers that hit only flyers, then on every tower that can hit one:',
+    'anti-air share of spend (towers that hit only flyers; with the beacons that lift nothing else; every tower that can hit a flyer):',
     ...winners.map(({ build, run }) => {
       const only = spentWhere(run, ['air']);
+      const lifted = only + airOnlySupportSpend(run.state, ruleset);
       const any = spentWhere(run, ['air', 'both']);
-      return `  ${build.id}: ${only} of ${run.spend} (${percent(only, run.spend)}), ${any} (${percent(any, run.spend)})`;
+      return `  ${build.id}: ${only} of ${run.spend} (${percent(only, run.spend)}); ${share(lifted, run)}; ${share(any, run)}`;
     }),
   ];
 }
 
 /** The juggling build's line beside the honest winners' (m3.md, B). Its spend counts every
  *  placement, re-placements too (M2's measure), so the line also gives it net of what its
- *  sells refunded: ⌊refundNum / refundDen⌋ of each sold tower's cost, the sim's rule. */
+ *  sells refunded: ⌊cost × refundNum / refundDen⌋ for each sold tower, the sim's rule. */
 function jugglingLines(entry: Entry, runs: readonly Entry[], ruleset: CompiledRuleset): string[] {
   const { build, run } = entry;
   const { refundNum, refundDen } = ruleset.balance;
@@ -227,29 +277,48 @@ export function firstMultiLaneAirWave(ruleset: CompiledRuleset): number | null {
   return wave < 0 ? null : wave;
 }
 
-/** Whether the centre-only anti-air build survives the waves that fly both lanes at once
- *  (m3.md, B), with the lives each of those waves' flyers took. */
-function centreAntiAirLines(entry: Entry, ruleset: CompiledRuleset): string[] {
+/** The starting lives of the centre-only build's second run: enough that no schedule ends it. */
+const LIVES_TO_SPARE = 1_000_000;
+
+/** Whether the centre-only anti-air build survives the waves that fly two lanes at once
+ *  (m3.md, B). Its own run meets that air on whatever lives the waves before it left it, so
+ *  the air is also measured apart from them: `spare` is the same build with lives to spare.
+ *  The sim reads lives only to end a run and to score it, so that run is this one tick for
+ *  tick until this one ends, and then plays on; the lives its flyers take from the first
+ *  two-lane wave on are what that air costs this build. */
+function centreAntiAirLines(
+  entry: Entry,
+  spare: () => BuildRun,
+  ruleset: CompiledRuleset,
+): string[] {
   const { build, run } = entry;
   const both = firstMultiLaneAirWave(ruleset);
   if (both === null) return [`centre-only anti-air: ${build.id} — no wave flies two lanes at once`];
-  const lost = new Map<number, number>();
-  for (const l of run.leaks) {
+  const taken = new Map<number, number>();
+  for (const l of spare().leaks) {
     if (l.wave < both || ruleset.creepById[l.creepId]?.domain !== 'air') continue;
-    lost.set(l.wave, (lost.get(l.wave) ?? 0) + resolveCreepLeakCost(ruleset.creepById, l.creepId));
+    taken.set(
+      l.wave,
+      (taken.get(l.wave) ?? 0) + resolveCreepLeakCost(ruleset.creepById, l.creepId),
+    );
   }
-  const air = [...lost].map(([w, n]) => `wave ${w + 1}: ${n}`).join(', ') || 'none';
-  const from = `the air down two lanes at once from wave ${both + 1}`;
+  const total = [...taken.values()].reduce((a, b) => a + b, 0);
+  const byWave = [...taken].map(([w, n]) => `wave ${w + 1}: ${n}`).join(', ') || 'none';
   const loss = locateLoss(run);
+  const outcome = loss === null ? `${run.state.phase} on ${run.state.lives} lives` : lossText(loss);
+  const from = `the air down two lanes at once, from wave ${both + 1}`;
+  const full = ruleset.balance.startingLives;
+  // The lives it held when that wave launched: the end of the window before it.
+  const met = run.state.waveCursor <= both ? null : both === 0 ? full : run.waves[both - 1]!.lives;
   const verdict =
-    loss === null
-      ? `${run.state.phase} on ${run.state.lives} lives — it survives ${from}`
-      : loss.reachedWave < both
-        ? `lost on wave ${loss.reachedWave + 1}, before ${from}`
-        : `lost on wave ${loss.reachedWave + 1} — it does not survive ${from}`;
+    total >= full
+      ? `at least the ${full} a run starts with: no build like it survives that air`
+      : met !== null && total < met
+        ? `fewer than it met that air on: it survives it`
+        : `fewer than the ${full} a run starts with: it survives that air if it meets it on more than ${total}`;
   return [
-    `centre-only anti-air: ${build.id} ${verdict}`,
-    `  lives its flyers took from wave ${both + 1} on: ${air}`,
+    `centre-only anti-air: ${build.id} ${outcome}; ${met === null ? `it never met ${from}` : `it met ${from}, on ${met} lives`}`,
+    `  with lives to spare, the flyers from wave ${both + 1} on take ${total} (${byWave}) — ${verdict}`,
   ];
 }
 
@@ -341,7 +410,8 @@ export function balanceReport(
   ];
   for (const set of sets) {
     if (set.builds.length === 0) failures.push(`${set.id}: the set has no builds`);
-    const ruleset = compileRuleset(load(set.rulesetId), set.boardId);
+    const bundle = load(set.rulesetId);
+    const ruleset = compileRuleset(bundle, set.boardId);
     lines.push(
       `== ${set.id}: ${set.rulesetId} / ${set.boardId}, seed 0x${set.seed.toString(16)} ==`,
       '',
@@ -378,7 +448,16 @@ export function balanceReport(
           `${set.id}: its centre-only anti-air build, ${set.centreAntiAir.id}, is not one of its builds`,
         );
       } else {
-        lines.push(...centreAntiAirLines(entry, ruleset), '');
+        const spare = () =>
+          measure(
+            entry.build,
+            compileRuleset(
+              { ...bundle, balance: { ...bundle.balance, startingLives: LIVES_TO_SPARE } },
+              set.boardId,
+            ),
+            set.seed,
+          );
+        lines.push(...centreAntiAirLines(entry, spare, ruleset), '');
       }
     }
     if (set.fullBoard !== undefined) {

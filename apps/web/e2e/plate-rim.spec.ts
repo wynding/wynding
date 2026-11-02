@@ -172,13 +172,13 @@ async function stage(page: Page): Promise<void> {
   await page.getByRole('button', { name: 'Start' }).click(); // a build on a running game commits
   await place(/^Splash Tower/, SPLASH);
   await place(/^Slow Tower/, SLOW);
-  // Both paid for (12 + 8) — but the chips present the PENDING world while builds are
+  // Both paid for (15 + 10) — but the chips present the PENDING world while builds are
   // queued (`controller.ts`), so that alone can pass before a tick commits them, and a Pause
   // landing first leaves the Slow Tower queued: a Pending plate (QC round 4, 2 runs in 13
   // under load). The countdown is the committed tick's (the projection is memoised on
   // `state.tick`), so its text changing after both placements means a tick of the running
   // game ran, and committed them.
-  await expect.poll(bounty).toBeLessThanOrEqual(before - 20);
+  await expect.poll(bounty).toBeLessThanOrEqual(before - 25);
   const waveChip = page.locator('.wy-chip[data-wy-chip="wave"] .wy-chip-full');
   const countdown = await waveChip.textContent();
   expect(countdown, 'a countdown to watch for a committed tick').toMatch(/\d/);

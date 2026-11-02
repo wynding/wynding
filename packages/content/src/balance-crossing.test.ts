@@ -17,17 +17,18 @@
 //     winning shape, one per route) each lose to a block-3 creep and clear the floors.
 // Then section B's two reported builds (M3 story 8): the juggling build, which wins only
 // because it juggles, inside the replay's command budgets; and the centre-only anti-air
-// build, which does not survive the waves that fly both lanes at once. Then block 2's
-// firmness: each winner, stopped after block 1, runs out of lives to block 2's creeps. Then
-// the budgets, and the capacity: the serpentine fills the board, a legal maze the sim
+// build, which meets the waves that fly both lanes at once on 15 lives and falls to them —
+// and, run with lives to spare, loses 19 to them, one fewer than a run starts with. Then
+// block 2's firmness: each winner, stopped after block 1, ends block 2 on one life or none.
+// Then the budgets, and the capacity: the serpentine fills the board, a legal maze the sim
 // accepts, priced against the schedule's income, in wave 23 — inside the board-full target —
 // and creep hit points flatten the wave after.
 //
 // A run of the whole arc is about 19,500 ticks, under a second outside coverage, so they live
 // in the default suite, as M2's calibration does. Each build is run once (the memo below) and
 // every test reads that run, the report's included; only the route checks run a build again,
-// to read where each leaked creep was bound (`leakDestinations`), and the block-1 and honest
-// probes run the shorter plans they name.
+// to read where each leaked creep was bound (`leakDestinations`), and the block-1, honest and
+// lives-to-spare probes run the plans and bundles they name.
 
 import { afterEach, describe, it, expect } from 'vitest';
 import {
@@ -150,6 +151,26 @@ function measured(build: ReferenceBuild): BuildRun {
     memo.set(build.id, run);
   }
   return run;
+}
+
+/** The shipped bundle with lives to spare — what the report runs its centre-only build on. */
+const SPARE_LIVES = 1_000_000;
+const spareRuleset = compileRuleset(
+  (() => {
+    const bundle = loadRulesetOrM2Fixture(M3_CROSSING.rulesetId);
+    return { ...bundle, balance: { ...bundle.balance, startingLives: SPARE_LIVES } };
+  })(),
+  M3_CROSSING.boardId,
+);
+let spareCentreMemo: BuildRun | undefined;
+/** The centre-only build on `spareRuleset`, run once for the file. */
+function spareCentre(): BuildRun {
+  spareCentreMemo ??= runReferenceBuild(
+    spareRuleset,
+    SEED,
+    compileReferenceBuild(M3_CENTRE_ANTI_AIR, spareRuleset),
+  );
+  return spareCentreMemo;
 }
 
 /** Both routes' ground paths on `state`'s maze, and how they share it. */
@@ -908,6 +929,32 @@ describe('M3 story 8 — section B’s reported builds', () => {
       expect(run.waves[BOTH_LANES - 1]!.lives).toBe(15);
     },
   );
+
+  it(
+    'with lives to spare, the two-lane air takes 19 of the centre-only build’s lives: one fewer than a run starts with',
+    { timeout: 120_000 },
+    () => {
+      // The run it would have had, had block 1's wall not cost it five: the same build with
+      // lives to spare plays tick for tick as the measured one until that one ends (the sim
+      // reads lives only to end and score a run), then on. From wave 26 its flyers take 19 —
+      // so a centre-only build that met that air on all 20 would survive it on one, and this
+      // one, meeting it on 15, falls (m3.md's flag on centre-only anti-air; the owner's call).
+      const spare = spareCentre();
+      const real = measured(M3_CENTRE_ANTI_AIR);
+      expect(spare.state.phase).toBe('won');
+      expect(spare.leaks.slice(0, real.leaks.length)).toEqual(real.leaks);
+      const fromBoth = spare.waves.filter((w) => w.wave >= BOTH_LANES && w.livesLost > 0);
+      expect(fromBoth.map((w) => [w.wave, w.livesLost])).toEqual([
+        [BOTH_LANES, 7],
+        [WALL, 9],
+        [FINALE, 3],
+      ]);
+      expect(spare.leaks.filter((l) => l.wave >= BOTH_LANES).every((l) => isAir(l.creepId))).toBe(
+        true,
+      );
+      expect(fromBoth.reduce((n, w) => n + w.livesLost, 0)).toBe(ruleset.balance.startingLives - 1);
+    },
+  );
 });
 
 describe('M3 story 8 — block 2 asks for more than block 1 built', () => {
@@ -953,7 +1000,7 @@ describe('M3 story 8 — block 2 asks for more than block 1 built', () => {
       ],
     },
   ])(
-    '$build.id, stopped after block 1, does not win block 2',
+    '$build.id, stopped after block 1, ends block 2 on one life or none',
     { timeout: 120_000 },
     ({ build, towers, loss, lost }) => {
       const full = measured(build);
@@ -1079,16 +1126,18 @@ describe('M3 stories 5–8 — the board’s capacity in bounty', () => {
     { timeout: 120_000 },
     () => {
       // The memo's runs, not a second simulation of every build: the report's own runner
-      // would measure the same builds on the same bundle, board and seed — which it checks.
+      // would measure the same builds on the same bundle, board and seed — which it checks —
+      // and the centre-only build once more on the bundle with lives to spare.
       const { text, failures } = balanceReport(
         [M3_CROSSING],
         loadRulesetOrM2Fixture,
         (build, compiled, seed) => {
-          expect([compiled.digest, compiled.boardId, seed]).toEqual([
-            ruleset.digest,
-            ruleset.boardId,
-            SEED,
-          ]);
+          expect([compiled.boardId, seed]).toEqual([ruleset.boardId, SEED]);
+          if (compiled.digest === spareRuleset.digest) {
+            expect(build).toBe(M3_CENTRE_ANTI_AIR);
+            return spareCentre();
+          }
+          expect(compiled.digest).toBe(ruleset.digest);
           return measured(build);
         },
       );
@@ -1113,12 +1162,16 @@ describe('M3 stories 5–8 — the board’s capacity in bounty', () => {
       );
       expect(text).toContain(
         [
-          'anti-air share of spend — on towers that hit only flyers, then on every tower that can hit one:',
-          '  m3-serpentine: 144 of 799 (18%), 184 (23%)',
-          '  m3-two-mazes: 207 of 689 (30%), 207 (30%)',
-          '  m3-channel: 135 of 876 (15%), 385 (44%)',
+          'anti-air share of spend (towers that hit only flyers; with the beacons that lift nothing else; every tower that can hit a flyer):',
+          '  m3-serpentine: 144 of 799 (18%); 252 (32%); 184 (23%)',
+          '  m3-two-mazes: 207 of 689 (30%); 225 (33%); 207 (30%)',
+          '  m3-channel: 135 of 876 (15%); 225 (26%); 385 (44%)',
         ].join('\n'),
       );
+      // Beacons that lift antiair alone, at 18 each: all six of the serpentine's, one of two
+      // mazes' two, five of the channel's thirteen. The juggler, on its live sells, is no
+      // honest winner.
+      expect(text).not.toContain('  m3-juggler:');
       expect(text).toContain(
         [
           'juggling: m3-juggler won on 2 lives (1★) — 24 sells, 24 with creeps alive; spend 913, 817 net of refunds; 131 tower commands, 107 of them placements',
@@ -1127,8 +1180,8 @@ describe('M3 stories 5–8 — the board’s capacity in bounty', () => {
       );
       expect(text).toContain(
         [
-          'centre-only anti-air: m3-centre-anti-air lost on wave 29 — it does not survive the air down two lanes at once from wave 26',
-          '  lives its flyers took from wave 26 on: wave 26: 7, wave 29: 8',
+          'centre-only anti-air: m3-centre-anti-air lost to 1 armored-flyer from wave 29 while on wave 29; it met the air down two lanes at once, from wave 26, on 15 lives',
+          '  with lives to spare, the flyers from wave 26 on take 19 (wave 26: 7, wave 29: 9, wave 30: 3) — fewer than the 20 a run starts with: it survives that air if it meets it on more than 19',
         ].join('\n'),
       );
       expect(text).toContain(

@@ -39,8 +39,13 @@ const INPUT_LATENCY_SAMPLES = 20;
 /** Floor on collected frame samples — catches a stalled sampling loop, never a budget. */
 const MIN_FRAME_SAMPLES = 10;
 
-/** The sim must genuinely advance across the window. */
-const MIN_TICKS_ADVANCED = 1;
+/** The sim must advance through most of the window, or a profile whose loop falls far
+ *  behind 20 Hz would time a thinner stretch than the Node oracle measured. */
+const MIN_TICKS_ADVANCED = CAMPAIGN_SAMPLE_TICKS / 2;
+
+/** How far past the densest stretch's first tick the window may open: the hand-over's
+ *  frames, the evaluate round trips and the optional trace warm-up all run the sim on. */
+const MAX_WINDOW_DRIFT_TICKS = CAMPAIGN_SAMPLE_TICKS / 4;
 
 /** Opt-in DevTools trace capture, the other specs' switch. */
 const TRACE_ENABLED = process.env.WY_TRACE === '1';
@@ -112,6 +117,7 @@ declare global {
       frameDeltas: number[];
       inputLatencies: number[];
     };
+    wyndingPerfCampaignError?: string;
   }
 }
 
@@ -134,10 +140,16 @@ test('campaign scene: fps / heap / input latency', async ({ page }, testInfo) =>
   await page.goto('/perf/campaign.html');
 
   const setupStart = Date.now();
-  await page.waitForFunction(() => window.wyndingPerfCampaign?.ready === true, undefined, {
-    timeout: 240_000,
-  });
+  // Ready, or failed: the entry records a throw from its setup, so a broken scene fails
+  // here with its reason rather than at the end of the timeout.
+  await page.waitForFunction(
+    () =>
+      window.wyndingPerfCampaign?.ready === true || window.wyndingPerfCampaignError !== undefined,
+    undefined,
+    { timeout: 240_000 },
+  );
   const setupMs = Date.now() - setupStart;
+  expect(await page.evaluate(() => window.wyndingPerfCampaignError ?? null)).toBeNull();
 
   // The run the scene declares, before any frame time means anything: every placement of the
   // plan accepted, and the board at hand-over exactly the Node oracle's at the same tick.
@@ -159,6 +171,10 @@ test('campaign scene: fps / heap / input latency', async ({ page }, testInfo) =>
   }
 
   const tickAtSampleStart = await page.evaluate(() => window.wyndingPerfCampaign!.tick());
+  expect(
+    tickAtSampleStart - CAMPAIGN_SAMPLE_START_TICK,
+    'the window opens at the densest stretch',
+  ).toBeLessThanOrEqual(MAX_WINDOW_DRIFT_TICKS);
   const liveCreepsAtSampleStart = await page.evaluate(() =>
     window.wyndingPerfCampaign!.liveCreepCount(),
   );

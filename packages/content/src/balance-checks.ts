@@ -97,7 +97,7 @@ export function checkNoSellWithLiveCreep(id: string, run: BuildRun): string[] {
 
 /** The run's tower commands fit the replay validator's two budgets (`packages/sim`'s
  *  `ruleset-shared.ts`): a run over either could not be submitted as a replay. The juggling
- *  build is the one that comes near them (m3.md, "Juggling"). */
+ *  build is the one that comes nearest them (m3.md, "Juggling"). */
 export function checkCommandBudgets(id: string, run: BuildRun): string[] {
   const { place, sell } = run.commands;
   const violations: string[] = [];

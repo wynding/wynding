@@ -9,7 +9,7 @@
     <title>Wynding perf harness</title>
     <style>
       /* Deliberately self-contained: this page loads no module and imports no stylesheet,
-         so it cannot pull anything into either scene's graph. It exists to be a root. */
+         so it cannot pull anything into any scene's graph. It exists to be a root. */
       body {
         margin: 0;
         padding: 2rem;
@@ -41,8 +41,9 @@
          had no root: its two entries are emitted at `perf/index.html` and
          `perf/catalog.html`, so a packaged perf build booted to a 404 and a white screen.
          `vite.perf.config.ts` emits THIS page as `dist-perf/index.html`, which closes that
-         without hard-coding either scene as the one the harness is about — both are
-         reachable, and adding a third scene means adding a link here. -->
+         without hard-coding one scene as the one the harness is about — every one is
+         reachable, and adding a scene means adding a link here (M3 story 8 added the
+         campaign scene's). -->
     <h1>Wynding perf harness</h1>
     <p>Perf-only. Never shipped, never installed as the game.</p>
     <ul>
@@ -57,7 +58,8 @@
       </li>
     </ul>
     <p>
-      Drive either from desktop Chrome at <code>chrome://inspect</code> once the device is attached.
+      Drive any of them from desktop Chrome at <code>chrome://inspect</code> once the device is
+      attached.
     </p>
   </body>
 </html>

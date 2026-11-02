@@ -105,8 +105,9 @@ export interface BuildRun {
   /** The most creeps alive at once over the whole run, counted as `WaveProfile`'s is. */
   readonly peakAlive: number;
   /** The wave whose window held the last placement on an anchor never built on before —
-   *  where the board filled, so a re-arm or a juggle re-placement doesn't move it: `-1`
-   *  if it came before wave 1 launched, `null` if nothing was ever placed. */
+   *  where the board filled, so a re-arm, or a juggle's re-placement on an anchor already
+   *  built on, doesn't move it (a juggle's first placement on a new anchor does): `-1` if it
+   *  came before wave 1 launched, `null` if nothing was ever placed. */
   readonly lastPlacementWave: number | null;
   /** One row per launched wave, in wave order. */
   readonly waves: readonly WaveProfile[];
