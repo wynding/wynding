@@ -396,6 +396,17 @@ test.describe('Compact layout (PLAN.md P1 / two-layouts contract)', () => {
       ),
     ).toEqual([false, true, false, false]);
     for (const icon of await icons.all()) await expect(icon).toBeVisible();
+    // Each route's arrow once, on a line of its own above its group's first icon (M3 story 4).
+    await expect(preview.locator('.wy-preview-arrow')).toHaveText(['→', '↓']);
+    const above = await preview.locator('li').evaluateAll((rows) =>
+      rows.map((row) => {
+        const arrow = row.querySelector('.wy-preview-arrow');
+        if (arrow === null) return null;
+        const icon = row.querySelector('svg.wy-creep-icon')!.getBoundingClientRect();
+        return arrow.getBoundingClientRect().bottom <= icon.top + 0.5;
+      }),
+    );
+    expect(above).toEqual([true, null, true, null]);
 
     // axe audit with all 4 rows showing — the standard bar every other HUD content is
     // held to (PLAN.md P3 step 19).

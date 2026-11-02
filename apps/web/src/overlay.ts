@@ -2182,9 +2182,9 @@ export function createOverlay(
   /** A wave's streams GROUPED BY ROUTE, in the board's entrance order, each route's streams
    *  in the order the wave lists them (a stable sort; an entrance the board lacks goes last).
    *  The strip draws each route's arrow once, on its group's first row: a route's arrow per
-   *  row cost a four-stream wave its fit at 1080×810 under a wide font (CI's), and a wave's
-   *  streams run on two routes at most, so the arrows' cost stops growing with the streams.
-   *  The rows' sentences read in the same order. */
+   *  row cost a four-stream wave its fit at 1080×810 under a wide font (CI's). The arrows now
+   *  cost one per route, not one per stream — two on the crossing board, however many streams
+   *  a wave sends. The rows' sentences read in the same order. */
   function byRoute(entries: readonly PreviewEntryVM[]): readonly PreviewEntryVM[] {
     const at = (e: PreviewEntryVM): number => ROUTE_ORDER.get(e.entrance) ?? ROUTE_ORDER.size;
     return [...entries].sort((a, b) => at(a) - at(b));

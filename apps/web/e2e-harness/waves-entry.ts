@@ -12,15 +12,19 @@
 // - `?hp=<percent>` sets every wave's `hpPercent` (default 100, the shipped value);
 // - `&wave=<n>` gives wave 1 wave n's streams, so a dense wave (9's four streams on two routes)
 //   is what the strip shows before Start;
-// - `&streams=<creep>:<entrance>:<count>,…` gives wave 1 those streams instead (20 ticks apart),
-//   so a spec can show a wave the shipped schedule does not have yet — m3.md's arc, say.
+// - `&streams=<creep>:<entrance>:<count>,…` gives wave 1 those streams instead, overriding
+//   `&wave=` (each stream's creeps 20 ticks apart, every stream from the launch), so a spec can
+//   show a wave the shipped schedule does not have yet — m3.md's arc, say;
+// - `&as=<n>/<N>` titles the strip "Wave n of N" instead of wave 1's own title, so a wave shown
+//   from the arc is measured with its real title's width. Only the HUD's preview numbers
+//   change; the run itself is wave 1 of the shipped schedule.
 //
 // Nothing else changes: the board, the catalog and the rest of each wave are the shipped ones.
 
 import { getBundledRuleset, defaultBoardId, type Ruleset } from '@wynding/content';
 import { mount } from '@wynding/render/scene';
 import { createApp, rafScheduler } from '../src/main';
-import { createController } from '../src/controller';
+import { createController, type Controller } from '../src/controller';
 
 const params = new URLSearchParams(window.location.search);
 const hp = Number(params.get('hp') ?? '100');
@@ -43,6 +47,22 @@ if (streams !== null) {
 }
 for (const wave of board.waves) wave.hpPercent = hp;
 const content = { bundle, boardId: defaultBoardId(bundle) } as const;
+const as = params.get('as')?.split('/').map(Number);
+
+/** The run, its upcoming wave's title numbers replaced by `&as=`'s. */
+function titled(controller: Controller): Controller {
+  if (as === undefined) return controller;
+  const [waveNumber, waveCount] = as as [number, number];
+  return {
+    ...controller,
+    hud: () => {
+      const hud = controller.hud();
+      return hud.preview?.kind === 'upcoming'
+        ? { ...hud, preview: { ...hud.preview, waveNumber, waveCount } }
+        : hud;
+    },
+  };
+}
 
 const root = document.getElementById('app');
 if (root === null) throw new Error('missing #app root element');
@@ -51,5 +71,5 @@ createApp(document, root, {
   schedule: rafScheduler,
   now: () => performance.now(),
   seed: 1,
-  controllerFactory: (seed) => createController(seed, content),
+  controllerFactory: (seed) => titled(createController(seed, content)),
 });

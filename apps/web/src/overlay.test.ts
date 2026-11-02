@@ -4577,19 +4577,21 @@ describe('overlay — routes, hit points and the wave counter on the crossing bo
 
   it('groups the rows by route, in the board’s entrance order, and draws each route’s arrow once — on its group’s first row', () => {
     const { overlay, shell } = setup();
-    // The shipped wave 9's streams, in the wave's own order: north, west, north, west.
-    show(overlay, [
+    // The shipped wave 9's streams, in the wave's own order — north, west, north, west — with
+    // the flyers at 8, so a sort by count within a route would show.
+    const wave = [
       north({ creepId: 'swarm', count: 10 }),
       entry({ creepId: 'fast', count: 6 }),
       north({ creepId: 'armored', count: 4, armor: 6 }),
-      entry({ creepId: 'flying', count: 4, domain: 'air' }),
-    ]);
+      entry({ creepId: 'flying', count: 8, domain: 'air' }),
+    ];
+    show(overlay, wave);
     const li = rows(shell);
     // West first (the board's first entrance), each route's streams in the wave's order — the
     // sentences read in the order the rows are drawn.
     expect(li.map((r) => fullOf(r).replace(/,.*$/, ''))).toEqual([
       '6 × Fast Creep — west to east',
-      '4 × Flying Creep — west to east',
+      '8 × Flying Creep — west to east',
       '10 × Swarm Creep — north to south',
       '4 × Armored Creep — north to south',
     ]);
@@ -4607,6 +4609,10 @@ describe('overlay — routes, hit points and the wave counter on the crossing bo
       false,
       true,
     ]);
+    // The memo guard reads its first row from the grouped order too: the same wave again keeps
+    // every node, though its first stream (north) is not the first row drawn.
+    show(overlay, wave);
+    expect(rows(shell)[0]).toBe(li[0]);
   });
 
   it('sends an entrance the board does not have to the end of the line, after the board’s routes', () => {
