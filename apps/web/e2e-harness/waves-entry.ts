@@ -11,35 +11,54 @@
 // controller's content seam, and the strip shows them from the first frame:
 //
 // - `?hp=<percent>` sets every wave's `hpPercent` (absent, each wave keeps its shipped one);
-// - `wave=<n>[,<m>…]` gives wave 1 the streams of waves n, m, … in that order, so a dense line
-//   (`8,9`: four streams on two routes) is what the strip shows before Start.
+// - `&wave=<n>[,<m>…]` gives wave 1 the streams of waves n, m, … in that order, so a dense line
+//   (`8,9`: four streams on two routes) is what the strip shows before Start;
+// - `&as=<n>/<N>` titles every upcoming preview "Wave n of N" instead of its own title, so a
+//   wave shown from the arc (before Start) is measured with its real title's width. Only the
+//   HUD's preview numbers change; the run itself is the shipped schedule's.
 //
 // Nothing else changes: the board, the catalog and the rest of each wave are the shipped ones.
 
 import { getBundledRuleset, defaultBoardId, type Ruleset } from '@wynding/content';
 import { mount } from '@wynding/render/scene';
 import { createApp, rafScheduler } from '../src/main';
-import { createController } from '../src/controller';
+import { createController, type Controller } from '../src/controller';
 
 const params = new URLSearchParams(window.location.search);
 const hp = params.get('hp');
-const from = (params.get('wave') ?? '1').split(',').map(Number);
 
 const bundle = structuredClone(getBundledRuleset()) as Ruleset;
 const board = bundle.boards[0] as unknown as {
   waves: { hpPercent: number; entries: unknown[] }[];
 };
-const streams = from.flatMap((n) => {
+const from = (params.get('wave') ?? '1').split(',').map(Number);
+const entries = from.flatMap((n) => {
   const source = board.waves[n - 1];
   // The message is also `check:build-layering`'s marker for this module: rename it there too.
   if (source === undefined) throw new Error(`waves harness: the board has no wave ${String(n)}`);
   return source.entries;
 });
-board.waves[0]!.entries = structuredClone(streams);
+board.waves[0]!.entries = structuredClone(entries);
 if (hp !== null) {
   for (const wave of board.waves) wave.hpPercent = Number(hp);
 }
 const content = { bundle, boardId: defaultBoardId(bundle) } as const;
+const as = params.get('as')?.split('/').map(Number);
+
+/** The run, its upcoming wave's title numbers replaced by `&as=`'s. */
+function titled(controller: Controller): Controller {
+  if (as === undefined) return controller;
+  const [waveNumber, waveCount] = as as [number, number];
+  return {
+    ...controller,
+    hud: () => {
+      const hud = controller.hud();
+      return hud.preview?.kind === 'upcoming'
+        ? { ...hud, preview: { ...hud.preview, waveNumber, waveCount } }
+        : hud;
+    },
+  };
+}
 
 const root = document.getElementById('app');
 if (root === null) throw new Error('missing #app root element');
@@ -48,5 +67,5 @@ createApp(document, root, {
   schedule: rafScheduler,
   now: () => performance.now(),
   seed: 1,
-  controllerFactory: (seed) => createController(seed, content),
+  controllerFactory: (seed) => titled(createController(seed, content)),
 });

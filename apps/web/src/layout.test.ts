@@ -442,8 +442,19 @@ describe('layout — the countdown dial, the hud floor, and hidden text’s cont
     // `.wy-shell` puts both at (0,2,0): above the title's base `margin: 0` (0,1,0, later in
     // source) and level with the list's Standard gap (0,2,0, earlier in source).
     expect(ruleBody(narrow, '.wy-shell .wy-wave-preview-title')).toContain('margin-inline-end:');
-    expect(ruleBody(narrow, '.wy-shell .wy-wave-preview-list')).toContain('gap:');
     expect(standard.indexOf('.wy-shell .wy-wave-preview-list {')).toBeLessThan(at);
+    // M3 story 4: the narrow form sets the gap through the list's own property, which a row
+    // continuing its route reads for its half-gap — one rule for both forms, so no source
+    // order decides it. Set as a literal `gap`, a continuing flyer's wings would overlap.
+    expect(ruleBody(narrow, '.wy-shell .wy-wave-preview-list')).toContain(
+      '--wy-strip-row-gap: 0.55rem;',
+    );
+    expect(ruleBody(standard, '.wy-shell .wy-wave-preview-list')).toContain(
+      'gap: var(--wy-strip-row-gap);',
+    );
+    expect(
+      ruleBody(standard, '.wy-shell .wy-wave-preview-list > .wy-preview-entry--continues'),
+    ).toContain('margin-inline-start: calc(-0.5 * var(--wy-strip-row-gap));');
   });
 });
 
