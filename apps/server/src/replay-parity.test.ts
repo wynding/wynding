@@ -30,7 +30,7 @@
 // it honest, and they fail by name once a retuned schedule outgrows M2's build. The prose
 // below about which slices win or lose was measured on M2's `field-01`.
 
-import { describe, it, expect } from 'vitest';
+import { afterEach, describe, it, expect } from 'vitest';
 import {
   compileRuleset,
   deriveScore,
@@ -55,6 +55,11 @@ const SCENARIO_SEED = 0x5eed;
 const bundle = getBundledRuleset();
 const BOARD_ID = defaultBoardId(bundle);
 const RULESET_HASH = currentRulesetHash(bundle);
+
+// Every test here re-simulates a whole run synchronously. Yield a macrotask after each so
+// the worker reads Vitest's RPC replies between them: birpc times a reply out at 60 s, so
+// each test alone must still finish inside that. The yield sits between runs, never in one.
+afterEach(() => new Promise<void>((r) => setImmediate(r)));
 
 interface ClientRun {
   readonly state: SimState;
