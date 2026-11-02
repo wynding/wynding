@@ -4,7 +4,7 @@
 // that the sv16 cap of 36,000 could not hold — and the validator's ceiling enforced at
 // the far end, where a run that never ends is rejected as a timeout.
 
-import { describe, it, expect } from 'vitest';
+import { afterEach, describe, it, expect } from 'vitest';
 import {
   compileRuleset,
   createInitialState,
@@ -22,6 +22,12 @@ import { DEFENSE_PLAN, playScript, thirtyWaveBundle, THIRTY_WAVE_BOARD_ID } from
 
 const M2 = getBundledRuleset();
 const SV16_CAP = 36_000;
+
+// Several tests here re-simulate whole runs synchronously. Yield a macrotask after each so
+// the worker reads Vitest's RPC replies between them: birpc times a reply out at 60 s, so
+// each test alone must still finish inside that. The yield sits between runs, never in one.
+// eslint-disable-next-line no-restricted-globals -- yield between tests, not inside a run
+afterEach(() => new Promise<void>((r) => setImmediate(r)));
 
 /** `compileRuleset`'s own bound, recomputed from the raw bundle: the hands-off latest
  *  spawn (wave k launches at the prefix sum of countdowns 1..k; its last spawn lands
