@@ -25,8 +25,9 @@
 // The gap is the board's, not each exit's (M3): two exits pulsing in turn, each under a gap of
 // its own, would flash four to six times a second together. A leak inside the gap is not
 // dropped: its exit waits, and when the gap ends the waiting exit pulsed longest ago goes next,
-// so a busy exit cannot take every pulse and hide another route's leaks. The kill burst needs no
-// bound: a creep dies once.
+// so a busy exit cannot take every pulse and hide another route's leaks. The one exception is a
+// leak at an exit whose pulse is still showing: that pulse already shows it, so it queues
+// nothing. The kill burst needs no bound: a creep dies once.
 //
 // REDUCE MOTION. The hit flash is the same: a white silhouette that fades where it is, with no
 // motion to remove (the frame's motion table). The kill burst is its ring alone, fading in place
@@ -171,8 +172,12 @@ export function createFeedbackTracker(): FeedbackTracker {
       for (const s of shown) live.push({ kill: s.kill, sinceMs: now - s.at });
       // Every leak's exit waits for a pulse; once the gap is over, the waiting exit pulsed
       // longest ago takes the next one (ties to the one that began waiting first). A busy exit
-      // re-joins the queue behind every other: the routes take turns.
-      for (const exit of leaks) waiting.add(exit);
+      // re-joins the queue behind every other: the routes take turns. A leak at the exit whose
+      // pulse is still showing is already shown by it, so it queues nothing.
+      for (const exit of leaks) {
+        if (pulse !== null && pulse.exit === exit && now - pulse.at < LEAK_PULSE_MS) continue;
+        waiting.add(exit);
+      }
       if (waiting.size > 0 && (pulse === null || now - pulse.at >= LEAK_PULSE_GAP_MS)) {
         let next = -1;
         let oldest = Infinity;

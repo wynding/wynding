@@ -61,6 +61,12 @@ const RULESET_HASH = currentRulesetHash(bundle);
  *  handler's default. */
 const SERPENTINE = compileReferenceBuild(M3_SERPENTINE, compileRuleset(bundle, BOARD_ID));
 
+// Every leg here re-simulates a whole run synchronously, inside the handler. Yield a
+// macrotask after each so the worker reads Vitest's RPC replies between them: birpc times a
+// reply out at 60 s, so each test alone must still finish inside that. The yield sits between
+// runs, never in one — as the replay package's `replay.test.ts` and `run-length.test.ts` do.
+afterEach(() => new Promise<void>((r) => setImmediate(r)));
+
 interface ClientRun {
   readonly state: SimState;
   readonly tickInputs: readonly (readonly SimInput[])[];
@@ -93,11 +99,6 @@ function serpentineRun(): ClientRun {
   serpentineMemo ??= runScript(compileRuleset(bundle, BOARD_ID), SERPENTINE);
   return serpentineMemo;
 }
-
-// The legs here re-simulate the whole arc synchronously, inside the handler. Yield a
-// macrotask after each so the worker reads Vitest's RPC replies between them (birpc times a
-// reply out at 60 s), as the content package's story-swarm.test.ts does.
-afterEach(() => new Promise<void>((r) => setImmediate(r)));
 
 function replayFor(tickInputs: readonly (readonly SimInput[])[]): Replay {
   return {

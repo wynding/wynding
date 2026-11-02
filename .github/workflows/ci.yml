@@ -36,7 +36,14 @@ jobs:
           node-version: 22
           cache: pnpm
       - run: pnpm install --frozen-lockfile
-      - run: pnpm run verify
+      # Two turbo tasks at a time, two Vitest workers each. Uncapped, turbo runs up to ten
+      # test tasks at once with a worker per core apiece, which oversubscribes the runner:
+      # a whole-run replay test that takes 3 s locally ran past a minute, and a synchronous
+      # test that long starves Vitest's 60 s worker RPC ("Timeout calling onTaskUpdate").
+      - run: pnpm run verify --concurrency=2
+        env:
+          VITEST_MAX_THREADS: 2
+          VITEST_MAX_FORKS: 2
       # Build smoke gate — compile every package/app so a build-only breakage is
       # caught here rather than in a deploy. Artifacts are NOT uploaded; this is a
       # gate, not a release step.
