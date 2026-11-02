@@ -2180,7 +2180,9 @@ export function createOverlay(
   /** Each entrance's place in the board's order — the order the strip groups routes in. */
   const ROUTE_ORDER = new Map([...routes.keys()].map((id, i) => [id, i] as const));
   /** A wave's streams GROUPED BY ROUTE, in the board's entrance order, each route's streams
-   *  in the order the wave lists them (a stable sort; an entrance the board lacks goes last).
+   *  in the order the wave lists them (a stable sort). Entrances the board lacks share the
+   *  last place, kept in the wave's order rather than grouped (a test's or a mismatched
+   *  build's case; no route arrow either).
    *  The strip draws each route's arrow once, on its group's first row: a route's arrow per
    *  row cost a four-stream wave its fit at 1080×810 under a wide font (CI's). The arrows now
    *  cost one per route, not one per stream — two on the crossing board, however many streams

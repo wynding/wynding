@@ -15,9 +15,9 @@
 // - `&streams=<creep>:<entrance>:<count>,…` gives wave 1 those streams instead, overriding
 //   `&wave=` (each stream's creeps 20 ticks apart, every stream from the launch), so a spec can
 //   show a wave the shipped schedule does not have yet — m3.md's arc, say;
-// - `&as=<n>/<N>` titles the strip "Wave n of N" instead of wave 1's own title, so a wave shown
-//   from the arc is measured with its real title's width. Only the HUD's preview numbers
-//   change; the run itself is wave 1 of the shipped schedule.
+// - `&as=<n>/<N>` titles every upcoming preview "Wave n of N" instead of its own title, so a
+//   wave shown from the arc (before Start) is measured with its real title's width. Only the
+//   HUD's preview numbers change; the run itself is the shipped schedule's.
 //
 // Nothing else changes: the board, the catalog and the rest of each wave are the shipped ones.
 
