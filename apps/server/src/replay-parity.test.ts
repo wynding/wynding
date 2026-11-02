@@ -14,10 +14,10 @@
 // field on the wire (`Replay` carries none) is silently ignored.
 //
 // Every leg plays `m3-serpentine`, the first build of M3's reference set on the shipped
-// crossing board (`packages/content/src/reference-builds.ts`, M3 story 5), compiled from its
-// grid to the same plan `balance-crossing.test.ts` proves wins block 1 — imported here, never
-// re-typed, so this file can't drift into scripting a DIFFERENT build than the one the
-// balance checker pins. `@wynding/content`'s package.json `exports` map has no subpath for
+// crossing board (`packages/content/src/reference-builds.ts`, M3 stories 5–6), compiled from
+// its grid to the same plan `balance-crossing.test.ts` proves wins blocks 1–2 — imported
+// here, never re-typed, so this file can't drift into scripting a DIFFERENT build than the
+// one the balance checker pins. `@wynding/content`'s package.json `exports` map has no subpath for
 // the test-support modules, so the imports below reach across the package boundary by
 // relative path — verified (by direct `tsc -p tsconfig.json` run) to compile cleanly despite
 // `rootDir: "src"`, since `apps/server/src` and `apps/server/dist` sit at the same depth
@@ -131,11 +131,12 @@ describe('M2-S11 P6 — client/server replay parity through the real handler()',
     expect(original.state.phase).toBe('won');
     const originalScore = deriveScore(original.state, ruleset);
 
-    // Drop exactly ONE placement — the second, the west wall's `basic` just below the
+    // Drop exactly ONE placement — the fourth, the west wall's `splash` two rows above the
     // entrance — a genuinely different build, re-simulated from scratch, never a
     // claimed-score echo. Measured: it still WINS, on fewer lives, so the changed value is a
-    // real score rather than a loss's 0.
-    const tamperedIndex = 1;
+    // real score rather than a loss's 0. (Since M3 story 6 the run is twenty waves, and
+    // dropping the wall's first three towers loses it.)
+    const tamperedIndex = 3;
     expect(baseScript[tamperedIndex]).toBeDefined();
     const tamperedScript = [
       ...baseScript.slice(0, tamperedIndex),
