@@ -703,12 +703,12 @@ test('the Venom Tower ghost stays functional and axe-clean under reduced motion,
     await callWave.click();
   }
   // M3 story 5: block 1's armored wave is wave 5 — armored creeps from the north beside the
-  // opener's creeps from the west.
+  // opener's creeps from the west, which the strip reads first (its routes, west first).
   await expect(previewTitle).toHaveText('Wave 5 of 10');
   await expect(callWave).toHaveAttribute('aria-disabled', 'false');
   await expect(preview.locator('.wy-preview-full')).toHaveText([
-    '6 × Armored Creep — north to south, ground, armor 6 (subtracted from each direct hit; damage over time ignores it), leak cost 1, no immunities',
     '8 × Creep — west to east, ground, armor 0, leak cost 1, no immunities',
+    '6 × Armored Creep — north to south, ground, armor 6 (subtracted from each direct hit; damage over time ignores it), leak cost 1, no immunities',
   ]);
 
   const previewAudit = await new AxeBuilder({ page }).include('#app').analyze();
@@ -888,9 +888,9 @@ test('supports player-started runs, pause / speed controls, launches wave 1 on S
   // CORRECT upcoming wave before each call (PLAN.md P3 step 19) — per-wave, since each
   // wave of block 1 (M3 story 5: m3.md's first-pass arc, rows 1–10) brings a new threat or
   // route: the swarm, the north route opening at wave 3, multi-entry waves from wave 4 (an
-  // array of `<li>` texts in authored order, each naming its route), the air headline at
-  // wave 6 (its row reads `air`, not `ground`), the armored-flyer wall at wave 9 and the
-  // boss at wave 10.
+  // array of `<li>` texts, each naming its route, grouped by route with west first — M3
+  // story 4: `overlay.ts`'s `byRoute`), the air headline at wave 6 (its row reads `air`, not
+  // `ground`), the armored-flyer wall at wave 9 and the boss at wave 10.
   // Keyed from wave 2: wave 1 launches on Start, so its composition is asserted PRE-start
   // above rather than inside the loop. Carrying a `1:` entry here too would be a second
   // source of truth that nothing reads — and therefore nothing keeps honest.
@@ -901,9 +901,10 @@ test('supports player-started runs, pause / speed controls, launches wave 1 on S
       '8 × Fast Creep — west to east, ground, armor 0, leak cost 1, no immunities',
       '6 × Fast Creep — north to south, ground, armor 0, leak cost 1, no immunities',
     ],
+    // Waves 5 and 8 are authored north first; the strip reads west first.
     5: [
-      '6 × Armored Creep — north to south, ground, armor 6 (subtracted from each direct hit; damage over time ignores it), leak cost 1, no immunities',
       '8 × Creep — west to east, ground, armor 0, leak cost 1, no immunities',
+      '6 × Armored Creep — north to south, ground, armor 6 (subtracted from each direct hit; damage over time ignores it), leak cost 1, no immunities',
     ],
     6: ['8 × Flying Creep — west to east, air, armor 0, leak cost 1, no immunities'],
     7: [
@@ -911,8 +912,8 @@ test('supports player-started runs, pause / speed controls, launches wave 1 on S
       '10 × Swarm Creep — north to south, ground, armor 0, leak cost 1, no immunities',
     ],
     8: [
-      '6 × Resolute Creep — north to south, ground, armor 0, leak cost 1, slow',
       '6 × Fast Creep — west to east, ground, armor 0, leak cost 1, no immunities',
+      '6 × Resolute Creep — north to south, ground, armor 0, leak cost 1, slow',
     ],
     9: [
       '6 × Armored Flyer — west to east, air, armor 5 (subtracted from each direct hit; damage over time ignores it), leak cost 1, no immunities',

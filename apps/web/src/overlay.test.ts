@@ -4575,6 +4575,60 @@ describe('overlay — routes, hit points and the wave counter on the crossing bo
     ]);
   });
 
+  it('groups the rows by route, in the board’s entrance order, and draws each route’s arrow once — on its group’s first row', () => {
+    const { overlay, shell } = setup();
+    // Four streams (story 4's placeholder wave 9), in the wave's own order — north, west,
+    // north, west — with the flyers at 8, so a sort by count within a route would show.
+    const wave = [
+      north({ creepId: 'swarm', count: 10 }),
+      entry({ creepId: 'fast', count: 6 }),
+      north({ creepId: 'armored', count: 4, armor: 6 }),
+      entry({ creepId: 'flying', count: 8, domain: 'air' }),
+    ];
+    show(overlay, wave);
+    const li = rows(shell);
+    // West first (the board's first entrance), each route's streams in the wave's order — the
+    // sentences read in the order the rows are drawn.
+    expect(li.map((r) => fullOf(r).replace(/,.*$/, ''))).toEqual([
+      '6 × Fast Creep — west to east',
+      '8 × Flying Creep — west to east',
+      '10 × Swarm Creep — north to south',
+      '4 × Armored Creep — north to south',
+    ]);
+    // One arrow per route, on the row that begins it; a row continuing its route has none and
+    // is marked so (`ui.css` sets it closer).
+    expect(li.map((r) => r.querySelector('.wy-preview-arrow')?.textContent ?? null)).toEqual([
+      '→',
+      null,
+      '↓',
+      null,
+    ]);
+    expect(li.map((r) => r.classList.contains('wy-preview-entry--continues'))).toEqual([
+      false,
+      true,
+      false,
+      true,
+    ]);
+    // The memo guard reads its first row from the grouped order too: the same wave again keeps
+    // every node, though its first stream (north) is not the first row drawn.
+    show(overlay, wave);
+    expect(rows(shell)[0]).toBe(li[0]);
+  });
+
+  it('sends an entrance the board does not have to the end of the line, after the board’s routes', () => {
+    const { overlay, shell } = setup();
+    show(overlay, [
+      entry({ entrance: 'gate', destination: ['door'] }),
+      north({ count: 6 }),
+      entry({ count: 4 }),
+    ]);
+    expect(rows(shell).map((r) => fullOf(r).replace(/ — (\w+ to \w+),.*$/, ' $1'))).toEqual([
+      '4 × Creep west to east',
+      '6 × Creep north to south',
+      '10 × Creep gate to door',
+    ]);
+  });
+
   it('names an entrance the board does not have by its ids, with no arrow, rather than dropping the route', () => {
     const { overlay, shell } = setup();
     show(overlay, [entry({ entrance: 'gate', destination: ['door'] })]);
@@ -4619,7 +4673,7 @@ describe('overlay — routes, hit points and the wave counter on the crossing bo
     show(overlay, [entry(), north()], { hpPercent: 170 });
     const hp = shell.preview.hp;
     expect(hp.hidden).toBe(false);
-    expect(shell.preview.hpFull.textContent).toBe('Every creep in this wave has +70% hit points');
+    expect(shell.preview.hpFull.textContent).toBe('Creeps in this wave have 70% more hit points');
     expect(shell.preview.hpGlance.textContent).toBe('+70% hit points');
     expect(shell.preview.hpGlance.getAttribute('aria-hidden')).toBe('true');
     expect(shell.preview.hpFull.getAttribute('aria-hidden')).toBeNull();
@@ -4632,9 +4686,7 @@ describe('overlay — routes, hit points and the wave counter on the crossing bo
   it('says a wave below the catalog’s hit points too, and nothing at exactly 100', () => {
     const { overlay, shell } = setup();
     show(overlay, [entry()], { hpPercent: 80 });
-    expect(shell.preview.hpFull.textContent).toBe(
-      'Every creep in this wave has 20% fewer hit points',
-    );
+    expect(shell.preview.hpFull.textContent).toBe('Creeps in this wave have 20% fewer hit points');
     expect(shell.preview.hpGlance.textContent).toBe('20% fewer hit points'); // never a bare minus sign
     show(overlay, [entry()], { hpPercent: 100 }); // only the hit points moved: the key rebuilds
     expect(shell.preview.hp.hidden).toBe(true);
@@ -4678,7 +4730,7 @@ describe('overlay — routes, hit points and the wave counter on the crossing bo
     const { overlay, shell } = setup(undefined, undefined, { ruleset: c.ruleset, board: c.board });
     overlay.update({ hud: c.hud(), paused: false, speed: 1, ui: uiState(), refund: 0 });
     expect(shell.preview.hp.hidden).toBe(false);
-    expect(shell.preview.hpFull.textContent).toBe('Every creep in this wave has +50% hit points');
+    expect(shell.preview.hpFull.textContent).toBe('Creeps in this wave have 50% more hit points');
     expect(shell.preview.hpGlance.textContent).toBe('+50% hit points');
   });
 });
