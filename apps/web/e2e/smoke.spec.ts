@@ -667,12 +667,18 @@ test('the Venom Tower ghost stays functional and axe-clean under reduced motion,
   // The DoT telegraph's own reduced-motion damping is unit-tested at source
   // (`creep-paint.test.ts`), not here — `scene.ts` stays coverage-excluded by
   // long-standing convention (not meaningfully testable under jsdom).
+  // From the cursor's start on the west entrance (0,11): one right and one DOWN, so the
+  // footprint (1–2, 12–13) sits beside the west route's row. One UP would wall the entrance
+  // in, and the sim refuses a tower that seals a route.
   await page.keyboard.press('ArrowRight');
-  await page.keyboard.press('ArrowUp');
-  await page.keyboard.press('Enter'); // place it — commits the venom tower to the board
+  await page.keyboard.press('ArrowDown');
 
   const armedAudit = await new AxeBuilder({ page }).include('#app').analyze();
   expect(armedAudit.violations, JSON.stringify(armedAudit.violations, null, 2)).toEqual([]);
+
+  await page.keyboard.press('Enter'); // place it — commits the venom tower to the board
+  await expect(venomCard).toHaveAttribute('aria-pressed', 'false'); // placement disarms
+  await expect(page.locator('.wy-panel').getByRole('button', { name: /^Sell/ })).toBeVisible();
 
   // Start unholds the run AND claims wave 1 (#70) — the Dock's primary control morphs
   // from "Start" to "Call wave" (M2-S2's decouple), which is what makes early-calling

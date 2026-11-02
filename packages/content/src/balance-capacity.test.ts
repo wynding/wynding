@@ -81,15 +81,23 @@ describe('a capacity drawing, placed', () => {
     ]);
   });
 
-  it('names a wave 1 that launched before the last tower stood', () => {
-    const board = bundle.boards[0]!;
-    const waves = board.waves.map((w, k) => (k === 0 ? { ...w, countdownTicks: 1 } : w));
-    const early = compileRuleset(
-      { ...bundle, boards: [{ ...board, waves }, ...bundle.boards.slice(1)] },
-      M3_CROSSING.boardId,
-    );
-    expect(placeCapacityDrawing('probe', M3_WEST_ONLY, early, seed).failures).toEqual([
-      'probe: wave 1 launched before its last tower stood',
+  it('names a creep on the board before the last tower stood — not a wave 1 launched on that tick', () => {
+    // West only's 19 towers go in on ticks 0–18. A wave 1 launched on tick 18 spawns after
+    // that tick's input phase has placed the last of them; launched on tick 17, its first
+    // creep is on the board when the 19th goes in.
+    const launchingAt = (countdownTicks: number) => {
+      const board = bundle.boards[0]!;
+      const waves = board.waves.map((w, k) => (k === 0 ? { ...w, countdownTicks } : w));
+      return compileRuleset(
+        { ...bundle, boards: [{ ...board, waves }, ...bundle.boards.slice(1)] },
+        M3_CROSSING.boardId,
+      );
+    };
+    const onTheTick = placeCapacityDrawing('probe', M3_WEST_ONLY, launchingAt(18), seed);
+    expect(onTheTick.state.waveLaunchTick[0]).toBe(18);
+    expect(onTheTick.failures).toEqual([]);
+    expect(placeCapacityDrawing('probe', M3_WEST_ONLY, launchingAt(17), seed).failures).toEqual([
+      'probe: creeps were on the board before its last tower stood',
     ]);
   });
 });

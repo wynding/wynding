@@ -723,7 +723,7 @@ test('1000×720, walking every wave: the board never re-projects — the strip i
 test('1512×854, a four-stream wave pending: a tower built in the corner the preview used to own is FULLY visible (#101)', async ({
   page,
 }) => {
-  // The #101 regression case, at the reported viewport, in the reported situation. The
+  // The #101 regression case, at the reported viewport, with the densest preview pending. The
   // owner's words were "I rarely build in that corner, though — but I could! Except I can't
   // because it's in the way" — so this builds there with the arc's densest preview pending
   // (four entries), and proves the strip and the tower do not share a pixel —

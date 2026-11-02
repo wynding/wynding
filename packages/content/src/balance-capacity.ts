@@ -6,7 +6,7 @@
 // Both halves are arithmetic, never a run:
 //   - a drawing's capacity is every tower its grid draws, at catalog cost — a reference
 //     set's `fullBoard`, the strongest winner's maze drawn to the whole board at its mix
-//     (`placeCapacityDrawing` checks the sim takes it, so a price is never of a maze that
+//     (`placeCapacityDrawing` checks the sim takes it, and the report fails on a maze that
 //     cannot stand);
 //   - a schedule's income is what a run that kills every creep and clears every wave earns
 //     by the end of each wave: the starting bounty, then each wave's kill bounty and clear
@@ -17,7 +17,14 @@
 // its own income when it leaks nothing, and the wave that column first covers the capacity
 // is where it places its last tower.
 
-import { createInitialState, step, type CompiledRuleset, type SimState } from '@wynding/sim';
+import {
+  createInitialState,
+  previewInputs,
+  step,
+  type CompiledRuleset,
+  type SimInput,
+  type SimState,
+} from '@wynding/sim';
 import { compileReferenceBuild, type ReferenceBuild } from './reference-build';
 
 export interface Capacity {
@@ -47,8 +54,10 @@ export function drawnCapacity(build: ReferenceBuild, ruleset: CompiledRuleset): 
  *  the drawing's whole price, so bounty refuses nothing — with the state it leaves and what
  *  makes its price untrustworthy, each labelled `label`: a sell (a drawing is every tower
  *  it holds, never a juggle, and its sold towers would still be priced), a placement the
- *  sim refuses (one that seals a route, or overlaps another), or wave 1 launching before
- *  the last tower stands. */
+ *  sim refuses (one that seals a route, or overlaps another), or a creep on the board
+ *  before the last tower stands (the drawing is of a maze, not a run). Each placement is
+ *  credited by the sim's own acceptance (`previewInputs`), as `script-runner.ts` credits a
+ *  step, never by the tower count. */
 export function placeCapacityDrawing(
   label: string,
   build: ReferenceBuild,
@@ -60,21 +69,23 @@ export function placeCapacityDrawing(
     ...createInitialState(seed, ruleset),
     bounty: drawnCapacity(build, ruleset).bounty,
   };
+  let crowded = false;
   for (const s of compileReferenceBuild(build, ruleset)) {
     if (s.kind === 'sell') {
       failures.push(`${label}: a capacity drawing sells nothing, but it sells (${s.col},${s.row})`);
       continue;
     }
-    const before = state.towers.id.length;
-    state = step(state, ruleset, [
+    if (!crowded && state.creeps.id.length > 0) {
+      failures.push(`${label}: creeps were on the board before its last tower stood`);
+      crowded = true;
+    }
+    const inputs: SimInput[] = [
       { kind: 'placeTower', anchor: { col: s.col, row: s.row }, towerId: s.towerId },
-    ]);
-    if (state.towers.id.length !== before + 1) {
+    ];
+    if (!previewInputs(state, ruleset, inputs).accepted[0]) {
       failures.push(`${label}: the sim refused its ${s.towerId} at (${s.col},${s.row})`);
     }
-  }
-  if (state.waveLaunchTick[0] !== null) {
-    failures.push(`${label}: wave 1 launched before its last tower stood`);
+    state = step(state, ruleset, inputs);
   }
   return { state, failures };
 }

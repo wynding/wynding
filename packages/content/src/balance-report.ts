@@ -11,11 +11,12 @@
 // placement, unless its plan never finished. A set that draws its board full (`fullBoard`)
 // then gets the board's capacity in bounty and the wave whose income first covers it
 // (`balance-capacity.ts`): where the strongest build would place its last tower once the
-// schedule is long enough to fill the board. A drawing the sim will not take as drawn — a
-// refused tower, a sell — fails the report rather than pricing a maze that cannot stand.
+// schedule is long enough to fill the board.
 //
-// Beside the text it returns what makes the report untrustworthy — no set registered, or
-// a build whose plan didn't finish or whose run never ended — so the command can fail.
+// Beside the text it returns what makes the report untrustworthy — no set registered, a
+// build whose plan didn't finish or whose run never ended, or a capacity drawing the sim
+// will not take as drawn (`placeCapacityDrawing`: a sell, a refused tower, a creep on the
+// board before it stands), whose price is still printed — so the command can fail.
 
 import { compileRuleset, deriveScore, deriveStars, type CompiledRuleset } from '@wynding/sim';
 import type { Ruleset } from '@wynding/types';
