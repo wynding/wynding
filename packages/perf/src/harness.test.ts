@@ -138,9 +138,9 @@ describe('runSampled() against the committed STRESS replay — real due-blast/st
 // most argued-for design decision (its own header comment: "the ENTIRE POINT of the
 // un-short-circuited loop"), yet nothing exercised it — every replay above stays
 // `running` for its whole sampled window. This builds a genuinely tiny scenario (the
-// shipped `wynding-core` bundle, 10 starting lives, 10 unstopped creeps at leakCost 1
-// each — an empty `tickInputs` places no towers, so the wave leaks out entirely and
-// the match reaches `lost` well inside the sampled window) and proves the harness
+// shipped `wynding-core` bundle, whose first two waves' unstopped creeps, at leakCost 1
+// each, outnumber its starting lives — an empty `tickInputs` places no towers, so wave 2's
+// swarm finishes the run well inside the sampled window) and proves the harness
 // keeps stepping past that terminal phase instead of stopping.
 describe('runSampled() does not short-circuit at a terminal phase', () => {
   const coreBundle = getBundledRuleset('wynding-core');

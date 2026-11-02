@@ -72,6 +72,10 @@ export interface ReferenceSet {
   readonly boardId: string;
   readonly seed: number;
   readonly builds: readonly ReferenceBuild[];
+  /** The board's capacity (m3.md, "Economy": the board-full target): the strongest
+   *  winner's maze drawn to the whole board, every tower it holds at its mix. Never run —
+   *  the report prices it and the schedule's income against it (`balance-capacity.ts`). */
+  readonly fullBoard?: ReferenceBuild;
 }
 
 const CELL_GLYPH = {

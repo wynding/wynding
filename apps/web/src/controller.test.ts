@@ -196,7 +196,9 @@ describe('controller — input → command mapping', () => {
 
   it('a mine detonating under the selection announces `destroyed` — the only signal a non-sighted player gets (M2-S9)', () => {
     const c = createController(1);
-    c.start();
+    // Wave 1 claimed on Start, so its creeps walk at once and the bound below measures the
+    // mine, not the shipped countdown (M3 story 5 lengthened it past the bound).
+    startAndCall(c);
     // Off the lane but inside the mine's 2.25-tile trigger ring of it (the shipped board
     // runs entrance (0,11) → exit (27,11)), so a wave-0 creep walking past trips it with
     // no detour and no reliance on the mine being an obstacle.
@@ -1004,7 +1006,8 @@ describe('controller — impact-spark plumbing via StepEvents (#31)', () => {
 
   it('a mine that is built, fires and lands inside one catch-up advance yields a `detonation` landing; a splash blast’s landing does not (#181)', () => {
     const c = createController(1);
-    c.start();
+    // Wave 1 walks at once: the 600-tick bound below is the mine's, not the countdown's.
+    startAndCall(c);
     c.armTower('mine');
     c.aimAt(10, 9);
     expect(c.confirm()).toBe(true);
@@ -2270,7 +2273,7 @@ describe('controller — run stats for the results panel (#181 H2)', () => {
 
   it('towers built keeps a sold tower and a detonated mine', () => {
     const c = createController(1);
-    c.start();
+    startAndCall(c); // wave 1 walks at once, well inside the mine's bound below
     c.armTower('basic');
     c.clickAt(3, 3);
     // Off the lane but inside the mine's trigger ring of it (the mine test above uses the
@@ -2300,9 +2303,10 @@ describe('controller — run stats for the results panel (#181 H2)', () => {
     // Placement runs before combat inside one `step()`, and a mine has no warm-up, so a mine
     // dropped beside a creep is placed and consumed in the same tick: its row never stands at a
     // boundary. A probe run finds that tick — the mine at (10, 9) as above, off the lane, so it
-    // does not change the creeps' path — then the same run, without it, places it there.
+    // does not change the creeps' path — then the same run, without it, places it there. Both
+    // runs claim wave 1 on Start, so its creeps walk at once, well inside the probe's bound.
     const probe = createController(1);
-    probe.start();
+    startAndCall(probe);
     probe.armTower('mine');
     probe.clickAt(10, 9);
     let steps = 0;
@@ -2314,7 +2318,7 @@ describe('controller — run stats for the results panel (#181 H2)', () => {
     expect(steps, 'it stood for a while first, so the probe saw it').toBeGreaterThan(1);
 
     const c = createController(1);
-    c.start();
+    startAndCall(c);
     for (let i = 1; i < steps; i++) tick(c);
     c.armTower('mine');
     c.clickAt(10, 9);
@@ -2483,10 +2487,10 @@ describe('controller — combat feedback wiring the tests above could not tell a
   });
 
   it('marks no impact a flyer’s while only ground towers fire — not even where a flyer stands on the struck creep’s point (C2)', () => {
-    // Wave 1's normals and wave 8's armoured flyers both move 26 fp a tick and spawn every 20
-    // ticks: launched 20 ticks apart, each flyer spawns with a normal and shares its every point
-    // along the straight row-11 path until a hit stops one. A Basic shoots ground creeps only, so
-    // every point it makes is a ground creep's, whichever creeps stand on it.
+    // Wave 1's normals and wave 9's armoured flyers (both from the west) move 26 fp a tick and
+    // spawn every 20 ticks: launched 20 ticks apart, each flyer spawns with a normal and shares
+    // its every point along the straight row-11 path until a hit stops one. A Basic shoots ground
+    // creeps only, so every point it makes is a ground creep's, whichever creeps stand on it.
     const c = createController(1);
     expect(c.callWaveEarly()).toBe(true); // wave 1
     c.start();
@@ -2494,12 +2498,12 @@ describe('controller — combat feedback wiring the tests above could not tell a
     c.aimAt(2, 9);
     expect(c.confirm()).toBe(true);
     tick(c);
-    for (let wave = 2; wave <= 7; wave++) {
+    for (let wave = 2; wave <= 8; wave++) {
       expect(c.callWaveEarly()).toBe(true);
       tick(c);
     }
     tick(c, 20 - c.frame().curVm.tick);
-    expect(c.callWaveEarly()).toBe(true); // wave 8, 20 ticks after wave 1
+    expect(c.callWaveEarly()).toBe(true); // wave 9, 20 ticks after wave 1
     tick(c);
     let shared = 0;
     for (let n = 0; n < 400 && !c.isTerminal(); n++) {

@@ -4577,8 +4577,8 @@ describe('overlay — routes, hit points and the wave counter on the crossing bo
 
   it('groups the rows by route, in the board’s entrance order, and draws each route’s arrow once — on its group’s first row', () => {
     const { overlay, shell } = setup();
-    // The shipped wave 9's streams, in the wave's own order — north, west, north, west — with
-    // the flyers at 8, so a sort by count within a route would show.
+    // Four streams (story 4's placeholder wave 9), in the wave's own order — north, west,
+    // north, west — with the flyers at 8, so a sort by count within a route would show.
     const wave = [
       north({ creepId: 'swarm', count: 10 }),
       entry({ creepId: 'fast', count: 6 }),
@@ -4711,7 +4711,7 @@ describe('overlay — routes, hit points and the wave counter on the crossing bo
     const { overlay, shell } = setup();
     show(overlay, [entry()], { waveNumber: 3, waveCount: 30 });
     expect(shell.preview.title.textContent).toBe('Wave 3 of 30');
-    // And from a real run's HUD: the shipped crossing board's placeholder schedule has ten.
+    // And from a real run's HUD: the shipped crossing board's block 1 has ten.
     const c = createController(1);
     overlay.update({ hud: c.hud(), paused: false, speed: 1, ui: uiState(), refund: 0 });
     expect(shell.preview.title.textContent).toBe(`Wave 1 of ${c.ruleset.waves.length}`);
@@ -4815,14 +4815,16 @@ describe('overlay — the countdown dial and the early-call note (#181 H1)', () 
       expect(primary.getAttribute('title'), `${s}s`).toBe(paysAt(s) ? NOTE : null);
     }
     // The boundary the accessibility checklist states for shipped content — the note falls
-    // silent from 3s — held unconditionally, so a retune of the divisor fails HERE and the
+    // silent from 5s — held unconditionally, so a retune of the divisor fails HERE and the
     // checklist is re-stated, rather than the claim going stale behind a skipped assertion.
+    // Re-stated M3 story 5: the divisor 50 → 100 moved it from 3s (6s holds 101–120 ticks,
+    // every one paying; 5s holds 81–100, and 81 pays nothing).
     let firstPaying = 1;
     while (!paysAt(firstPaying)) firstPaying++;
     expect(
       { divisor, msPerTick: MS_PER_TICK, firstPaying },
-      'docs/accessibility-checklist.md: "shipped content: from 3s" — re-state it on a retune',
-    ).toEqual({ divisor: 50, msPerTick: 50, firstPaying: 4 });
+      'docs/accessibility-checklist.md: "shipped content: from 5s" — re-state it on a retune',
+    ).toEqual({ divisor: 100, msPerTick: 50, firstPaying: 6 });
   });
 
   it('notes the bonus iff EVERY tick count the shown second can hold would pay one — enumerated, across divisors', () => {

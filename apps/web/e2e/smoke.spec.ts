@@ -650,7 +650,7 @@ test('the seventh Card (M2-S8): arms Beacon by click AND by Digit7, OMITS the fo
   expect(invalidAudit.violations, JSON.stringify(invalidAudit.violations, null, 2)).toEqual([]);
 });
 
-test('the Venom Tower ghost stays functional and axe-clean under reduced motion, and a live run with an Armored Creep on the board (its hexagon silhouette + wave-4 preview text) is axe-clean (M2-S5a steps 31/32/36)', async ({
+test('the Venom Tower ghost stays functional and axe-clean under reduced motion, and a live run with an Armored Creep on the board (its hexagon silhouette + wave-5 preview text) is axe-clean (M2-S5a steps 31/32/36)', async ({
   page,
 }) => {
   await page.goto('/');
@@ -667,50 +667,57 @@ test('the Venom Tower ghost stays functional and axe-clean under reduced motion,
   // The DoT telegraph's own reduced-motion damping is unit-tested at source
   // (`creep-paint.test.ts`), not here — `scene.ts` stays coverage-excluded by
   // long-standing convention (not meaningfully testable under jsdom).
+  // From the cursor's start on the west entrance (0,11): one right and one DOWN, so the
+  // footprint (1–2, 12–13) sits beside the west route's row. One UP would wall the entrance
+  // in, and the sim refuses a tower that seals a route.
   await page.keyboard.press('ArrowRight');
-  await page.keyboard.press('ArrowUp');
-  await page.keyboard.press('Enter'); // place it — commits the venom tower to the board
+  await page.keyboard.press('ArrowDown');
 
   const armedAudit = await new AxeBuilder({ page }).include('#app').analyze();
   expect(armedAudit.violations, JSON.stringify(armedAudit.violations, null, 2)).toEqual([]);
 
+  await page.keyboard.press('Enter'); // place it — commits the venom tower to the board
+  await expect(venomCard).toHaveAttribute('aria-pressed', 'false'); // placement disarms
+  await expect(page.locator('.wy-panel').getByRole('button', { name: /^Sell/ })).toBeVisible();
+
   // Start unholds the run AND claims wave 1 (#70) — the Dock's primary control morphs
   // from "Start" to "Call wave" (M2-S2's decouple), which is what makes early-calling
-  // the rest of the way to wave 4 below possible.
+  // the rest of the way to wave 5 below possible.
   await page.getByRole('button', { name: 'Start' }).click();
 
-  // Early-call through to wave 4 (M2-S5a's `armored` creep — a hexagon silhouette on
+  // Early-call through to wave 5 (M2-S5a's `armored` creep — a hexagon silhouette on
   // canvas, out of axe's scope, but its wave-preview composition IS a DOM/AT surface:
   // `armor 6`, never `armor 0`, now that a wave actually carries a nonzero-armor creep
   // — PLAN.md step 36's "preview's now-nonzero armor text"). Wave 1 already launched on
-  // Start, so only TWO raw clicks are needed to bring wave 4 into the preview slot, and
-  // a third launches it. Every press is gated on the preview title + aria-disabled=false
-  // first — a same-tick click here would dedupe against the PREVIOUS call (Start's own
-  // buffered wave-1 claim, or this loop's own prior click), not just the first press
-  // after Start, so an ungated back-to-back run of raw clicks could silently short the
-  // walk to wave 4.
+  // Start, so THREE raw clicks bring wave 5 into the preview slot, and a fourth launches
+  // it. Every press is gated on the preview title + aria-disabled=false first — a
+  // same-tick click here would dedupe against the PREVIOUS call (Start's own buffered
+  // wave-1 claim, or this loop's own prior click), not just the first press after Start,
+  // so an ungated back-to-back run of raw clicks could silently short the walk to wave 5.
   const callWave = page.getByRole('button', { name: 'Call wave' });
   const preview = page.locator('.wy-wave-preview');
   const previewTitle = preview.locator('.wy-wave-preview-title');
-  for (let waveNumber = 2; waveNumber <= 3; waveNumber++) {
+  for (let waveNumber = 2; waveNumber <= 4; waveNumber++) {
     await expect(previewTitle).toHaveText(`Wave ${waveNumber} of 10`);
     await expect(callWave).toHaveAttribute('aria-disabled', 'false');
     await callWave.click();
   }
-  // M2-S11: the bundle now carries ten waves — the armored wave is wave 4 of 10, not
-  // wave 4 of 4.
-  await expect(previewTitle).toHaveText('Wave 4 of 10');
+  // M3 story 5: block 1's armored wave is wave 5 — armored creeps from the north beside the
+  // opener's creeps from the west, which the strip reads first (its routes, west first).
+  await expect(previewTitle).toHaveText('Wave 5 of 10');
   await expect(callWave).toHaveAttribute('aria-disabled', 'false');
   await expect(preview.locator('.wy-preview-full')).toHaveText([
-    '6 × Armored Creep — west to east, ground, armor 6 (subtracted from each direct hit; damage over time ignores it), leak cost 1, no immunities',
+    '8 × Creep — west to east, ground, armor 0, leak cost 1, no immunities',
+    '6 × Armored Creep — north to south, ground, armor 6 (subtracted from each direct hit; damage over time ignores it), leak cost 1, no immunities',
   ]);
 
   const previewAudit = await new AxeBuilder({ page }).include('#app').analyze();
   expect(previewAudit.violations, JSON.stringify(previewAudit.violations, null, 2)).toEqual([]);
 
-  // Call wave 4 and let the (reduced-motion, axe-invisible) poisoned telegraph + hexagon
-  // silhouette actually render for a moment on canvas — proving the live-run DOM stays
-  // axe-clean with an armored, poisoned creep on the board, not merely the wave preview.
+  // Call wave 5 and let the (reduced-motion, axe-invisible) hexagon silhouette and the
+  // poisoned telegraph actually render for a moment on canvas — proving the live-run DOM
+  // stays axe-clean with an armored creep on the board (at the north entrance, its route)
+  // and west creeps poisoned passing the venom, not merely the wave preview.
   await callWave.click();
   await page.waitForTimeout(1000);
 
@@ -878,46 +885,39 @@ test('supports player-started runs, pause / speed controls, launches wave 1 on S
 
   // Early-call every REMAINING wave via the morphed primary control — wave 1 already
   // launched on Start above, so this calls 2 through 10 — checking the preview shows the
-  // CORRECT upcoming wave before each call (PLAN.md P3 step 19) — per-wave, since wave 2
-  // is M2-S4a's DISTINCT swarm-creep composition and wave 3 is M2-S3's DISTINCT
-  // fast-creep composition (only wave 1 stays the single normal-creep kind).
-  // M2-S6 P5 appended a `resolute`+`fast` multi-entry wave — the FIRST multi-entry wave
-  // this spec exercises, so its composition is an array of two `<li>` texts (authored
-  // order: `resolute` then `fast`), not a single string like every wave before it. M2-S7
-  // P6 appended an AIR wave, so its row reads `air`, not `ground`. M2-S10 appended an
-  // `armored-flyer` wave and the boss wave, closing out the (then eight-wave) bundle with
-  // a `boss` entry ahead of a final `creep` swarm. M2-S11 (P1) inserts two further waves —
-  // a second `normal`+`swarm` wave ahead of the air waves, and the arc's densest tick, a
-  // FOUR-entry wave (`swarm`+`fast`+`armored`+`flying`) — taking the bundle to ten waves
-  // and reordering `flying` ahead of `resolute`+`fast`.
+  // CORRECT upcoming wave before each call (PLAN.md P3 step 19) — per-wave, since each
+  // wave of block 1 (M3 story 5: m3.md's first-pass arc, rows 1–10) brings a new threat or
+  // route: the swarm, the north route opening at wave 3, multi-entry waves from wave 4 (an
+  // array of `<li>` texts, each naming its route, grouped by route with west first — M3
+  // story 4: `overlay.ts`'s `byRoute`), the air headline at wave 6 (its row reads `air`, not
+  // `ground`), the armored-flyer wall at wave 9 and the boss at wave 10.
   // Keyed from wave 2: wave 1 launches on Start, so its composition is asserted PRE-start
   // above rather than inside the loop. Carrying a `1:` entry here too would be a second
   // source of truth that nothing reads — and therefore nothing keeps honest.
   const EXPECTED_COMPOSITION: Record<number, string[]> = {
     2: ['16 × Swarm Creep — west to east, ground, armor 0, leak cost 1, no immunities'],
-    3: ['8 × Fast Creep — west to east, ground, armor 0, leak cost 1, no immunities'],
+    3: ['10 × Creep — north to south, ground, armor 0, leak cost 1, no immunities'],
     4: [
-      '6 × Armored Creep — west to east, ground, armor 6 (subtracted from each direct hit; damage over time ignores it), leak cost 1, no immunities',
+      '8 × Fast Creep — west to east, ground, armor 0, leak cost 1, no immunities',
+      '6 × Fast Creep — north to south, ground, armor 0, leak cost 1, no immunities',
     ],
-    // M3 story 4: the crossing board's placeholder schedule opens the north route here.
+    // Waves 5 and 8 are authored north first; the strip reads west first.
     5: [
-      '12 × Creep — west to east, ground, armor 0, leak cost 1, no immunities',
-      '6 × Swarm Creep — north to south, ground, armor 0, leak cost 1, no immunities',
+      '8 × Creep — west to east, ground, armor 0, leak cost 1, no immunities',
+      '6 × Armored Creep — north to south, ground, armor 6 (subtracted from each direct hit; damage over time ignores it), leak cost 1, no immunities',
     ],
     6: ['8 × Flying Creep — west to east, air, armor 0, leak cost 1, no immunities'],
     7: [
-      '6 × Resolute Creep — west to east, ground, armor 0, leak cost 1, slow',
-      '6 × Fast Creep — north to south, ground, armor 0, leak cost 1, no immunities',
+      '12 × Creep — west to east, ground, armor 0, leak cost 1, no immunities',
+      '10 × Swarm Creep — north to south, ground, armor 0, leak cost 1, no immunities',
     ],
     8: [
-      '6 × Armored Flyer — west to east, air, armor 5 (subtracted from each direct hit; damage over time ignores it), leak cost 1, no immunities',
-    ],
-    // Grouped by route, west first (M3 story 4: `overlay.ts`'s `byRoute`).
-    9: [
       '6 × Fast Creep — west to east, ground, armor 0, leak cost 1, no immunities',
-      '4 × Flying Creep — west to east, air, armor 0, leak cost 1, no immunities',
-      '10 × Swarm Creep — north to south, ground, armor 0, leak cost 1, no immunities',
-      '4 × Armored Creep — north to south, ground, armor 6 (subtracted from each direct hit; damage over time ignores it), leak cost 1, no immunities',
+      '6 × Resolute Creep — north to south, ground, armor 0, leak cost 1, slow',
+    ],
+    9: [
+      '6 × Armored Flyer — west to east, air, armor 5 (subtracted from each direct hit; damage over time ignores it), leak cost 1, no immunities',
+      '8 × Creep — north to south, ground, armor 0, leak cost 1, no immunities',
     ],
     10: [
       // The ONLY row in the arc carrying a role, and the only one whose accessible text

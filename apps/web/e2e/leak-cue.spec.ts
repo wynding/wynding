@@ -137,8 +137,8 @@ async function resolveColour(page: Page, value: string): Promise<string> {
 }
 
 /** An undefended run at 2×, from Start to its loss and the last cue cleared: wave 1's ten
- *  creeps take the ten lives twenty ticks apart, half a second at 2× — faster than a cue may
- *  begin. */
+ *  creeps take ten of the twenty lives twenty ticks apart, half a second at 2×, and wave 2's
+ *  swarm the rest five ticks apart — both faster than a cue may begin. */
 async function leakRun(page: Page, reduceMotion: boolean): Promise<Recording> {
   await stubFullscreen(page);
   await stampFrames(page);

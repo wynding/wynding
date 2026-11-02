@@ -13,22 +13,20 @@
 // exactly (known-different, not just "different"), and a forged extra claimed-score
 // field on the wire (`Replay` carries none) is silently ignored.
 //
-// `WINNER_A` ("the poisoner") is reused from `packages/content/src/showcase-builds.ts`
-// — the M2-S11 P4/P5 shared test-support module, imported here (never modified) rather
-// than re-typed, so this file can't silently drift into scripting a DIFFERENT build
-// than the one `story-showcase.test.ts` and `m2-golden.test.ts` already prove wins.
-// `@wynding/content`'s package.json `exports` map has no subpath for it, so the import
-// below reaches across the package boundary by relative path — verified (by direct
-// `tsc -p tsconfig.json` run) to compile cleanly despite `rootDir: "src"`, since
-// `apps/server/src` and `apps/server/dist` sit at the same depth under `apps/server`,
-// so the relative path resolves identically from either.
+// Every leg plays `m3-serpentine`, the first build of M3's reference set on the shipped
+// crossing board (`packages/content/src/reference-builds.ts`, M3 story 5), compiled from its
+// grid to the same plan `balance-crossing.test.ts` proves wins block 1 — imported here, never
+// re-typed, so this file can't drift into scripting a DIFFERENT build than the one the
+// balance checker pins. `@wynding/content`'s package.json `exports` map has no subpath for
+// the test-support modules, so the imports below reach across the package boundary by
+// relative path — verified (by direct `tsc -p tsconfig.json` run) to compile cleanly despite
+// `rootDir: "src"`, since `apps/server/src` and `apps/server/dist` sit at the same depth
+// under `apps/server`, so the relative path resolves identically from either.
 //
-// M3 story 4: the handler validates against the SHIPPED bundle only, which is now the
-// crossing board, so every leg here replays WINNER_A — M2's build — on the crossing board's
-// placeholder schedule (M2's ten waves, five streams moved north). It still wins there with
-// every creep stopped; the guards in each leg (won, lost, a score that moved) are what keep
-// it honest, and they fail by name once a retuned schedule outgrows M2's build. The prose
-// below about which slices win or lose was measured on M2's `field-01`.
+// The handler validates against the SHIPPED bundle only, so the build has to be one that
+// plays the shipped schedule — until M3 story 5 these legs replayed M2's showcase build on
+// story 4's placeholder schedule. The guards in each leg (won, lost, a score that moved) fail
+// by name if a retune outgrows the build.
 
 import { afterEach, describe, it, expect } from 'vitest';
 import {
@@ -43,18 +41,21 @@ import {
 } from '@wynding/sim';
 import { currentRulesetHash, type Replay } from '@wynding/replay';
 import { getBundledRuleset, defaultBoardId } from '@wynding/content';
-import { WINNER_A, type Placement } from '../../../packages/content/src/showcase-builds';
-import { runBuildScript } from '../../../packages/content/src/script-runner';
+import { compileReferenceBuild } from '../../../packages/content/src/reference-build';
+import { M3_CROSSING, M3_SERPENTINE } from '../../../packages/content/src/reference-builds';
+import { runBuildScript, type ScriptStep } from '../../../packages/content/src/script-runner';
 import { handler } from './handler';
 
-// The seed WINNER A is tuned against (`packages/content/src/m2-golden.test.ts`'s
-// `SCENARIO_SEED`) — not exported from `showcase-builds.ts` (only the script is), so
-// pinned here as the same literal. A different seed is not guaranteed to still win.
-const SCENARIO_SEED = 0x5eed;
+// The seed the reference set is measured from. A different seed is not guaranteed to win.
+const SCENARIO_SEED = M3_CROSSING.seed;
 
 const bundle = getBundledRuleset();
 const BOARD_ID = defaultBoardId(bundle);
 const RULESET_HASH = currentRulesetHash(bundle);
+
+/** The serpentine's plan on the shipped board: the set names that board, and it is the
+ *  handler's default. */
+const SERPENTINE = compileReferenceBuild(M3_SERPENTINE, compileRuleset(bundle, BOARD_ID));
 
 // Every test here re-simulates a whole run synchronously. Yield a macrotask after each so
 // the worker reads Vitest's RPC replies between them: birpc times a reply out at 60 s, so
@@ -73,7 +74,7 @@ interface ClientRun {
  *  a real client would submit as a `Replay`. Stops the instant the sim leaves `'running'`,
  *  so the log ends exactly at the terminal tick (`@wynding/replay`'s `validate()` rejects
  *  any tick logged past termination). */
-function runScript(ruleset: CompiledRuleset, script: readonly Placement[]): ClientRun {
+function runScript(ruleset: CompiledRuleset, script: readonly ScriptStep[]): ClientRun {
   const tickInputs: (readonly SimInput[])[] = [];
 
   const { state } = runBuildScript(ruleset, SCENARIO_SEED, script, {
@@ -96,9 +97,14 @@ function replayFor(tickInputs: readonly (readonly SimInput[])[]): Replay {
 }
 
 describe('M2-S11 P6 — client/server replay parity through the real handler()', () => {
+  it('plays the reference set’s first build on the board the handler defaults to', () => {
+    expect(M3_CROSSING.boardId).toBe(BOARD_ID);
+    expect(M3_CROSSING.builds[0]).toBe(M3_SERPENTINE);
+  });
+
   it('leg 2: a full-arc WINNING run submitted as a replay returns the same score and stars as the independent client-side simulation', async () => {
     const ruleset = compileRuleset(bundle, BOARD_ID);
-    const client = runScript(ruleset, WINNER_A);
+    const client = runScript(ruleset, SERPENTINE);
 
     // This has to actually be the winning run the plan asks for, not merely "some
     // terminal" — assert it before comparing anything else.
@@ -122,29 +128,26 @@ describe('M2-S11 P6 — client/server replay parity through the real handler()',
   it('leg 3a: a replay whose script differs by one placement is re-simulated and returns the independently derived, known-different score', async () => {
     const ruleset = compileRuleset(bundle, BOARD_ID);
 
-    // WINNER_A's full 40-placement script is so far over the win threshold (P4's
-    // diversity/materiality floors, not a minimal build) that dropping any ONE of its
-    // placements leaves every wave still fully cleared with all 10 lives intact — a
-    // single-tower deletion is a true no-op against it (verified: every index probed).
-    // So this leg uses a deliberately TIGHTER slice of the same script — its first 20
-    // placements, still a genuine win over the same shipped bundle — where individual
-    // placements are load-bearing, to prove the property leg 3a is actually about:
-    // ONE differing placement in an otherwise-valid replay changes the re-simulated
-    // outcome, and the handler returns exactly that changed value.
-    const baseScript = WINNER_A.slice(0, 20);
+    // The property leg 3a is about: ONE differing placement in an otherwise-valid replay
+    // changes the re-simulated outcome, and the handler returns exactly that changed value.
+    // The serpentine's whole plan serves: its west wall is load-bearing tower by tower.
+    const baseScript = SERPENTINE;
     const original = runScript(ruleset, baseScript);
     expect(original.state.phase).toBe('won');
     const originalScore = deriveScore(original.state, ruleset);
 
-    // Drop exactly ONE placement (the first: a `basic` wall) — a genuinely different
-    // build, re-simulated from scratch, never a claimed-score echo.
-    const tamperedIndex = 0;
+    // Drop exactly ONE placement — the second, the west wall's `basic` just below the
+    // entrance — a genuinely different build, re-simulated from scratch, never a
+    // claimed-score echo. Measured: it still WINS, on fewer lives, so the changed value is a
+    // real score rather than a loss's 0.
+    const tamperedIndex = 1;
     expect(baseScript[tamperedIndex]).toBeDefined();
     const tamperedScript = [
       ...baseScript.slice(0, tamperedIndex),
       ...baseScript.slice(tamperedIndex + 1),
     ];
     const tampered = runScript(ruleset, tamperedScript);
+    expect(tampered.state.phase).toBe('won');
     const tamperedScore = deriveScore(tampered.state, ruleset);
     const tamperedStars = deriveStars(tampered.state, ruleset);
 
@@ -166,7 +169,7 @@ describe('M2-S11 P6 — client/server replay parity through the real handler()',
 
   it('leg 3b: a forged extra claimed-score field on the wire is accepted, re-simulated, and ignored', async () => {
     const ruleset = compileRuleset(bundle, BOARD_ID);
-    const client = runScript(ruleset, WINNER_A);
+    const client = runScript(ruleset, SERPENTINE);
     expect(client.state.phase).toBe('won');
     const trueScore = deriveScore(client.state, ruleset);
     const trueStars = deriveStars(client.state, ruleset);
@@ -205,7 +208,7 @@ describe('#25 item 1 — the terminal contract is STRICT, on a WINNING replay, t
   const ruleset = compileRuleset(bundle, BOARD_ID);
 
   it('the recorder’s own truncated-at-terminal log is ACCEPTED, and graded exactly as the client graded it', async () => {
-    const client = runScript(ruleset, WINNER_A);
+    const client = runScript(ruleset, SERPENTINE);
     expect(client.state.phase).toBe('won');
 
     // The recorder's contract, asserted as a property of the log rather than assumed:
@@ -225,8 +228,8 @@ describe('#25 item 1 — the terminal contract is STRICT, on a WINNING replay, t
     expect(payload.stars).toBe(deriveStars(client.state, ruleset));
     expect(payload.finalHash).toBe(hashSimState(client.state));
     // NO `stars >= 1` FLOOR ASSERTION HERE, deliberately: the handler compiles the
-    // SHIPPED bundle, whose ladder starts at t1 = 1, and WINNER_A finishes on 10 lives
-    // for a clean 3★ — so such an assertion would pass identically at sv15 and witness
+    // SHIPPED bundle, whose ladder starts at t1 = 1, and the serpentine finishes on all 20
+    // lives for a clean 3★ — so such an assertion would pass identically at sv15 and witness
     // nothing. The floor is only observable against an authored ladder that puts a win
     // below its first rung, which `packages/sim`'s story5 suite does with `[5, 7, 9]`.
     // The parity claim two lines up is what this leg is actually for.
@@ -239,24 +242,31 @@ describe('#25 item 1 — the terminal contract is STRICT, on a WINNING replay, t
     // the server is precisely the consumer the ruling names ("a leaderboard consumer
     // ingesting `score`"). Ruling 3 got real-handler coverage below; this is ruling 2's.
     //
-    // A 12-placement prefix of WINNER_A is measured, not guessed: enough defense to bank
-    // kills across the early arc, far too little to survive it. The guards below are what
+    // A 12-placement prefix of the serpentine is measured, not guessed: enough defense to
+    // bank kills across block 1, far too little to survive it. The guards below are what
     // keep the fixture honest if content is retuned — they fail by NAME rather than
     // letting the 0/0 assertions pass vacuously.
-    const client = runScript(ruleset, WINNER_A.slice(0, 12));
+    const client = runScript(ruleset, SERPENTINE.slice(0, 12));
     expect(client.state.phase).toBe('lost');
     expect(client.state.cumulativeKillBounty).toBeGreaterThan(0); // there IS a forfeiture
 
     const res = await handler({ body: JSON.stringify(replayFor(client.tickInputs)) });
     expect(res.statusCode).toBe(200); // a loss is a VALID replay, not a rejected one
-    const payload = JSON.parse(res.body) as { ok: boolean; score: number; stars: number };
+    const payload = JSON.parse(res.body) as {
+      ok: boolean;
+      score: number;
+      stars: number;
+      finalHash: string;
+    };
     expect(payload.ok).toBe(true);
+    // The handler re-simulated to THIS loss — not a default 0/0 for a replay it never ran.
+    expect(payload.finalHash).toBe(hashSimState(client.state));
     expect(payload.score).toBe(0);
     expect(payload.stars).toBe(0);
   }, 120_000);
 
   it('the SAME winning log plus one inert trailing tick is rejected 422, with the exact reason', async () => {
-    const client = runScript(ruleset, WINNER_A);
+    const client = runScript(ruleset, SERPENTINE);
     expect(client.state.phase).toBe('won');
     // The log ends AT the terminal tick, so its LENGTH is the first index a canonical log
     // must not contain — the terminal tick index + 1. Named for what it is: `terminalTick`

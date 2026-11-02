@@ -8,16 +8,32 @@
 // build — the build that won on the most lives (then the highest score), leaving out any
 // that sold with a creep alive (the juggling build is reported beside the honest
 // winners, never as one) — which is the wave whose window held that build's last
-// placement, unless its plan never finished.
+// placement, unless its plan never finished. A set that draws its board full (`fullBoard`)
+// then gets the board's capacity in bounty and the wave whose income first covers it
+// (`balance-capacity.ts`): where the strongest build would place its last tower once the
+// schedule is long enough to fill the board.
 //
-// Beside the text it returns what makes the report untrustworthy — no set registered, or
-// a build whose plan didn't finish or whose run never ended — so the command can fail.
+// Beside the text it returns what makes the report untrustworthy — no set registered, a
+// build whose plan didn't finish or whose run never ended, or a capacity drawing the sim
+// will not take as drawn (`placeCapacityDrawing`: a sell, a refused tower, a creep on the
+// board before it stands), whose price is still printed — so the command can fail.
 
 import { compileRuleset, deriveScore, deriveStars, type CompiledRuleset } from '@wynding/sim';
 import type { Ruleset } from '@wynding/types';
 import { compileReferenceBuild, type ReferenceBuild, type ReferenceSet } from './reference-build';
 import { runReferenceBuild, type BuildRun } from './balance-run';
-import { checkAllStepsRan, checkNoSellWithLiveCreep, locateLoss } from './balance-checks';
+import {
+  checkAllStepsRan,
+  checkNoSellWithLiveCreep,
+  idsBySpend,
+  locateLoss,
+} from './balance-checks';
+import {
+  drawnCapacity,
+  firstWaveCovering,
+  placeCapacityDrawing,
+  scheduleIncome,
+} from './balance-capacity';
 
 /** Where a placement fell: a wave's window as the arc numbers it, before the first, or
  *  nowhere. */
@@ -127,6 +143,28 @@ function boardFullLine(
   return `board-full: the strongest build, ${best.build.id} (won on ${run.state.lives} lives), ${where}`;
 }
 
+/** The capacity lines for a set that draws its board full (`balance-capacity.ts`): what the
+ *  drawing holds, and the wave whose income first covers it, without and with early calls. */
+function capacityLines(full: ReferenceBuild, ruleset: CompiledRuleset): string[] {
+  const { towers, bounty, spendById } = drawnCapacity(full, ruleset);
+  const mix = idsBySpend(spendById)
+    .map((id) => `${id} ${spendById[id]}`)
+    .join(', ');
+  const income = scheduleIncome(ruleset);
+  const last = income[income.length - 1]!;
+  const covered = (withCalls: boolean, what: string): string => {
+    const wave = firstWaveCovering(income, bounty, withCalls);
+    if (wave !== null) return `  ${what} covers it by the end of wave ${wave + 1}`;
+    const reached = withCalls ? last.earnedWithCalls : last.earned;
+    return `  ${what} reaches ${reached} by the end of wave ${last.wave + 1}, short of it`;
+  };
+  return [
+    `capacity: ${full.id} draws ${towers} towers worth ${bounty} bounty — ${mix}`,
+    covered(false, 'income (every kill and clear bonus)'),
+    covered(true, 'income with every early call at its maximum'),
+  ];
+}
+
 export interface BalanceReport {
   readonly text: string;
   /** What makes the report untrustworthy; the command fails on any. */
@@ -164,6 +202,11 @@ export function balanceReport(
       failures.push(...checkAllStepsRan(`${set.id}/${build.id}`, run));
     }
     lines.push(boardFullLine(runs, ruleset), '');
+    if (set.fullBoard !== undefined) {
+      const label = `${set.id}/${set.fullBoard.id}`;
+      failures.push(...placeCapacityDrawing(label, set.fullBoard, ruleset, set.seed).failures);
+      lines.push(...capacityLines(set.fullBoard, ruleset), '');
+    }
   }
   return { text: lines.join('\n'), failures };
 }

@@ -211,14 +211,17 @@ describe('getBundledRuleset (happy path + authored values)', () => {
   });
 
   it('carries the starting economy, refund/slow-floor fractions and early-call bounty divisor', () => {
+    // Re-pinned M3 story 5 (m3.md, "Lives" and "Economy"): 20 starting lives for a run three
+    // times M2's length, and the early-call bounty divisor 50 → 100, so a call on M3's
+    // 500–800-tick countdowns pays at most 5–8. Starting bounty and refund are M2's.
     expect(ruleset.balance).toEqual({
-      startingLives: 10,
+      startingLives: 20,
       startingBounty: 80,
       refundNum: 3,
       refundDen: 4,
       slowFloorNum: 1,
       slowFloorDen: 4,
-      earlyCallBountyDivisor: 50,
+      earlyCallBountyDivisor: 100,
     });
   });
 
@@ -226,10 +229,13 @@ describe('getBundledRuleset (happy path + authored values)', () => {
     // Re-pinned M2-S11 P4: `survivalMul` 35 → 50 — ruling 8's designated lever for the
     // win-over-loss margin, set from the bounded-knapsack extremes at the foot of this
     // file (worst win 218 vs best loss 201, margin 17 ≥ the pre-committed 15).
+    // Re-pinned M3 story 5 (m3.md, "Scoring & star grade"): scaled to 20 lives —
+    // `survivalMul` 50 → 25 keeps M2's 500-point survival ceiling, the star cutoffs double
+    // to [1, 12, 18], and the early-call score credit takes the bounty's divisor, 100.
     expect(ruleset.scoring).toEqual({
-      survivalMul: 50,
-      starThresholds: [1, 6, 9],
-      earlyCallScoreDivisor: 50,
+      survivalMul: 25,
+      starThresholds: [1, 12, 18],
+      earlyCallScoreDivisor: 100,
     });
   });
 
@@ -248,91 +254,55 @@ describe('getBundledRuleset (happy path + authored values)', () => {
       { id: 'east', cell: { col: 27, row: 11 } },
       { id: 'south', cell: { col: 13, row: 23 } },
     ]);
-    // The placeholder schedule grows no creep hit points (stories 5–7 author the curve).
+    // Block 1 grows no creep hit points: the curve is flat at 100 through wave 10 (m3.md,
+    // "Creep HP growth"); stories 6–7 author its rise.
     for (const wave of board.waves) expect(wave.hpPercent).toBe(100);
   });
 
-  // Re-pinned M2-S11 P3 (measured): P1 authors the full ten-wave arc per m2.md's spec
-  // table, inserting arc row 5 (12x`normal`+6x`swarm`) at index 4 and arc row 9
-  // (10x`swarm`+6x`fast`+4x`armored`+4x`flying`) at index 8, and renumbering every wave
-  // — `resolute`+`fast` moves from index 4 to index 6, `armored-flyer` from index 6 to
-  // index 7, and the boss finale from index 7 to index 9.
-  // Re-pinned M3 story 4: the crossing board's PLACEHOLDER schedule — M2's ten waves with
-  // five streams moved to the north route (index 4's swarm, index 6's fast, index 8's swarm
-  // and armored, index 9's escort). The north route opens at index 4, a wave that brings
-  // nothing else new; north stays ground-only; air stays on the west lane. Stories 5–7
-  // replace the whole schedule. Every count, spacing, offset, countdown and bonus is M2's.
-  it("carries the placeholder ten waves, M2's with five streams moved north: 10 × normal @ spacing 20, then 16 × swarm @ spacing 5 (the S4a AoE showcase), then 8 × fast @ spacing 15 (the S3 slow-showcase), then 6 × armored @ spacing 25 (the S5a armor showcase), then wave index 4's 12 × normal + 6 × swarm @ spacing 12/5 (arc row 5), then wave index 5's 8 × flying @ spacing 15 (the S7 air showcase), then wave index 6's 6 × resolute + 6 × fast @ spacing 15/15 (the S6 immunity showcase), then wave index 7's 6 × armored-flyer @ spacing 20 (the S10 armored-air showcase), then wave index 8's 10 × swarm + 6 × fast + 4 × armored + 4 × flying @ spacing 6/12/20/20 (arc row 9), then wave index 9's 1 × boss + 8 × normal @ spacing 20/20 (the S10 boss finale)", () => {
-    const normalEntries = [
-      { creepId: 'normal', entrance: 'west', count: 10, spacingTicks: 20, offsetTicks: 0 },
-    ];
-    const swarmEntries = [
-      { creepId: 'swarm', entrance: 'west', count: 16, spacingTicks: 5, offsetTicks: 0 },
-    ];
-    const fastEntries = [
-      { creepId: 'fast', entrance: 'west', count: 8, spacingTicks: 15, offsetTicks: 0 },
-    ];
-    const armoredEntries = [
-      { creepId: 'armored', entrance: 'west', count: 6, spacingTicks: 25, offsetTicks: 0 },
-    ];
-    const normalSwarmEntries = [
-      { creepId: 'normal', entrance: 'west', count: 12, spacingTicks: 12, offsetTicks: 0 },
-      { creepId: 'swarm', entrance: 'north', count: 6, spacingTicks: 5, offsetTicks: 0 },
-    ];
-    const flyingEntries = [
-      { creepId: 'flying', entrance: 'west', count: 8, spacingTicks: 15, offsetTicks: 0 },
-    ];
-    const resoluteFastEntries = [
-      { creepId: 'resolute', entrance: 'west', count: 6, spacingTicks: 15, offsetTicks: 0 },
-      { creepId: 'fast', entrance: 'north', count: 6, spacingTicks: 15, offsetTicks: 0 },
-    ];
-    const armoredFlyerEntries = [
-      { creepId: 'armored-flyer', entrance: 'west', count: 6, spacingTicks: 20, offsetTicks: 0 },
-    ];
-    const swarmFastArmoredFlyingEntries = [
-      { creepId: 'swarm', entrance: 'north', count: 10, spacingTicks: 6, offsetTicks: 0 },
-      { creepId: 'fast', entrance: 'west', count: 6, spacingTicks: 12, offsetTicks: 0 },
-      { creepId: 'armored', entrance: 'north', count: 4, spacingTicks: 20, offsetTicks: 0 },
-      { creepId: 'flying', entrance: 'west', count: 4, spacingTicks: 20, offsetTicks: 0 },
-    ];
-    const bossEntries = [
-      { creepId: 'boss', entrance: 'west', count: 1, spacingTicks: 20, offsetTicks: 0 },
-      // Re-pinned M2-S11 P4: the boss's `normal` escort gains `offsetTicks` 600. At 0 the
-      // escort (speed 26) overtook the boss (speed 18) and screened it — every tower
-      // preferring the creep nearest the exit — so the finale was fought against the
-      // escort while the boss walked through behind it. Composition is untouched (ruling
-      // 2): same creep ids, same counts, same order; only the stream's start moves.
-      { creepId: 'normal', entrance: 'north', count: 8, spacingTicks: 20, offsetTicks: 600 },
-    ];
+  // Re-pinned M3 story 5: block 1 of the first-pass arc (m3.md, "First-pass arc", rows 1–10)
+  // replaces story 4's placeholder (M2's ten waves with five streams moved north). Wave 1 is
+  // the familiar opener; the north route opens at wave 3; air flies the west lane only
+  // (waves 6 and 9); the wall is wave 9's armored flyers; wave 10's one boss comes from the
+  // west, its escort down the north route 600 ticks later. Every clear bonus is the spec's
+  // `2 + ⌊(wave − 1) / 10⌋`, plus 4 on the boss wave.
+  it('carries block 1 of the first-pass arc, row for row: compositions, routes, spacings, offsets, countdowns, clear bonuses', () => {
+    const e = (
+      creepId: string,
+      entrance: string,
+      count: number,
+      spacingTicks: number,
+      offsetTicks = 0,
+    ) => ({
+      creepId,
+      entrance,
+      count,
+      spacingTicks,
+      offsetTicks,
+    });
+    const wave = (
+      index: number,
+      countdownTicks: number,
+      clearBonus: number,
+      entries: unknown[],
+    ) => ({
+      index,
+      countdownTicks,
+      clearBonus,
+      hpPercent: 100,
+      entries,
+    });
+    // prettier-ignore
     expect(board.waves).toEqual([
-      { index: 0, countdownTicks: 500, clearBonus: 4, hpPercent: 100, entries: normalEntries },
-      { index: 1, countdownTicks: 300, clearBonus: 4, hpPercent: 100, entries: swarmEntries },
-      { index: 2, countdownTicks: 300, clearBonus: 5, hpPercent: 100, entries: fastEntries },
-      { index: 3, countdownTicks: 300, clearBonus: 5, hpPercent: 100, entries: armoredEntries },
-      { index: 4, countdownTicks: 300, clearBonus: 6, hpPercent: 100, entries: normalSwarmEntries },
-      { index: 5, countdownTicks: 300, clearBonus: 6, hpPercent: 100, entries: flyingEntries },
-      {
-        index: 6,
-        countdownTicks: 300,
-        clearBonus: 7,
-        hpPercent: 100,
-        entries: resoluteFastEntries,
-      },
-      {
-        index: 7,
-        countdownTicks: 300,
-        clearBonus: 7,
-        hpPercent: 100,
-        entries: armoredFlyerEntries,
-      },
-      {
-        index: 8,
-        countdownTicks: 300,
-        clearBonus: 8,
-        hpPercent: 100,
-        entries: swarmFastArmoredFlyingEntries,
-      },
-      { index: 9, countdownTicks: 400, clearBonus: 12, hpPercent: 100, entries: bossEntries },
+      wave(0, 600, 2, [e('normal', 'west', 10, 20)]),
+      wave(1, 500, 2, [e('swarm', 'west', 16, 5)]),
+      wave(2, 500, 2, [e('normal', 'north', 10, 20)]),
+      wave(3, 500, 2, [e('fast', 'west', 8, 15), e('fast', 'north', 6, 15, 60)]),
+      wave(4, 500, 2, [e('armored', 'north', 6, 25), e('normal', 'west', 8, 20)]),
+      wave(5, 500, 2, [e('flying', 'west', 8, 15)]),
+      wave(6, 500, 2, [e('normal', 'west', 12, 15), e('swarm', 'north', 10, 6)]),
+      wave(7, 500, 2, [e('resolute', 'north', 6, 15), e('fast', 'west', 6, 15)]),
+      wave(8, 500, 2, [e('armored-flyer', 'west', 6, 20), e('normal', 'north', 8, 20, 100)]),
+      wave(9, 600, 6, [e('boss', 'west', 1, 20), e('normal', 'north', 8, 20, 600)]),
     ]);
   });
 
@@ -391,8 +361,8 @@ describe('the compile-bound arithmetic, pinned as named numbers (M2-S5a P5, mirr
   // here in a way stress.test.ts's single-wave bundle doesn't exercise.
   const text = readFileSync(BUNDLED_ARTIFACT_URL, 'utf8');
   const bundle = parseRulesetJson(text);
-  // The shipped default board — `crossing-medium` since M3 story 4, whose placeholder schedule
-  // keeps M2's timing, so every number below is M2's.
+  // The shipped default board — `crossing-medium` since M3 story 4, on block 1's schedule
+  // since M3 story 5.
   const board = bundle.boards[0]!;
   const slowTower = bundle.towerCatalog.find((t) => t.id === 'slow');
   if (slowTower === undefined) throw new Error("no tower 'slow' in the shipped bundle");
@@ -465,7 +435,10 @@ describe('the compile-bound arithmetic, pinned as named numbers (M2-S5a P5, mirr
   // 600 (see the wave-schedule pin above for why). An entry's tail is
   // `offsetTicks + (count-1) × spacingTicks` = 600 + 140 = 740, so the boss wave's last
   // spawn lands at prefix 3300 + 740 = 4040 — the new max.
-  it('latestSpawnTick = 4040 (wave index 9 launches at prefix 3300; its 8x20 `normal` entry now starts 600 ticks in, tail 740)', () => {
+  // Re-pinned M3 story 5: block 1's countdowns, 600 + 500×8 + 600, put the boss wave's
+  // launch at prefix 5200; its north escort keeps the same tail, 600 + 140 = 740, so the
+  // last spawn lands at 5200 + 740 = 5940 — still the max.
+  it('latestSpawnTick = 5940 (wave index 9 launches at prefix 5200; its 8x20 `normal` escort starts 600 ticks in, tail 740)', () => {
     console.log(
       'registry.test.ts: waves.length =',
       waves.length,
@@ -473,19 +446,21 @@ describe('the compile-bound arithmetic, pinned as named numbers (M2-S5a P5, mirr
       latestSpawnTick,
     );
     expect(waves).toHaveLength(10);
-    expect(latestSpawnTick).toBe(4_040);
+    expect(latestSpawnTick).toBe(5_940);
   });
 
   // Re-pinned M2-S11 P4 (measured): 30470 → 31070, entirely from `latestSpawnTick`'s
   // own +600 above; `traversal` is unmoved (P4 touched neither the board nor the slow
   // floor nor the slowest creep's speed). Headroom under MAX_MATCH_TICKS: 4930 at
   // sv16's 36,000, 40,930 since sv17's 72,000 (M3 story 2) — the bound itself is unmoved.
-  it('total bound = latestSpawnTick + traversal = 31070, comfortably under MAX_MATCH_TICKS (72000)', () => {
+  // Re-pinned M3 story 5: 31070 → 32970, entirely from block 1's longer countdowns above;
+  // `traversal` is unmoved. Headroom under MAX_MATCH_TICKS: 39,030.
+  it('total bound = latestSpawnTick + traversal = 32970, comfortably under MAX_MATCH_TICKS (72000)', () => {
     // Derived from the same bundle-read terms the tests above pin, not re-typed as
-    // `3440 + 27030` — the same reason stress.test.ts's own pin does this.
+    // `5940 + 27030` — the same reason stress.test.ts's own pin does this.
     const total = latestSpawnTick + traversal;
     console.log('registry.test.ts: total bound =', total, 'MAX_MATCH_TICKS =', MAX_MATCH_TICKS);
-    expect(total).toBe(31_070);
+    expect(total).toBe(32_970);
     expect(MAX_MATCH_TICKS).toBe(72_000);
     expect(total).toBeLessThan(MAX_MATCH_TICKS);
   });
@@ -531,8 +506,8 @@ describe('the win-over-loss score ordering invariant (m2.md §Scoring & star gra
   // best loss.
   const text = readFileSync(BUNDLED_ARTIFACT_URL, 'utf8');
   const bundle = parseRulesetJson(text);
-  // The shipped default board — `crossing-medium` since M3 story 4, whose placeholder schedule
-  // keeps M2's timing, so every number below is M2's.
+  // The shipped default board — `crossing-medium` since M3 story 4, on block 1's schedule
+  // and M3's 20 lives and `survivalMul` 25 since M3 story 5.
   const board = bundle.boards[0]!;
   const creepById = new Map(bundle.creepCatalog.map((c) => [c.id, c]));
   const L = bundle.balance.startingLives;
@@ -620,9 +595,14 @@ describe('the win-over-loss score ordering invariant (m2.md §Scoring & star gra
     // moves 203 → 218 purely because P4 raised `survivalMul` 35 → 50 — the one lever
     // ruling 8 assigns to this margin, because it appears only in the winning terminal
     // and so moves worst-win without touching combat, economy or clear bonuses.
+    // Re-pinned M3 story 5 (measured): block 1 schedules 129 creeps whose bounty also sums
+    // to 211. At 20 lives the cheapest loss leaks twenty 1-bounty creeps, so the largest
+    // bounty a loss can forfeit is 211 − 20 = 191; the worst win leaks 19 lives' worth of
+    // the richest creeps (the boss, twelve 3-bounty and four 2-bounty creeps: 69) and keeps
+    // one life at `survivalMul` 25: 211 − 69 + 25 = 167.
     expect(B).toBe(211);
-    expect(bestLossKillBounty).toBe(201);
-    expect(worstWinScore).toBe(218);
+    expect(bestLossKillBounty).toBe(191);
+    expect(worstWinScore).toBe(167);
     // Re-pinned #25 (SIM_VERSION 15 → 16, measured): the best losing SCORE moves 201 → 0,
     // and the margin 17 → 218 with it.
     expect(bestLossScore).toBe(0);
@@ -641,7 +621,7 @@ describe('the win-over-loss score ordering invariant (m2.md §Scoring & star gra
     const lost = bestCaseLosingTerminal();
     // Anti-vacuity first: this terminal really is carrying both score inputs, and the
     // bounty half is the arc's own maximum, not a token value.
-    expect(lost.cumulativeKillBounty).toBe(201);
+    expect(lost.cumulativeKillBounty).toBe(191);
     expect(lost.cumulativeEarlyCallCredit).toBeGreaterThan(0);
     // ...and it grades 0 on both readouts, so no losing run of this bundle can reach any
     // winning run's score — without a leaderboard consumer gating on phase or stars.
