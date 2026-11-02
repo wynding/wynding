@@ -212,7 +212,7 @@ describe('the report’s capacity lines', () => {
   });
 
   it('say how far short the schedule’s income falls of a drawing it cannot pay for', () => {
-    // The serpentine's 613 against block 1 alone: ten waves earn 315, 361 with every call.
+    // The serpentine's 648 against block 1 alone: ten waves earn 315, 361 with every call.
     const board = bundle.boards[0]!;
     const blockOne = { ...bundle, boards: [{ ...board, waves: board.waves.slice(0, 10) }] };
     const set: ReferenceSet = {
