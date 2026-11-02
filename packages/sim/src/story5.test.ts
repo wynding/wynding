@@ -420,7 +420,7 @@ describe('rulesetHash — every schema field enters the digest (P3 step 8 mutati
     //   • 'burst-aoe' — an attack-with-burst bundle carrying burst/aoe (the 8th
     //     variant), also covering a second cadenceTicks-omitted attack shape.
     const fullSchema: Ruleset = {
-      formatVersion: 2,
+      formatVersion: 3,
       rulesetId: 'full-schema-fixture',
       version: 3,
       creepCatalog: [
@@ -493,23 +493,42 @@ describe('rulesetHash — every schema field enters the digest (P3 step 8 mutati
           id: 'full-board',
           widthTiles: 20,
           heightTiles: 20,
-          entrance: { col: 0, row: 10 },
-          exit: { col: 19, row: 10 },
+          // Format 3 (M3): two entrances, two exits, and one MULTI-exit destination —
+          // every list and set leaf the board can carry, whether or not a sim build's
+          // capability profile can simulate it (hashing is profile-independent).
+          entrances: [
+            { id: 'west', cell: { col: 0, row: 10 }, destination: ['east'] },
+            { id: 'north', cell: { col: 10, row: 0 }, destination: ['south', 'east'] },
+          ],
+          exits: [
+            { id: 'east', cell: { col: 19, row: 10 } },
+            { id: 'south', cell: { col: 10, row: 19 } },
+          ],
           waves: [
             {
               index: 0,
               countdownTicks: 100,
               clearBonus: 5, // nonzero — a parity-invisible field at M1
+              hpPercent: 100,
               entries: [
-                { creepId: 'normal', count: 10, spacingTicks: 20 },
-                { creepId: 'brute', count: 2, spacingTicks: 50, offsetTicks: 15 },
+                { creepId: 'normal', entrance: 'west', count: 10, spacingTicks: 20 },
+                {
+                  creepId: 'brute',
+                  entrance: 'north',
+                  count: 2,
+                  spacingTicks: 50,
+                  offsetTicks: 15,
+                },
               ],
             },
             {
               index: 1,
               countdownTicks: 200,
               clearBonus: 0,
-              entries: [{ creepId: 'normal', count: 5, spacingTicks: 10, offsetTicks: 3 }],
+              hpPercent: 175,
+              entries: [
+                { creepId: 'normal', entrance: 'west', count: 5, spacingTicks: 10, offsetTicks: 3 },
+              ],
             },
           ],
         },

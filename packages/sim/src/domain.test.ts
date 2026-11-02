@@ -82,7 +82,7 @@ const RULESET = testRuleset(SPEC, {
   extraCreeps: [FLYER_DEF],
   extraTowers: [GROUND_TOWER, AIR_TOWER, AOE_GROUND_TOWER, AOE_AIR_TOWER],
 });
-const FIELD = RULESET.board.field;
+const FIELD = RULESET.board.fields[0]!;
 const GRID = RULESET.board.grid;
 const SF_NUM = RULESET.balance.slowFloorNum;
 const SF_DEN = RULESET.balance.slowFloorDen;
@@ -129,6 +129,7 @@ function restingCreeps(
     slowMulFp: rows.map(() => 0),
     slowUntilTick: rows.map(() => 0),
     stunUntilTick: rows.map(() => 0),
+    destination: rows.map(() => 0),
   };
 }
 
@@ -159,6 +160,7 @@ function creepAtPoint(
     slowMulFp: [0],
     slowUntilTick: [0],
     stunUntilTick: [0],
+    destination: [0],
   };
 }
 
@@ -182,7 +184,7 @@ describe('domain filtering on the sticky-HOLD path, not just fresh acquisition (
       [],
       0,
       0,
-      FIELD,
+      [FIELD],
       GRID,
       RULESET.towerById,
       RULESET.creepById,
@@ -205,7 +207,7 @@ describe('domain filtering on the sticky-HOLD path, not just fresh acquisition (
       [],
       0,
       0,
-      FIELD,
+      [FIELD],
       GRID,
       RULESET.towerById,
       RULESET.creepById,
@@ -233,7 +235,7 @@ describe("predictBlastPoint's domain argument — a blast leads a flyer along th
   const walled = (() => {
     const mask = new Uint8Array(GRID.width * GRID.height);
     for (let row = 0; row <= 4; row++) mask[row * GRID.width + 6] = 1;
-    return computeDistanceField(GRID, mask);
+    return computeDistanceField(GRID, GRID.exits[0]!, mask);
   })();
 
   function blastAt(creepId: string): { x: number; y: number } {
@@ -246,7 +248,7 @@ describe("predictBlastPoint's domain argument — a blast leads a flyer along th
       [],
       0,
       0,
-      walled,
+      [walled],
       GRID,
       RULESET.towerById,
       RULESET.creepById,
@@ -338,6 +340,7 @@ describe('remainingRouteDist (air) — metric boundaries', () => {
       slowMulFp: [0, 0],
       slowUntilTick: [0, 0],
       stunUntilTick: [0, 0],
+      destination: [0, 0],
     };
     const towers = oneTower('air-tower');
     runCombat(
@@ -347,7 +350,7 @@ describe('remainingRouteDist (air) — metric boundaries', () => {
       [],
       0,
       0,
-      FIELD,
+      [FIELD],
       GRID,
       RULESET.towerById,
       RULESET.creepById,
@@ -386,6 +389,7 @@ describe('remainingRouteDist (air) — metric boundaries', () => {
       slowMulFp: [...a.slowMulFp, ...b.slowMulFp],
       slowUntilTick: [...a.slowUntilTick, ...b.slowUntilTick],
       stunUntilTick: [...a.stunUntilTick, ...b.stunUntilTick],
+      destination: [0, 0],
     };
     const towers = oneTower('air-tower');
     runCombat(
@@ -395,7 +399,7 @@ describe('remainingRouteDist (air) — metric boundaries', () => {
       [],
       0,
       0,
-      FIELD,
+      [FIELD],
       GRID,
       RULESET.towerById,
       RULESET.creepById,
@@ -424,6 +428,7 @@ describe('a ground blast leaves a flyer inside its radius untouched', () => {
       slowMulFp: [0, 0],
       slowUntilTick: [0, 0],
       stunUntilTick: [0, 0],
+      destination: [0, 0],
     };
     const impact: Impact = {
       kind: 'blast',
@@ -442,7 +447,7 @@ describe('a ground blast leaves a flyer inside its radius untouched', () => {
       [],
       0,
       0,
-      FIELD,
+      [FIELD],
       GRID,
       RULESET.towerById,
       RULESET.creepById,
@@ -484,7 +489,7 @@ describe('a targeted impact from a sold source still carries its mask', () => {
       [],
       0,
       0,
-      FIELD,
+      [FIELD],
       GRID,
       RULESET.towerById,
       RULESET.creepById,
@@ -520,7 +525,7 @@ describe('a ground-mask targeted impact against an air creep: no effect, no even
       [],
       0,
       0,
-      FIELD,
+      [FIELD],
       GRID,
       RULESET.towerById,
       RULESET.creepById,
@@ -549,7 +554,7 @@ describe('domain filtering at acquisition', () => {
       [],
       0,
       0,
-      FIELD,
+      [FIELD],
       GRID,
       RULESET.towerById,
       RULESET.creepById,
@@ -567,7 +572,7 @@ describe('domain filtering at acquisition', () => {
       [],
       0,
       0,
-      FIELD,
+      [FIELD],
       GRID,
       RULESET.towerById,
       RULESET.creepById,
@@ -590,7 +595,7 @@ describe('an unresolved creepId falls back to ground at the four call sites in t
       [],
       0,
       0,
-      FIELD,
+      [FIELD],
       GRID,
       RULESET.towerById,
       RULESET.creepById,
@@ -608,7 +613,7 @@ describe('an unresolved creepId falls back to ground at the four call sites in t
       [],
       0,
       0,
-      FIELD,
+      [FIELD],
       GRID,
       RULESET.towerById,
       RULESET.creepById,
@@ -686,7 +691,7 @@ describe('an unresolved creepId falls back to ground at the four call sites in t
       [],
       0,
       0,
-      FIELD,
+      [FIELD],
       GRID,
       RULESET.towerById,
       RULESET.creepById,
@@ -704,7 +709,7 @@ describe('an unresolved creepId falls back to ground at the four call sites in t
       [],
       0,
       0,
-      FIELD,
+      [FIELD],
       GRID,
       RULESET.towerById,
       RULESET.creepById,

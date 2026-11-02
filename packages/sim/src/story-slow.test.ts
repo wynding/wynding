@@ -194,7 +194,7 @@ describe('slow application — movement reads the per-creep slow columns', () =>
 
 describe('slow stacking — strongest-wins, refresh-only-at-equal-or-stronger (via runCombat)', () => {
   const RULESET = testRuleset(LANE, { extraTowers: [TEST_SLOW_TOWER] });
-  const FIELD = RULESET.board.field;
+  const FIELD = RULESET.board.fields[0]!;
   const GRID = RULESET.board.grid;
 
   function oneRestingCreep(hp: number) {
@@ -213,6 +213,7 @@ describe('slow stacking — strongest-wins, refresh-only-at-equal-or-stronger (v
       slowMulFp: [0],
       slowUntilTick: [0],
       stunUntilTick: [0],
+      destination: [0],
     };
   }
 
@@ -381,6 +382,7 @@ describe('slow stacking — strongest-wins, refresh-only-at-equal-or-stronger (v
       slowMulFp: [0, 0],
       slowUntilTick: [0, 0],
       stunUntilTick: [0, 0],
+      destination: [0, 0],
     };
     const impacts: Impact[] = [
       {
@@ -511,7 +513,7 @@ describe('slow stacking — strongest-wins, refresh-only-at-equal-or-stronger (v
 
 describe('slow expiry — the combat-phase sweep, inclusive final tick', () => {
   const RULESET = testRuleset(LANE);
-  const FIELD = RULESET.board.field;
+  const FIELD = RULESET.board.fields[0]!;
   const GRID = RULESET.board.grid;
 
   function slowedCreep(slowUntilTick: number) {
@@ -530,6 +532,7 @@ describe('slow expiry — the combat-phase sweep, inclusive final tick', () => {
       slowMulFp: [128],
       slowUntilTick: [slowUntilTick],
       stunUntilTick: [0],
+      destination: [0],
     };
   }
 

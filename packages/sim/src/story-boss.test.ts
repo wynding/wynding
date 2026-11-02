@@ -58,7 +58,7 @@ const LANE = {
  *  timeline. `startingLives` is the one thing tests vary, via `buildRuleset`. */
 function buildRuleset(startingLives: number): CompiledRuleset {
   const bundle: Ruleset = {
-    formatVersion: 2,
+    formatVersion: 3,
     rulesetId: 'test-boss',
     version: 1,
     creepCatalog: [
@@ -106,14 +106,15 @@ function buildRuleset(startingLives: number): CompiledRuleset {
         id: 'test',
         widthTiles: LANE.widthTiles,
         heightTiles: LANE.heightTiles,
-        entrance: LANE.entrance,
-        exit: LANE.exit,
+        entrances: [{ id: 'in', cell: LANE.entrance, destination: ['out'] }],
+        exits: [{ id: 'out', cell: LANE.exit }],
         waves: [
           {
             index: 0,
             countdownTicks: 500,
             clearBonus: 0,
-            entries: [{ creepId: 'grunt', count: 1, spacingTicks: 20 }],
+            hpPercent: 100,
+            entries: [{ creepId: 'grunt', entrance: 'in', count: 1, spacingTicks: 20 }],
           },
         ],
       },

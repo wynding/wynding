@@ -2400,10 +2400,13 @@ export function createOverlay(
     const key =
       preview.kind === 'lastWave'
         ? 'last'
-        : `${preview.waveNumber}/${preview.waveCount}:${preview.entries
+        : // The wave's hpPercent and each stream's route are in the key now (M3), though
+          // nothing here renders them yet: a wave that differs only there must still
+          // rebuild the day story 4 draws them, not keep the previous wave's rows.
+          `${preview.waveNumber}/${preview.waveCount}:${preview.hpPercent}%:${preview.entries
             .map(
               (e) =>
-                `${e.creepId}x${e.count}:${e.domain}:${e.armor}:${e.leakCost}:${e.immunities.join('+')}:${e.boss ? 'boss' : ''}`,
+                `${e.creepId}x${e.count}:${e.entrance}>${e.destination.join('+')}:${e.domain}:${e.armor}:${e.leakCost}:${e.immunities.join('+')}:${e.boss ? 'boss' : ''}`,
             )
             .join('|')}`;
     // Locale self-heal: the key is CONTENT-only, so a runtime

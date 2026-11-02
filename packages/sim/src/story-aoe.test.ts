@@ -26,6 +26,7 @@ import {
   TEST_AOE_TOWER,
   TEST_SWARM_CREEP,
   runCombatT,
+  withoutDestination,
 } from './test-support';
 import { advanceCreep, cellCenterX, cellCenterY, deriveValidCreepPosition } from './movement';
 import { effectiveSpeedFp } from './ruleset-shared';
@@ -67,6 +68,7 @@ function creepAtPoint(id: number, px: number, py: number, hp: number): CombatCre
     slowMulFp: [0],
     slowUntilTick: [0],
     stunUntilTick: [0],
+    destination: [0],
   };
 }
 
@@ -91,6 +93,7 @@ function restingCreeps(
     slowMulFp: rows.map(() => 0),
     slowUntilTick: rows.map(() => 0),
     stunUntilTick: rows.map(() => 0),
+    destination: rows.map(() => 0),
   };
 }
 
@@ -110,7 +113,7 @@ function aoeTower(): TowerArrays {
 }
 
 const RULESET = testRuleset(LANE, { extraTowers: [TEST_AOE_TOWER] });
-const FIELD = RULESET.board.field;
+const FIELD = RULESET.board.fields[0]!;
 const GRID = RULESET.board.grid;
 const SF_NUM = RULESET.balance.slowFloorNum;
 const SF_DEN = RULESET.balance.slowFloorDen;
@@ -919,6 +922,9 @@ describe('the done-criterion scenario (Codex R1-13): one blast tower SURVIVES a 
     expect(state.leakedCount).toBe(5);
     expect(state.lives).toBe(5);
     expect(state.cumulativeKillBounty).toBe(11);
+    // The pin from before M3 story 3's `destination` creep column, which the state minus
+    // that column must still hash to: the proof the column is all that moved the golden.
+    expect(hashSimState(withoutDestination(state))).toBe('34ee3f5f');
     // GOLDEN — a behavior change here requires re-pinning this alongside the three
     // measured values above. Re-pinned M2-S5a P2: `Impact.sourceId` enters the
     // world-hash; the three measured values above are UNCHANGED, so this is a
@@ -926,6 +932,10 @@ describe('the done-criterion scenario (Codex R1-13): one blast tower SURVIVES a 
     // Re-pinned M2-S6 P5: the new `stunUntilTick` creep column (P1) widens every
     // creep's serialized shape; this scenario carries no `stun` tower, so the
     // three measured values above are again UNCHANGED — another hash-only move.
-    expect(hashSimState(state)).toBe('34ee3f5f');
+    // Re-pinned M3 story 3 (SIM_VERSION 17 → 18): the new `destination` creep column
+    // (ADR 0015) widens every creep's shape; the three measured values above are
+    // UNCHANGED once more, and the previous pin, asserted above under
+    // `withoutDestination`, proves the column is all that moved — a hash-only move.
+    expect(hashSimState(state)).toBe('75879dbb');
   });
 });

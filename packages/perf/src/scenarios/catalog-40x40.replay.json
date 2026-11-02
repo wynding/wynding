@@ -1,8 +1,8 @@
 {
   "seed": 5678,
   "boardId": "catalog-40x40",
-  "rulesetHash": "43ae0bc94e4d9dcf672366e57260e2bd193a984673284616934aa8c7a43db74c",
-  "simVersion": 17,
+  "rulesetHash": "8e1c2d157abed3f3d514baa078c274ff71f4fb53ac37bcff94159587125eb048",
+  "simVersion": 18,
   "tickInputs": [
     [
       {

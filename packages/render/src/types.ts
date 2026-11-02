@@ -6,10 +6,16 @@
 import type { SimPhase } from '@wynding/sim';
 
 /** One creep row in the wave preview (M2-S2) — the preview-facing axes
- *  `CompiledCreep` carries, joined onto `waves[waveCursor].entriesSummary`. */
+ *  `CompiledCreep` carries, joined onto `waves[waveCursor].entriesSummary`. Since M3 a
+ *  row is one (creep, route) STREAM: the same creep from two entrances is two rows. */
 export interface PreviewEntryVM {
   readonly creepId: string;
   readonly count: number;
+  /** The entrance this stream spawns at, by board id (M3) — with `destination`, the
+   *  stream's route. Data only in M3 story 3; the route text is story 4's. */
+  readonly entrance: string;
+  /** That entrance's destination — its exit ids, in the board's exit order (ADR 0015). */
+  readonly destination: readonly string[];
   readonly domain: 'ground' | 'air';
   readonly armor: number;
   /** The creep's per-leak lives cost. `?? 1` at the join site is the safe fallback for a
@@ -49,6 +55,9 @@ export type HudPreview =
       readonly kind: 'upcoming';
       readonly waveNumber: number;
       readonly waveCount: number;
+      /** The wave's creep hit points as a percent of the catalog's (M3 creep HP growth;
+       *  100 = unchanged). Data only in M3 story 3; the "+n% hit points" text is story 4's. */
+      readonly hpPercent: number;
       readonly entries: readonly PreviewEntryVM[];
     }
   | { readonly kind: 'lastWave' };

@@ -42,6 +42,7 @@ import {
   type CompiledRuleset,
 } from '@wynding/sim';
 import { getBundledRuleset, defaultBoardId } from './registry';
+import { withoutDestination } from './test-digest';
 import {
   waveIndexForCreep,
   wallInputsFromTick,
@@ -240,7 +241,12 @@ describe('wave 5 (the appended `flying` wave) — S7 done-criteria, each measure
       // wave index 7's two observed leaks before the freeze also contribute 0 kills.
       expect(state.cumulativeKillBounty).toBe(102);
       expect(state.bounty).toBe(165);
-      expect(hashSimState(state)).toBe('bd6516b9');
+      // Re-pinned M3 story 3 (SIM_VERSION 17 → 18): the new `destination` creep column (ADR
+      // 0015) widens every creep's shape — a hash-only move, asserted below: the previous
+      // pin still holds under `withoutDestination`.
+      expect(hashSimState(state)).toBe('05c4a809');
+      // The pre-`destination`-column pin, under the projection that removes it.
+      expect(hashSimState(withoutDestination(state))).toBe('bd6516b9');
       // Re-pinned #25 (SIM_VERSION 15 → 16, measured): score 102 → 0. The sv16 lost
       // branch forfeits the kill bounty too, so the 102 pinned above grades nothing.
       expect(deriveScore(state, ruleset)).toBe(0);
@@ -401,7 +407,12 @@ describe('wave 5 (the appended `flying` wave) — S7 done-criteria, each measure
       // the mechanism-proof test above, de-indexed — not duplicated here.
       expect(state.cumulativeKillBounty).toBe(177);
       expect(state.bounty).toBe(218);
-      expect(hashSimState(state)).toBe('4c8de2bc');
+      // Re-pinned M3 story 3 (SIM_VERSION 17 → 18): the new `destination` creep column (ADR
+      // 0015) widens every creep's shape — a hash-only move, asserted below: the previous
+      // pin still holds under `withoutDestination`.
+      expect(hashSimState(state)).toBe('8a6776dc');
+      // The pre-`destination`-column pin, under the projection that removes it.
+      expect(hashSimState(withoutDestination(state))).toBe('4c8de2bc');
       expect(deriveScore(state, ruleset)).toBe(377);
       expect(deriveStars(state, ruleset)).toBe(1);
     },
@@ -532,7 +543,12 @@ describe('wave 5 (the appended `flying` wave) — S7 done-criteria, each measure
       // index 7's three observed leaks before the freeze contribute 0 kills.
       expect(state.cumulativeKillBounty).toBe(106);
       expect(state.bounty).toBe(153);
-      expect(hashSimState(state)).toBe('3471ba09');
+      // Re-pinned M3 story 3 (SIM_VERSION 17 → 18): the new `destination` creep column (ADR
+      // 0015) widens every creep's shape — a hash-only move, asserted below: the previous
+      // pin still holds under `withoutDestination`.
+      expect(hashSimState(state)).toBe('6c3c0ca1');
+      // The pre-`destination`-column pin, under the projection that removes it.
+      expect(hashSimState(withoutDestination(state))).toBe('3471ba09');
       // Re-pinned #25 (SIM_VERSION 15 → 16, measured): score 106 → 0, the sv16 lost
       // branch. The 106 pinned above is what it forfeits.
       expect(deriveScore(state, ruleset)).toBe(0);

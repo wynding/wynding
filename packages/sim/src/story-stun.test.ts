@@ -162,7 +162,7 @@ const RULESET = testRuleset(LANE, {
   extraTowers: [T_STUN_ALWAYS, T_STUN_BLANK, T_STUN_CHANCE, T_BLAST_LEAD, T_STUN_AOE],
   extraCreeps: [C_PLAIN, C_STUN_IMMUNE, C_SLOW_IMMUNE, C_BLANKED, C_SWIFT],
 });
-const FIELD = RULESET.board.field;
+const FIELD = RULESET.board.fields[0]!;
 const GRID = RULESET.board.grid;
 const SF_NUM = RULESET.balance.slowFloorNum;
 const SF_DEN = RULESET.balance.slowFloorDen;
@@ -195,6 +195,7 @@ function restingCreeps(
     slowMulFp: rows.map(() => 0),
     slowUntilTick: rows.map(() => 0),
     stunUntilTick: rows.map((r) => r.stunUntilTick ?? 0),
+    destination: rows.map(() => 0),
   };
 }
 
@@ -432,7 +433,7 @@ describe('2. rngState draw-consumption rules (PASS 2 gating)', () => {
       [],
       0,
       0,
-      FIELD,
+      [FIELD],
       GRID,
       {},
       RULESET.creepById,
@@ -455,7 +456,7 @@ describe('2. rngState draw-consumption rules (PASS 2 gating)', () => {
       [],
       0,
       0,
-      FIELD,
+      [FIELD],
       GRID,
       {},
       RULESET.creepById,
@@ -477,7 +478,7 @@ describe('2. rngState draw-consumption rules (PASS 2 gating)', () => {
       [],
       0,
       0,
-      FIELD,
+      [FIELD],
       GRID,
       {},
       RULESET.creepById,
@@ -501,7 +502,7 @@ describe('2. rngState draw-consumption rules (PASS 2 gating)', () => {
       [],
       0,
       0,
-      FIELD,
+      [FIELD],
       GRID,
       {},
       RULESET.creepById,
@@ -710,7 +711,7 @@ describe('8. resolute-shape slow immunity: applySlow never writes, speed unchang
       [],
       0,
       0,
-      FIELD,
+      [FIELD],
       GRID,
       {},
       RULESET.creepById,

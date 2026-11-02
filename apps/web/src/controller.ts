@@ -864,8 +864,8 @@ export function createController(
     frozen = isTerminalPhase(state.phase);
     stopped = false; // a fresh run identity is a healthy one (#191)
     cur = {
-      col: Math.min(grid.entrance.col, cols - 1),
-      row: Math.min(grid.entrance.row, rows - 1),
+      col: Math.min(grid.entrances[0]!.col, cols - 1),
+      row: Math.min(grid.entrances[0]!.row, rows - 1),
     };
     ghost = null;
     selection = null;

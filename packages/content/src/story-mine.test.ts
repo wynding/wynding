@@ -302,16 +302,18 @@ describe('M2-S9 — the `mine` burst tower, measured against the shipped bundle'
       // tick) and reads the tower snapshot as it stood at the END of `t - 1` — still walled.
       const preField = computeDistanceField(
         grid,
+        grid.exits[0]!,
         blockedMaskFor(grid, scene.towersByTick.get(t - 1)!),
       );
       // `t + 1`'s movement step reads the tower snapshot as it stood at the END of `t` —
       // the mine's row is already gone, so the wall cells are open.
       const postField = computeDistanceField(
         grid,
+        grid.exits[0]!,
         blockedMaskFor(grid, scene.towersByTick.get(t)!),
       );
-      const prePath = shortestPath(grid, preField)!;
-      const postPath = shortestPath(grid, postField)!;
+      const prePath = shortestPath(grid, preField, grid.entrances[0]!)!;
+      const postPath = shortestPath(grid, postField, grid.entrances[0]!)!;
       console.log(
         `[story-mine] pre-consumption path near the wall: ` +
           `${JSON.stringify(prePath.filter((c) => c.col >= 3 && c.col <= 8))}`,

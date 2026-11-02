@@ -8,7 +8,7 @@ import { computeDistanceField, type DistanceField } from './pathfinding';
 import { GridError, type Grid } from './board';
 import { loadBoard, assertConsistent, type BoardContext } from './context';
 import { createInitialState, step, hashSimState, type SimInput, type SimState } from './index';
-import { testRuleset, pushCreep } from './test-support';
+import { testRuleset, pushCreep, pairBoardSpec } from './test-support';
 import {
   advanceCreep,
   airLineFollowNeighbor,
@@ -25,47 +25,55 @@ const cx = (col: number): number => col * 256 + 128;
 const cy = (row: number): number => row * 256 + 128;
 
 // A straight 5×5 board: entrance (0,2) → exit (4,2), four orthogonal edges.
-const STRAIGHT = loadBoard({
-  widthTiles: 5,
-  heightTiles: 5,
-  entrance: { col: 0, row: 2 },
-  exit: { col: 4, row: 2 },
-});
-const STRAIGHT_FIELD = STRAIGHT.field;
+const STRAIGHT = loadBoard(
+  pairBoardSpec({
+    widthTiles: 5,
+    heightTiles: 5,
+    entrance: { col: 0, row: 2 },
+    exit: { col: 4, row: 2 },
+  }),
+);
+const STRAIGHT_FIELD = STRAIGHT.fields[0]!;
 
 // A 2×3 board with entrance (0,1) and exit (1,1) exactly one cell apart.
-const ADJACENT = loadBoard({
-  widthTiles: 2,
-  heightTiles: 3,
-  entrance: { col: 0, row: 1 },
-  exit: { col: 1, row: 1 },
-}).field;
+const ADJACENT = loadBoard(
+  pairBoardSpec({
+    widthTiles: 2,
+    heightTiles: 3,
+    entrance: { col: 0, row: 1 },
+    exit: { col: 1, row: 1 },
+  }),
+).fields[0]!;
 
 // A 5×5 board whose entrance (0,3) and exit (4,1) sit on different rows, so the
 // true-shortest descent must take no-corner-cut DIAGONAL steps through the field.
-const DIAGONAL = loadBoard({
-  widthTiles: 5,
-  heightTiles: 5,
-  entrance: { col: 0, row: 3 },
-  exit: { col: 4, row: 1 },
-}).field;
+const DIAGONAL = loadBoard(
+  pairBoardSpec({
+    widthTiles: 5,
+    heightTiles: 5,
+    entrance: { col: 0, row: 3 },
+    exit: { col: 4, row: 1 },
+  }),
+).fields[0]!;
 
 // A 7×5 open board and a variant with a small wall at (3,1)/(3,2), so the descent
 // from (2,2) differs between them — the re-path fixture.
-const WIDE = loadBoard({
-  widthTiles: 7,
-  heightTiles: 5,
-  entrance: { col: 0, row: 2 },
-  exit: { col: 6, row: 2 },
-});
-const WIDE_FIELD = WIDE.field;
+const WIDE = loadBoard(
+  pairBoardSpec({
+    widthTiles: 7,
+    heightTiles: 5,
+    entrance: { col: 0, row: 2 },
+    exit: { col: 6, row: 2 },
+  }),
+);
+const WIDE_FIELD = WIDE.fields[0]!;
 const wideWallMask = (): Uint8Array => {
   const mask = new Uint8Array(WIDE.grid.width * WIDE.grid.height);
   mask[1 * 7 + 3] = 1; // (3,1)
   mask[2 * 7 + 3] = 1; // (3,2)
   return mask;
 };
-const WIDE_WALLED = computeDistanceField(WIDE.grid, wideWallMask());
+const WIDE_WALLED = computeDistanceField(WIDE.grid, WIDE.grid.exits[0]!, wideWallMask());
 
 /** Advance one resting creep tick-by-tick from a cell until it leaks; return the tick count. */
 function ticksToLeak(field: DistanceField, col: number, row: number, budget: number): number {
@@ -572,13 +580,14 @@ describe('mid-transitional serialize/restore is byte-identical (determinism)', (
 
 describe('assertConsistent — board-context validator (loud GridError)', () => {
   const base = STRAIGHT;
+  const baseField = STRAIGHT_FIELD;
   const withGrid = (patch: Partial<Grid>): BoardContext => ({
+    ...base,
     grid: { ...base.grid, ...patch } as Grid,
-    field: base.field,
   });
   const withField = (patch: Partial<DistanceField>): BoardContext => ({
-    grid: base.grid,
-    field: { ...base.field, ...patch } as DistanceField,
+    ...base,
+    fields: [{ ...baseField, ...patch } as DistanceField],
   });
 
   it('accepts a loadBoard-built context and memoizes it (idempotent)', () => {
@@ -589,11 +598,15 @@ describe('assertConsistent — board-context validator (loud GridError)', () => 
   it('rejects a null-membered forged context with GridError (not a raw TypeError)', () => {
     const forged = [
       null,
-      { grid: null, field: base.field },
-      { grid: base.grid, field: null },
-      { grid: base.grid, field: { ...base.field, dist: undefined } },
-      { grid: base.grid, field: { ...base.field, blockedMask: undefined } },
-      { grid: base.grid, field: { ...base.field, exit: null } },
+      { ...base, grid: null },
+      { ...base, fields: null },
+      { ...base, fields: [] },
+      { ...base, fields: [null] },
+      { ...base, fields: [{ ...baseField, dist: undefined }] },
+      { ...base, fields: [{ ...baseField, blockedMask: undefined }] },
+      { ...base, fields: [{ ...baseField, exit: null }] },
+      { ...base, grid: { ...base.grid, entrances: [] } },
+      { ...base, grid: { ...base.grid, exits: null } },
     ] as unknown as BoardContext[];
     for (const ctx of forged) {
       expect(() => assertConsistent(ctx)).toThrow(GridError);
@@ -616,29 +629,127 @@ describe('assertConsistent — board-context validator (loud GridError)', () => 
   });
 
   it('rejects an out-of-bounds entrance or exit', () => {
-    expect(() => assertConsistent(withGrid({ entrance: { col: -1, row: 0 } }))).toThrow(/entrance/);
-    expect(() => assertConsistent(withGrid({ exit: { col: 99, row: 0 } }))).toThrow(/exit/);
+    expect(() => assertConsistent(withGrid({ entrances: [{ col: -1, row: 0 }] }))).toThrow(
+      /entrance/,
+    );
+    expect(() =>
+      assertConsistent(
+        withGrid({
+          exits: [
+            { col: 4, row: 2 },
+            { col: 99, row: 0 },
+          ],
+        }),
+      ),
+    ).toThrow(/exit/);
   });
 
-  it('rejects a field whose exit disagrees with the grid exit', () => {
-    expect(() => assertConsistent(withField({ exit: { col: 3, row: 2 } }))).toThrow(/field exit/);
+  it("rejects a field whose exit is not one of the grid's exits", () => {
+    expect(() => assertConsistent(withField({ exit: { col: 3, row: 2 } }))).toThrow(
+      /not one of the grid's exits/,
+    );
+    expect(() => assertConsistent(withField({ exit: { col: 99, row: 2 } }))).toThrow(/in-bounds/);
   });
 
   it('rejects a field where the exit is not the unblocked distance-0 source', () => {
-    const badDist = Int32Array.from(base.field.dist);
+    const badDist = Int32Array.from(baseField.dist);
     badDist[2 * 5 + 4] = 5;
     expect(() => assertConsistent(withField({ dist: badDist }))).toThrow(/unblocked distance-0/);
 
-    const badMask = Uint8Array.from(base.field.blockedMask);
+    const badMask = Uint8Array.from(baseField.blockedMask);
     badMask[2 * 5 + 4] = 1;
     expect(() => assertConsistent(withField({ blockedMask: badMask }))).toThrow(
       /unblocked distance-0/,
     );
   });
 
-  it('rejects a context whose entrance cannot reach the exit', () => {
-    const badDist = Int32Array.from(base.field.dist);
+  it('rejects a context whose entrance cannot reach its own destination', () => {
+    const badDist = Int32Array.from(baseField.dist);
     badDist[2 * 5 + 0] = -1;
     expect(() => assertConsistent(withField({ dist: badDist }))).toThrow(/cannot reach/);
+  });
+
+  it('rejects an entranceDestination that is not one index per entrance, each naming a field', () => {
+    const withDest = (entranceDestination: unknown): BoardContext =>
+      ({ ...base, entranceDestination }) as unknown as BoardContext;
+    expect(() => assertConsistent(withDest([]))).toThrow(/one destination per entrance/);
+    expect(() => assertConsistent(withDest(null))).toThrow(/one destination per entrance/);
+    expect(() => assertConsistent(withDest([1]))).toThrow(/names no destination field/);
+    expect(() => assertConsistent(withDest([-1]))).toThrow(/names no destination field/);
+    expect(() => assertConsistent(withDest([0.5]))).toThrow(/names no destination field/);
+  });
+});
+
+describe('loadBoard — one field per DISTINCT destination (ADR 0015)', () => {
+  // A 7×7 board: entrances west (0,3), north (3,0) and south-west (0,5); exits east (6,3)
+  // and south (3,6). West and south-west both drain east, so they share one field.
+  const spec = {
+    widthTiles: 7,
+    heightTiles: 7,
+    entrances: [
+      { col: 0, row: 3 },
+      { col: 3, row: 0 },
+      { col: 0, row: 5 },
+    ],
+    exits: [
+      { col: 6, row: 3 },
+      { col: 3, row: 6 },
+    ],
+    destinations: [[0], [1], [0]],
+  };
+
+  it('builds fields in first-use order and maps every entrance to its own', () => {
+    const board = loadBoard(spec);
+    expect(board.fields.map((f) => f.exit)).toEqual([
+      { col: 6, row: 3 },
+      { col: 3, row: 6 },
+    ]);
+    expect(board.entranceDestination).toEqual([0, 1, 0]);
+    expect(Object.isFrozen(board.fields)).toBe(true);
+    expect(Object.isFrozen(board.entranceDestination)).toBe(true);
+    // Each field is seeded from its own exit only — the other exit is a real distance.
+    expect(board.fields[0]!.dist[3 * 7 + 6]).toBe(0);
+    expect(board.fields[0]!.dist[6 * 7 + 3]).toBeGreaterThan(0);
+    expect(board.fields[1]!.dist[6 * 7 + 3]).toBe(0);
+  });
+
+  it('orders fields by FIRST USE, not by exit index', () => {
+    const board = loadBoard({ ...spec, destinations: [[1], [0], [1]] });
+    expect(board.fields.map((f) => f.exit)).toEqual([
+      { col: 3, row: 6 },
+      { col: 6, row: 3 },
+    ]);
+    expect(board.entranceDestination).toEqual([0, 1, 0]);
+  });
+
+  it('rejects a multi-exit destination — ADR 0015 leaves its tie rule and flyer pick open', () => {
+    expect(() => loadBoard({ ...spec, destinations: [[0, 1], [1], [0]] })).toThrow(
+      /only one-exit destinations are supported/,
+    );
+  });
+
+  it('rejects a malformed destination list with a typed GridError', () => {
+    const bad = (destinations: unknown): (() => unknown) => {
+      return () => loadBoard({ ...spec, destinations } as typeof spec);
+    };
+    expect(bad(undefined)).toThrow(/one destination per entrance/);
+    expect(bad([[0], [1]])).toThrow(/one destination per entrance/);
+    expect(bad([[0], [], [0]])).toThrow(/non-empty set of exits/);
+    expect(bad([[0], 1, [0]])).toThrow(/non-empty set of exits/);
+    expect(bad([[0], [2], [0]])).toThrow(/names no exit/);
+    expect(bad([[0], [-1], [0]])).toThrow(/names no exit/);
+  });
+
+  it('rejects a context where an entrance reaches another destination but not its OWN', () => {
+    // The north entrance still reaches the east exit (field 0 is untouched); only its own
+    // field (south) is forged to strand it — the check must read the entrance's own field.
+    const board = loadBoard(spec);
+    const sealed = Int32Array.from(board.fields[1]!.dist);
+    sealed[0 * 7 + 3] = -1; // the north entrance, unreachable in ITS field (south)
+    const forged: BoardContext = {
+      ...board,
+      fields: [board.fields[0]!, { ...board.fields[1]!, dist: sealed }],
+    };
+    expect(() => assertConsistent(forged)).toThrow(/cannot reach its destination exit \(3,6\)/);
   });
 });

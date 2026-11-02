@@ -18,7 +18,7 @@ export interface Cell {
   readonly row: number;
 }
 
-// ── The ruleset bundle (ADR 0007) — v2 schema ─────────────────────────────────
+// ── The ruleset bundle (ADR 0007) — format 3 schema ───────────────────────────
 //
 // The single validated data bundle a match runs against — tower catalog, creep
 // catalog, board geometry, wave schedules, and global balance constants — plus its
@@ -144,11 +144,15 @@ export interface TowerDef {
 }
 
 /** One line item within a wave: N creeps of a catalog `creepId`, spaced by
- *  `spacingTicks`. Carries NO inline stats — the creep catalog is the single stat
- *  authority. `offsetTicks` (stream offset) defaults to 0, canonicalized at parse. */
+ *  `spacingTicks`, entering at the board entrance `entrance`. Carries NO inline stats —
+ *  the creep catalog is the single stat authority. `offsetTicks` (stream offset)
+ *  defaults to 0, canonicalized at parse. */
 export interface WaveEntry {
   /** Must reference `creepCatalog`. */
   readonly creepId: string;
+  /** The id of the board entrance this stream spawns at (format 3) — required on every
+   *  entry, including on a one-entrance board. Must reference `RulesetBoard.entrances`. */
+  readonly entrance: string;
   readonly count: number; // int 1..1e6 (MAX_SCHEDULED_SPAWNS caps the aggregate)
   readonly spacingTicks: number; // int 1..1e6
   /** Omitted → 0 (stream offset), applied at parse. */
@@ -165,22 +169,50 @@ export interface WaveSchedule {
   readonly countdownTicks: number; // int 1..1e6
   /** Paid once on a leak-free wave clear (0 at M1; mechanic present, valued off). */
   readonly clearBonus: number; // int 0..1e6
+  /** Creep hit points for this wave, as a whole-number percent of each creep's catalog
+   *  `hp` (100 = the catalog's own value). Applied at spawn as
+   *  `max(1, ⌊hp × hpPercent / 100⌋)`; every other creep stat is untouched (M3). */
+  readonly hpPercent: number; // int 1..1e6
   /** Concurrent spawn streams (m2.md §Waves). 1..16. */
   readonly entries: readonly WaveEntry[];
 }
 
+/** One creep entrance on a board's border (format 3, ADR 0015). Its `destination` is the
+ *  set of exits every creep that spawns here walks toward — taken at spawn, kept for
+ *  life. */
+export interface BoardEntrance {
+  /** `^[a-z][a-z0-9-]{0,31}$`, unique across the board's entrances AND exits. */
+  readonly id: string;
+  readonly cell: Cell; // in-bounds (the sim requires a border cell)
+  /** A non-empty SET of exit ids (each must reference `RulesetBoard.exits`, no
+   *  repeats), canonicalized at parse into the board's `exits` order — one hash form
+   *  regardless of authored order. */
+  readonly destination: readonly string[];
+}
+
+/** One exit on a board's border (format 3). A creep leaks only at an exit in its own
+ *  destination; to every other creep an exit is an ordinary walkable cell. */
+export interface BoardExit {
+  /** `^[a-z][a-z0-9-]{0,31}$`, unique across the board's entrances AND exits. */
+  readonly id: string;
+  readonly cell: Cell; // in-bounds (the sim requires a border cell)
+}
+
 /** A playable board: geometry + its wave schedule. Cell classes are DERIVED by the
- *  sim from the two openings; content carries only geometry, not a per-cell map.
- *  `name` is DELETED (decision 5 — v2 carries zero presentation fields; a
- *  catalog/board id IS the ADR 0004 "descriptor", display keys derive from it at
- *  the UI layer when a story actually renders them). */
+ *  sim from the openings (every entrance and exit); content carries only geometry,
+ *  not a per-cell map. `name` is DELETED (decision 5 — the schema carries zero
+ *  presentation fields; a catalog/board id IS the ADR 0004 "descriptor", display keys
+ *  derive from it at the UI layer when a story actually renders them). Format 3
+ *  replaces v2's single `entrance`/`exit` cells with the two lists below (ADR 0015). */
 export interface RulesetBoard {
   /** `^[a-z][a-z0-9-]{0,31}$`, unique within `boards`. */
   readonly id: string;
   readonly widthTiles: number; // int 1..1e6
   readonly heightTiles: number; // int 1..1e6
-  readonly entrance: Cell; // in-bounds
-  readonly exit: Cell; // in-bounds
+  /** 1..16, each with its destination. */
+  readonly entrances: readonly BoardEntrance[];
+  /** 1..16. */
+  readonly exits: readonly BoardExit[];
   /** 1..64; `index` = position, contiguous from 0. */
   readonly waves: readonly WaveSchedule[];
 }
@@ -225,10 +257,12 @@ export interface ScoringConfig {
 }
 
 /** The full ruleset bundle (ADR 0007 §1/§4) — a match is pure over
- *  `(seed, ruleset, boardId, inputs)`. `formatVersion` is fixed at 2 for all of M2;
- *  stories S2–S10 grow only the capability profile and the content. */
+ *  `(seed, ruleset, boardId, inputs)`. `formatVersion` was 2 for all of M2; M3 bumps it
+ *  to 3 (entrance/exit lists, a destination per entrance, a required `entrance` on
+ *  every wave entry, a per-wave `hpPercent` — the validator rejects unknown keys, so a
+ *  shape change is a format bump, never optional keys). */
 export interface Ruleset {
-  readonly formatVersion: 2;
+  readonly formatVersion: 3;
   /** `^[a-z][a-z0-9-]{0,31}$`. */
   readonly rulesetId: string;
   readonly version: number; // int ≥ 0

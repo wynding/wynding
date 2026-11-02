@@ -1,22 +1,29 @@
-// ruleset-schema.ts — the v2 structural validator + JSON parser (ADR 0007, M2-S1).
+// ruleset-schema.ts — the structural validator + JSON parser (ADR 0007, M2-S1), at
+// `formatVersion` 3 since M3 (ADR 0015: entrance/exit lists, a destination per
+// entrance, an `entrance` on every wave entry, a per-wave `hpPercent`).
 //
 // Owns ALL shape/structural validation: types, bounds, id patterns, catalog/board id
 // uniqueness, cross-field rules (support-exclusivity, burst-cadence-exclusivity, wave
-// index contiguity, `creepId` reference resolution), and STRICT unknown-key rejection
-// at every nesting level (a modder's typo must fail loudly, not silently no-op).
+// index contiguity, `creepId`/`entrance`/destination-exit reference resolution, one
+// shared id namespace for a board's entrances and exits), and STRICT unknown-key
+// rejection at every nesting level (a modder's typo must fail loudly, not silently
+// no-op).
 // `compileRuleset` (ruleset.ts) calls `validateRulesetShape` FIRST, then performs
 // semantic compilation (board playability, schedule, the capability profile, the
 // digest) — this module never touches any of that.
 //
 // Returns a deep-frozen NORMALIZED copy, never the caller's object: canonical
 // defaults are applied here (`offsetTicks` omitted → 0; `immunities` deduped and
-// sorted into enum order, `slow` before `stun`), so every downstream consumer
+// sorted into enum order, `slow` before `stun`; each destination sorted into its
+// board's `exits` order), so every downstream consumer
 // (`compileRuleset`, `rulesetDigest`, a hand-built test fixture that bypasses
 // `parseRulesetJson`) sees one canonical shape regardless of how the raw bundle
 // was authored.
 
 import type {
   BalanceConstants,
+  BoardEntrance,
+  BoardExit,
   Cell,
   CreepDef,
   EffectDef,
@@ -27,7 +34,7 @@ import type {
   WaveEntry,
   WaveSchedule,
 } from '@wynding/types';
-import { RulesetError, canonicalImmunities } from './ruleset-shared';
+import { RulesetError, canonicalDestination, canonicalImmunities } from './ruleset-shared';
 
 /** Parse-input text cap — 1,048,576 UTF-16 code units (`text.length`), counted
  *  identically in every JS runtime and checkable BEFORE `JSON.parse` at zero
@@ -36,7 +43,8 @@ import { RulesetError, canonicalImmunities } from './ruleset-shared';
 export const MAX_RULESET_TEXT_UNITS = 1_048_576;
 
 const GENERIC_MAX = 1_000_000;
-/** Shared by `rulesetId`, every catalog entry `id`, and `RulesetBoard.id`. */
+/** Shared by `rulesetId`, every catalog entry `id`, `RulesetBoard.id`, and every board
+ *  entrance/exit `id`. */
 const CATALOG_ID_RE = /^[a-z][a-z0-9-]{0,31}$/;
 function isPosInt(v: unknown, max = GENERIC_MAX): v is number {
   return typeof v === 'number' && Number.isSafeInteger(v) && v > 0 && v <= max;
@@ -374,13 +382,19 @@ function validateWaveEntry(
   raw: unknown,
   index: number,
   creepIds: ReadonlySet<string>,
+  entranceIds: ReadonlySet<string>,
   parent: string,
 ): WaveEntry {
   const where = `${parent}.entries[${index}]`;
   const rec = requireRecord(raw, where);
-  assertNoUnknownKeys(rec, ['creepId', 'count', 'spacingTicks', 'offsetTicks'], where);
+  assertNoUnknownKeys(rec, ['creepId', 'entrance', 'count', 'spacingTicks', 'offsetTicks'], where);
   if (typeof rec.creepId !== 'string' || !creepIds.has(rec.creepId)) {
     throw new RulesetError(`${where} references unknown creepId '${String(rec.creepId)}'`);
+  }
+  // Required on every entry, even on a one-entrance board (format 3): a missing key and a
+  // misspelt one both fail here rather than defaulting to "the" entrance.
+  if (typeof rec.entrance !== 'string' || !entranceIds.has(rec.entrance)) {
+    throw new RulesetError(`${where} references unknown entrance '${String(rec.entrance)}'`);
   }
   if (!isPosInt(rec.count)) throw new RulesetError(`${where}.count must be a positive int`);
   if (!isPosInt(rec.spacingTicks))
@@ -390,54 +404,163 @@ function validateWaveEntry(
     if (!isNonNegInt(rec.offsetTicks)) throw new RulesetError(`${where}.offsetTicks must be ≥ 0`);
     offsetTicks = rec.offsetTicks;
   }
-  return { creepId: rec.creepId, count: rec.count, spacingTicks: rec.spacingTicks, offsetTicks };
+  return {
+    creepId: rec.creepId,
+    entrance: rec.entrance,
+    count: rec.count,
+    spacingTicks: rec.spacingTicks,
+    offsetTicks,
+  };
 }
 
 function validateWaveSchedule(
   raw: unknown,
   index: number,
   creepIds: ReadonlySet<string>,
+  entranceIds: ReadonlySet<string>,
   parent: string,
 ): WaveSchedule {
   const where = `${parent}.waves[${index}]`;
   const rec = requireRecord(raw, where);
-  assertNoUnknownKeys(rec, ['index', 'countdownTicks', 'clearBonus', 'entries'], where);
+  assertNoUnknownKeys(
+    rec,
+    ['index', 'countdownTicks', 'clearBonus', 'hpPercent', 'entries'],
+    where,
+  );
   if (!isNonNegInt(rec.index) || rec.index !== index) {
     throw new RulesetError(`${where}.index must equal its array position (${index})`);
   }
   if (!isPosInt(rec.countdownTicks))
     throw new RulesetError(`${where}.countdownTicks must be a positive int`);
   if (!isNonNegInt(rec.clearBonus)) throw new RulesetError(`${where}.clearBonus must be ≥ 0`);
+  // A whole number, at least 1: the spawn formula's `max(1, …)` floor is for rounding a
+  // small catalog hp down, not a licence to author a 0% wave.
+  if (!isPosInt(rec.hpPercent)) {
+    throw new RulesetError(`${where}.hpPercent must be a positive int`);
+  }
   const entriesArr = requireArray(rec.entries, `${where}.entries`);
   if (entriesArr.length < 1 || entriesArr.length > 16) {
     throw new RulesetError(`${where}.entries must have 1..16 entries`);
   }
-  const entries = entriesArr.map((e, i) => validateWaveEntry(e, i, creepIds, where));
-  return { index, countdownTicks: rec.countdownTicks, clearBonus: rec.clearBonus, entries };
+  const entries = entriesArr.map((e, i) => validateWaveEntry(e, i, creepIds, entranceIds, where));
+  return {
+    index,
+    countdownTicks: rec.countdownTicks,
+    clearBonus: rec.clearBonus,
+    hpPercent: rec.hpPercent,
+    entries,
+  };
+}
+
+/** Validate one board opening's shared `{id, cell}` part and claim its id in the board's
+ *  single opening namespace (entrance and exit ids may not collide — a wave entry or a
+ *  destination naming `east` must mean exactly one cell). */
+function validateOpening(
+  rec: Record<string, unknown>,
+  width: number,
+  height: number,
+  where: string,
+  openingIds: Set<string>,
+): { id: string; cell: Cell } {
+  if (!isCatalogId(rec.id)) throw new RulesetError(`${where}.id must match ^[a-z][a-z0-9-]{0,31}$`);
+  if (openingIds.has(rec.id)) {
+    throw new RulesetError(`${where}.id '${rec.id}' duplicates another entrance or exit id`);
+  }
+  openingIds.add(rec.id);
+  return { id: rec.id, cell: validateCell(rec.cell, width, height, `${where}.cell`) };
+}
+
+function validateExit(
+  raw: unknown,
+  index: number,
+  width: number,
+  height: number,
+  parent: string,
+  openingIds: Set<string>,
+): BoardExit {
+  const where = `${parent}.exits[${index}]`;
+  const rec = requireRecord(raw, where);
+  assertNoUnknownKeys(rec, ['id', 'cell'], where);
+  return validateOpening(rec, width, height, where, openingIds);
+}
+
+function validateEntrance(
+  raw: unknown,
+  index: number,
+  width: number,
+  height: number,
+  parent: string,
+  openingIds: Set<string>,
+  exitIds: readonly string[],
+): BoardEntrance {
+  const where = `${parent}.entrances[${index}]`;
+  const rec = requireRecord(raw, where);
+  assertNoUnknownKeys(rec, ['id', 'cell', 'destination'], where);
+  const { id, cell } = validateOpening(rec, width, height, where, openingIds);
+  // A destination is a non-empty SET of exit ids (ADR 0015). A repeat is rejected loudly
+  // (a typo signal, like a duplicate catalog id) rather than silently deduped, then the
+  // set is canonicalized into the board's `exits` order.
+  const destArr = requireArray(rec.destination, `${where}.destination`);
+  if (destArr.length < 1 || destArr.length > 16) {
+    throw new RulesetError(`${where}.destination must have 1..16 exit ids`);
+  }
+  const seen = new Set<string>();
+  for (const exitId of destArr) {
+    if (typeof exitId !== 'string' || !exitIds.includes(exitId)) {
+      throw new RulesetError(`${where}.destination references unknown exit '${String(exitId)}'`);
+    }
+    if (seen.has(exitId)) {
+      throw new RulesetError(`${where}.destination repeats exit '${exitId}'`);
+    }
+    seen.add(exitId);
+  }
+  return { id, cell, destination: canonicalDestination(destArr as string[], exitIds) };
 }
 
 function validateBoard(raw: unknown, index: number, creepIds: ReadonlySet<string>): RulesetBoard {
   const where = `boards[${index}]`;
   const rec = requireRecord(raw, where);
-  assertNoUnknownKeys(rec, ['id', 'widthTiles', 'heightTiles', 'entrance', 'exit', 'waves'], where);
+  assertNoUnknownKeys(
+    rec,
+    ['id', 'widthTiles', 'heightTiles', 'entrances', 'exits', 'waves'],
+    where,
+  );
   if (!isCatalogId(rec.id)) throw new RulesetError(`${where}.id must match ^[a-z][a-z0-9-]{0,31}$`);
   if (!isPosInt(rec.widthTiles))
     throw new RulesetError(`${where}.widthTiles must be a positive int`);
   if (!isPosInt(rec.heightTiles))
     throw new RulesetError(`${where}.heightTiles must be a positive int`);
-  const entrance = validateCell(rec.entrance, rec.widthTiles, rec.heightTiles, `${where}.entrance`);
-  const exit = validateCell(rec.exit, rec.widthTiles, rec.heightTiles, `${where}.exit`);
+  const width = rec.widthTiles;
+  const height = rec.heightTiles;
+  // Exits first: every destination references them. Cell geometry beyond bounds (border
+  // placement, distinct openings, reachability) is the sim's `buildGrid`/`loadBoard`
+  // concern at compile time, exactly as for v2's single pair.
+  const openingIds = new Set<string>();
+  const exitsArr = requireArray(rec.exits, `${where}.exits`);
+  if (exitsArr.length < 1 || exitsArr.length > 16) {
+    throw new RulesetError(`${where}.exits must have 1..16 entries`);
+  }
+  const exits = exitsArr.map((x, i) => validateExit(x, i, width, height, where, openingIds));
+  const exitIds = exits.map((x) => x.id);
+  const entrancesArr = requireArray(rec.entrances, `${where}.entrances`);
+  if (entrancesArr.length < 1 || entrancesArr.length > 16) {
+    throw new RulesetError(`${where}.entrances must have 1..16 entries`);
+  }
+  const entrances = entrancesArr.map((e, i) =>
+    validateEntrance(e, i, width, height, where, openingIds, exitIds),
+  );
+  const entranceIds = new Set(entrances.map((e) => e.id));
   const wavesArr = requireArray(rec.waves, `${where}.waves`);
   if (wavesArr.length < 1 || wavesArr.length > 64) {
     throw new RulesetError(`${where}.waves must have 1..64 entries`);
   }
-  const waves = wavesArr.map((w, i) => validateWaveSchedule(w, i, creepIds, where));
+  const waves = wavesArr.map((w, i) => validateWaveSchedule(w, i, creepIds, entranceIds, where));
   return {
     id: rec.id,
-    widthTiles: rec.widthTiles,
-    heightTiles: rec.heightTiles,
-    entrance,
-    exit,
+    widthTiles: width,
+    heightTiles: height,
+    entrances,
+    exits,
     waves,
   };
 }
@@ -454,7 +577,7 @@ const TOP_LEVEL_KEYS = [
 ] as const;
 
 /**
- * The v2 structural validator: types, bounds, id patterns, catalog/board id
+ * The format-3 structural validator: types, bounds, id patterns, catalog/board id
  * uniqueness, cross-field rules, and strict unknown-key rejection at every nesting
  * level. Throws {@link RulesetError} on the first violation; on success, returns a
  * DEEP-FROZEN NORMALIZED COPY (never the caller's object) with canonical defaults
@@ -464,8 +587,8 @@ export function validateRulesetShape(value: unknown): Ruleset {
   const raw = requireRecord(value, 'ruleset');
   assertNoUnknownKeys(raw, TOP_LEVEL_KEYS, 'ruleset');
 
-  if (raw.formatVersion !== 2) {
-    throw new RulesetError(`unsupported formatVersion ${String(raw.formatVersion)} (supported: 2)`);
+  if (raw.formatVersion !== 3) {
+    throw new RulesetError(`unsupported formatVersion ${String(raw.formatVersion)} (supported: 3)`);
   }
   if (!isCatalogId(raw.rulesetId)) {
     throw new RulesetError('rulesetId must match ^[a-z][a-z0-9-]{0,31}$');
@@ -515,7 +638,7 @@ export function validateRulesetShape(value: unknown): Ruleset {
   });
 
   const normalized: Ruleset = {
-    formatVersion: 2,
+    formatVersion: 3,
     rulesetId: raw.rulesetId,
     version: raw.version,
     creepCatalog,

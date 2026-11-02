@@ -22,7 +22,7 @@ import {
   type StepEvents,
 } from './combat';
 import { resolveCreepDomain } from './domain';
-import type { Grid } from './board';
+import { entranceSpawn, type BoardContext } from './context';
 import { computeDistanceField, type DistanceField } from './pathfinding';
 import {
   MAX_TOWERS,
@@ -37,7 +37,7 @@ import {
   refundFor,
 } from './tower';
 import { assertRuleset, type CompiledRuleset, type CompiledCreep } from './ruleset';
-import { SIM_VERSION, effectiveSpeedFp } from './ruleset-shared';
+import { SIM_VERSION, effectiveSpeedFp, spawnHp } from './ruleset-shared';
 
 /** Simulation cadence: 20 Hz. Must match the render loop's tick duration. */
 export const MS_PER_TICK = 50;
@@ -47,6 +47,9 @@ export const MS_PER_TICK = 50;
  *  (`import { SIM_VERSION } from '@wynding/sim'`) is unchanged. See that module for
  *  the bump history. */
 export { SIM_VERSION };
+/** A creep's hit points at spawn under its wave's `hpPercent` — the one formula the
+ *  spawn site and the render view model's health bar share (ruleset-shared.ts). */
+export { spawnHp };
 
 /** The game lifecycle phase: `'running'` covers the whole multi-wave run (waiting
  *  on the first countdown through the last wave's clear) — the pre-S2 `'pre-wave'`/
@@ -91,6 +94,15 @@ export function isTerminalPhase(phase: SimPhase): boolean {
  * (M2-S6) is appended immediately AFTER `slowUntilTick` (same hash-load-bearing
  * position rule) — `0` means not stunned, with no paired magnitude column (stun is
  * binary; the `slowMulFp === 0 ⟺ slowUntilTick === 0` biconditional has no analogue).
+ *
+ * `destination` (M3 story 3, ADR 0015) is appended LAST, after `stunUntilTick` (same
+ * hash-load-bearing rule): the index into `ruleset.board.fields` of the creep's
+ * destination — its entrance's, copied at spawn and never rewritten, so a creep keeps
+ * its destination for life. HOW IT IS STORED is a story-3 choice the spec leaves open:
+ * the index of the destination's flow-field (not the entrance, not exit ids), because
+ * that is the one thing every reader needs — movement, targeting, the AoE lead and the
+ * maze invariant each look up `fields[destination]` and nothing else. `coerceSoa` drops
+ * a row whose index names no field, the `wave`/`creepId` policy.
  */
 export interface CreepArrays {
   id: number[];
@@ -107,6 +119,7 @@ export interface CreepArrays {
   slowMulFp: number[]; // 0 = no active slow (M2-S3)
   slowUntilTick: number[]; // 0 = no active slow, paired with slowMulFp (M2-S3)
   stunUntilTick: number[]; // 0 = not stunned (M2-S6, no paired magnitude column)
+  destination: number[]; // index into ruleset.board.fields, fixed at spawn (M3, ADR 0015)
 }
 
 /**
@@ -173,13 +186,16 @@ export type SimInput =
   | { readonly kind: 'callWaveEarly' } // buffer an early launch of the current wave
   | { readonly kind: 'noop' };
 
-// The effective distance field is a pure function of `(grid, tower mask)`, so it
-// can be reused across ticks until the mask changes — a hit is byte-identical to
-// a cold recompute (see the WeakMap cache below; keyed on the immutable `grid`,
-// validated by FULL mask equality, so a stale or colliding entry can never serve).
+// The effective distance fields are a pure function of `(board, tower mask)`, so they
+// can be reused across ticks until the mask changes — a hit is byte-identical to a
+// cold recompute (see the WeakMap cache below; keyed on the immutable compiled
+// `BoardContext`, validated by FULL mask equality, so a stale or colliding entry can
+// never serve). One entry per board holds EVERY destination's field (M3, ADR 0015):
+// a mask change rebuilds them all together, exactly the trigger the single field had —
+// any tower-mask change, a placement, a sell, or a mine consuming itself.
 const fieldCache = new WeakMap<
-  Grid,
-  { readonly mask: Uint8Array; readonly field: DistanceField }
+  BoardContext,
+  { readonly mask: Uint8Array; readonly fields: readonly DistanceField[] }
 >();
 
 function maskEquals(a: Uint8Array, b: Uint8Array): boolean {
@@ -188,19 +204,22 @@ function maskEquals(a: Uint8Array, b: Uint8Array): boolean {
   return true;
 }
 
-/** The exit-sourced distance field for `grid` under the current tower SoA, reusing
- *  the cached field while the materialized mask is unchanged. Pure in its result. */
-function effectiveField(
-  grid: Grid,
+/** Every destination's distance field for `board` under the current tower SoA, index-
+ *  parallel to `board.fields`, reusing the cached set while the materialized mask is
+ *  unchanged. Pure in its result. Resident cost: one cached field per distinct
+ *  destination (≤ `maxDestinationsPerBoard`, capability.ts), not one per board. */
+function effectiveFields(
+  board: BoardContext,
   towers: TowerArrays,
   towerById: CompiledRuleset['towerById'],
-): DistanceField {
+): readonly DistanceField[] {
+  const { grid } = board;
   const mask = materializeTowerMask(grid, towers, towerById); // O(towers), never throws
-  const memo = fieldCache.get(grid);
-  if (memo !== undefined && maskEquals(memo.mask, mask)) return memo.field;
-  const field = computeDistanceField(grid, mask);
-  fieldCache.set(grid, { mask, field });
-  return field;
+  const memo = fieldCache.get(board);
+  if (memo !== undefined && maskEquals(memo.mask, mask)) return memo.fields;
+  const fields = board.fields.map((f) => computeDistanceField(grid, f.exit, mask));
+  fieldCache.set(board, { mask, fields });
+  return fields;
 }
 
 /** Per-wave alive counts derived from a (wave-column-clean) creep SoA `wave` column —
@@ -250,14 +269,27 @@ function coerceSoa(state: SimState, ruleset: CompiledRuleset, mode: CoerceMode):
   if (!Array.isArray(c.slowMulFp)) c.slowMulFp = [];
   if (!Array.isArray(c.slowUntilTick)) c.slowUntilTick = [];
   if (!Array.isArray(c.stunUntilTick)) c.stunUntilTick = [];
+  // A state with no `destination` column at all — a snapshot taken before the column
+  // existed — therefore loses every creep below. No resume path exists (ADR 0008 §3: no
+  // mid-run resume at MVP), and ADR 0008 §4 binds the future one to check a snapshot's
+  // `simVersion` before it reaches `step`; replay's strict version equality already
+  // rejects a log from any other version. Here it is simply a forged state, coerced like
+  // any other — never a throw (ADR 0006 §4).
+  if (!Array.isArray(c.destination)) c.destination = [];
 
   const waveCount = ruleset.waves.length;
+  const destinationCount = ruleset.board.fields.length;
   const { creepById } = ruleset;
+  // A row's `destination` must name one of the board's destination fields (M3) — the
+  // `wave` rule's shape: a safe int in [0, destinationCount).
+  const validDestination = (d: unknown): boolean =>
+    Number.isSafeInteger(d) && (d as number) >= 0 && (d as number) < destinationCount;
 
-  // Creep `wave`/`creepId` column totality (M2-S3 generalizes the M2-S2 `wave`-only
-  // rule): a row whose wave id isn't a safe int in [0, waveCount), OR whose
-  // `creepId` doesn't resolve in the compiled catalog, can never be attributed to a
-  // real spawn — dropped here (the existing invalid-row policy) so the resolution
+  // Creep `wave`/`creepId`/`destination` column totality (M2-S3 generalizes the M2-S2
+  // `wave`-only rule; M3 adds `destination`): a row whose wave id isn't a safe int in
+  // [0, waveCount), whose `creepId` doesn't resolve in the compiled catalog, OR whose
+  // destination names no field, can never be attributed to a real spawn — dropped here
+  // (the existing invalid-row policy, and never a throw: ADR 0006 §4) so the resolution
   // phase's per-wave alive histogram (derived from this very column) is never
   // polluted, and the render VM's per-creep max-HP join (`creepById[creepId].hp`)
   // never sees an unresolvable id. Any row whose OTHER columns are ragged (a length
@@ -274,7 +306,8 @@ function coerceSoa(state: SimState, ruleset: CompiledRuleset, mode: CoerceMode):
     c.creepId.length > c.id.length ||
     c.slowMulFp.length > c.id.length ||
     c.slowUntilTick.length > c.id.length ||
-    c.stunUntilTick.length > c.id.length;
+    c.stunUntilTick.length > c.id.length ||
+    c.destination.length > c.id.length;
   for (let i = 0; i < c.id.length && !sawInvalidRow; i++) {
     const w = c.wave[i];
     const cid = c.creepId[i];
@@ -283,7 +316,8 @@ function coerceSoa(state: SimState, ruleset: CompiledRuleset, mode: CoerceMode):
       (w as number) < 0 ||
       (w as number) >= waveCount ||
       typeof cid !== 'string' ||
-      creepById[cid] === undefined
+      creepById[cid] === undefined ||
+      !validDestination(c.destination[i])
     ) {
       sawInvalidRow = true;
     }
@@ -293,12 +327,14 @@ function coerceSoa(state: SimState, ruleset: CompiledRuleset, mode: CoerceMode):
     for (let i = 0; i < c.id.length; i++) {
       const w = c.wave[i];
       const cid = c.creepId[i];
+      const dest = c.destination[i];
       if (
         !Number.isSafeInteger(w) ||
         (w as number) < 0 ||
         (w as number) >= waveCount ||
         typeof cid !== 'string' ||
-        creepById[cid] === undefined
+        creepById[cid] === undefined ||
+        !validDestination(dest)
       ) {
         continue;
       }
@@ -319,6 +355,7 @@ function coerceSoa(state: SimState, ruleset: CompiledRuleset, mode: CoerceMode):
       filtered.slowMulFp.push(c.slowMulFp[i] as number);
       filtered.slowUntilTick.push(c.slowUntilTick[i] as number);
       filtered.stunUntilTick.push(c.stunUntilTick[i] as number);
+      filtered.destination.push(dest as number);
     }
     state.creeps = filtered;
   }
@@ -729,7 +766,7 @@ function applyInputPhase(
       }
       const towerMask = materializeTowerMask(grid, state.towers, towerById);
       if (
-        !canPlaceTower(grid, towerMask, anchor, state.creeps, state.bounty, def.cost, creepById)
+        !canPlaceTower(board, towerMask, anchor, state.creeps, state.bounty, def.cost, creepById)
       ) {
         accepted.push(false);
         continue;
@@ -879,7 +916,6 @@ export function step(
 
   const { board, towerById, balance, scoring, waves, creepById } = ruleset;
   const { grid } = board;
-  const { entrance } = grid;
   const waveCount = waves.length;
 
   // 1) INPUT PHASE — array order; each command re-validated against evolving state.
@@ -931,16 +967,22 @@ export function step(
     }
   }
   // Spawn drain: every launched wave, in index order (earlier-launched wave first;
-  // within a wave, its pre-sorted spawn list) — creeps carry `wave = k`.
+  // within a wave, its pre-sorted spawn list) — creeps carry `wave = k`. The entrance is
+  // NOT a sort key (M3): a creep spawns at its own entry's entrance cell centre and takes
+  // that entrance's destination, in exactly the order it would have spawned anyway.
   for (let k = 0; k < waveCount; k++) {
     const launchTick = state.waveLaunchTick[k]!; // coerceSoa sized this array to waveCount
     if (launchTick === null) continue;
-    const spawns = waves[k]!.spawns;
+    const { spawns, hpPercent } = waves[k]!;
     for (;;) {
       const cursor = state.waveSpawnCursor[k]!;
       const entry = cursor < spawns.length ? spawns[cursor] : undefined;
       if (entry === undefined || launchTick + entry.offsetTicks > state.tick) break;
       const def = creepById[entry.creepId];
+      // The entry's entrance cell and that entrance's destination. Resolved at compile
+      // time, so a dangling index is a corrupt compiled ruleset: `entranceSpawn` throws
+      // rather than consuming the spawn silently.
+      const { cell: entrance, destination } = entranceSpawn(board, entry.entrance);
       if (def !== undefined) {
         const newCreepId = allocEntityId(state);
         // Exhausted entity-id space: the scheduled spawn is still consumed (cursor
@@ -948,7 +990,7 @@ export function step(
         // loop termination and never retries the same cursor.
         if (newCreepId !== null) {
           state.creeps.id.push(newCreepId);
-          state.creeps.hp.push(def.hp);
+          state.creeps.hp.push(spawnHp(def.hp, hpPercent)); // its wave's HP growth (M3)
           state.creeps.bounty.push(def.bounty);
           state.creeps.speed.push(def.speedFp);
           state.creeps.fromX.push(cellCenterX(entrance.col)); // rest on the entrance centre
@@ -961,19 +1003,23 @@ export function step(
           state.creeps.slowMulFp.push(0); // fresh spawn — never slowed yet
           state.creeps.slowUntilTick.push(0);
           state.creeps.stunUntilTick.push(0); // fresh spawn — never stunned yet
+          state.creeps.destination.push(destination); // its entrance's, kept for life
         }
       }
       state.waveSpawnCursor[k] = cursor + 1;
     }
   }
 
-  // 3) DERIVE the effective field once for this tick from the final tower SoA.
-  const field =
-    state.towers.id.length === 0 ? board.field : effectiveField(grid, state.towers, towerById);
+  // 3) DERIVE every destination's effective field once for this tick from the final
+  //    tower SoA (index-parallel to `board.fields`).
+  const fields =
+    state.towers.id.length === 0 ? board.fields : effectiveFields(board, state.towers, towerById);
 
-  // 4) MOVEMENT PHASE — advance each creep at its own speed over the post-input field.
-  //    A creep reaching the exit leaks (costs `leakCost` lives, bumps `leakedCount`
-  //    and its owning wave's `waveLeaked`); a corrupt row is dropped (no life lost).
+  // 4) MOVEMENT PHASE — advance each creep at its own speed over its OWN destination's
+  //    post-input field (M3, ADR 0015). A creep reaching an exit in its own destination
+  //    leaks (costs `leakCost` lives, bumps `leakedCount` and its owning wave's
+  //    `waveLeaked`); every other exit is an ordinary cell to it, since its field only
+  //    knows its own. A corrupt row is dropped (no life lost).
   //    Rebuild to compact both removals — `wave`/`creepId`/`slowMulFp`/`slowUntilTick`
   //    thread through by source row like any other column. The per-row travel budget
   //    is the SLOW-AWARE `effectiveSpeedFp` (ruleset-shared.ts) — THE single
@@ -990,6 +1036,7 @@ export function step(
     const speed = src.speed[i] as number;
     const wave = src.wave[i] as number; // coerceSoa already dropped any invalid-wave row
     const creepId = src.creepId[i] as string; // coerceSoa already dropped any unresolvable-id row
+    const destination = src.destination[i] as number; // coerceSoa already dropped any invalid one
     const slowMulFp = Number.isSafeInteger(src.slowMulFp[i]) ? (src.slowMulFp[i] as number) : 0;
     const slowUntilTick = Number.isSafeInteger(src.slowUntilTick[i])
       ? (src.slowUntilTick[i] as number)
@@ -1011,7 +1058,7 @@ export function step(
     // uniformly regardless.
     const domain = resolveCreepDomain(creepById, creepId);
     const outcome = advanceCreep(
-      field,
+      fields[destination]!,
       src.id[i],
       src.hp[i],
       src.fromX[i],
@@ -1059,6 +1106,7 @@ export function step(
     next.slowMulFp.push(slowMulFp);
     next.slowUntilTick.push(slowUntilTick);
     next.stunUntilTick.push(stunUntilTick);
+    next.destination.push(destination);
   }
   state.creeps = next;
 
@@ -1081,7 +1129,7 @@ export function step(
     state.dots,
     state.tick,
     state.bounty,
-    field,
+    fields,
     grid,
     towerById,
     creepById,
@@ -1209,6 +1257,7 @@ export interface ReadonlyCreepArrays {
   readonly slowMulFp: readonly number[];
   readonly slowUntilTick: readonly number[];
   readonly stunUntilTick: readonly number[];
+  readonly destination: readonly number[];
 }
 
 /** Deep-readonly view of `TowerArrays` — see `ReadonlyCreepArrays`. */
@@ -1385,7 +1434,7 @@ export type { CellClass, GridSpec, Grid } from './board';
 export { computeDistanceField, isReachable, shortestPath } from './pathfinding';
 export type { DistanceField } from './pathfinding';
 export { loadBoard } from './context';
-export type { BoardContext } from './context';
+export type { BoardContext, BoardSpec } from './context';
 // Landed-impact events (M1 Story 8, #31): an optional out-param on `step()` — never
 // part of `SimState`, never hash-relevant.
 export type { StepEvents } from './combat';
@@ -1420,6 +1469,7 @@ export {
   type CompiledEffect,
   type CompiledCreep,
   type CompiledWave,
+  type PreviewStream,
   type ScheduledSpawn,
 } from './ruleset';
 // The v2 structural validator + JSON parser (M2-S1) — `@wynding/content`'s registry

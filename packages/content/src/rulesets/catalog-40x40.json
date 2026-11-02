@@ -1,5 +1,5 @@
 {
-  "formatVersion": 2,
+  "formatVersion": 3,
   "rulesetId": "catalog-40x40",
   "version": 1,
   "creepCatalog": [
@@ -161,30 +161,127 @@
       "id": "catalog-40x40",
       "widthTiles": 40,
       "heightTiles": 40,
-      "entrance": { "col": 0, "row": 20 },
-      "exit": { "col": 39, "row": 20 },
+      "entrances": [{ "id": "west", "cell": { "col": 0, "row": 20 }, "destination": ["east"] }],
+      "exits": [{ "id": "east", "cell": { "col": 39, "row": 20 } }],
       "waves": [
         {
           "index": 0,
           "countdownTicks": 100,
           "clearBonus": 1,
+          "hpPercent": 100,
           "entries": [
-            { "creepId": "cat-ground", "count": 19, "spacingTicks": 16, "offsetTicks": 0 },
-            { "creepId": "cat-ground", "count": 19, "spacingTicks": 16, "offsetTicks": 1 },
-            { "creepId": "cat-ground", "count": 19, "spacingTicks": 16, "offsetTicks": 2 },
-            { "creepId": "cat-ground", "count": 19, "spacingTicks": 16, "offsetTicks": 3 },
-            { "creepId": "cat-ground", "count": 19, "spacingTicks": 16, "offsetTicks": 4 },
-            { "creepId": "cat-ground", "count": 19, "spacingTicks": 16, "offsetTicks": 5 },
-            { "creepId": "cat-immune", "count": 19, "spacingTicks": 16, "offsetTicks": 6 },
-            { "creepId": "cat-immune", "count": 19, "spacingTicks": 16, "offsetTicks": 7 },
-            { "creepId": "cat-immune", "count": 19, "spacingTicks": 16, "offsetTicks": 8 },
-            { "creepId": "cat-immune", "count": 19, "spacingTicks": 16, "offsetTicks": 9 },
-            { "creepId": "cat-heavy", "count": 19, "spacingTicks": 16, "offsetTicks": 10 },
-            { "creepId": "cat-heavy", "count": 19, "spacingTicks": 16, "offsetTicks": 11 },
-            { "creepId": "cat-air", "count": 146, "spacingTicks": 24, "offsetTicks": 12 },
-            { "creepId": "cat-air", "count": 146, "spacingTicks": 24, "offsetTicks": 13 },
-            { "creepId": "cat-air", "count": 146, "spacingTicks": 24, "offsetTicks": 14 },
-            { "creepId": "cat-air", "count": 146, "spacingTicks": 24, "offsetTicks": 15 }
+            {
+              "creepId": "cat-ground",
+              "entrance": "west",
+              "count": 19,
+              "spacingTicks": 16,
+              "offsetTicks": 0
+            },
+            {
+              "creepId": "cat-ground",
+              "entrance": "west",
+              "count": 19,
+              "spacingTicks": 16,
+              "offsetTicks": 1
+            },
+            {
+              "creepId": "cat-ground",
+              "entrance": "west",
+              "count": 19,
+              "spacingTicks": 16,
+              "offsetTicks": 2
+            },
+            {
+              "creepId": "cat-ground",
+              "entrance": "west",
+              "count": 19,
+              "spacingTicks": 16,
+              "offsetTicks": 3
+            },
+            {
+              "creepId": "cat-ground",
+              "entrance": "west",
+              "count": 19,
+              "spacingTicks": 16,
+              "offsetTicks": 4
+            },
+            {
+              "creepId": "cat-ground",
+              "entrance": "west",
+              "count": 19,
+              "spacingTicks": 16,
+              "offsetTicks": 5
+            },
+            {
+              "creepId": "cat-immune",
+              "entrance": "west",
+              "count": 19,
+              "spacingTicks": 16,
+              "offsetTicks": 6
+            },
+            {
+              "creepId": "cat-immune",
+              "entrance": "west",
+              "count": 19,
+              "spacingTicks": 16,
+              "offsetTicks": 7
+            },
+            {
+              "creepId": "cat-immune",
+              "entrance": "west",
+              "count": 19,
+              "spacingTicks": 16,
+              "offsetTicks": 8
+            },
+            {
+              "creepId": "cat-immune",
+              "entrance": "west",
+              "count": 19,
+              "spacingTicks": 16,
+              "offsetTicks": 9
+            },
+            {
+              "creepId": "cat-heavy",
+              "entrance": "west",
+              "count": 19,
+              "spacingTicks": 16,
+              "offsetTicks": 10
+            },
+            {
+              "creepId": "cat-heavy",
+              "entrance": "west",
+              "count": 19,
+              "spacingTicks": 16,
+              "offsetTicks": 11
+            },
+            {
+              "creepId": "cat-air",
+              "entrance": "west",
+              "count": 146,
+              "spacingTicks": 24,
+              "offsetTicks": 12
+            },
+            {
+              "creepId": "cat-air",
+              "entrance": "west",
+              "count": 146,
+              "spacingTicks": 24,
+              "offsetTicks": 13
+            },
+            {
+              "creepId": "cat-air",
+              "entrance": "west",
+              "count": 146,
+              "spacingTicks": 24,
+              "offsetTicks": 14
+            },
+            {
+              "creepId": "cat-air",
+              "entrance": "west",
+              "count": 146,
+              "spacingTicks": 24,
+              "offsetTicks": 15
+            }
           ]
         }
       ]

@@ -183,7 +183,7 @@ describe('compileRuleset — tower catalog domains', () => {
     rejects((b) => (b.towerCatalog[0]!.attack!.travelTicks = 30)); // >= cadence → >1 impact in flight
   });
 
-  it('rejects a burst effect form unsupported at simVersion 17 (valid schema, capability-gated: allowedBurstForms)', () => {
+  it('rejects a burst effect form unsupported at simVersion 18 (valid schema, capability-gated: allowedBurstForms)', () => {
     // Before M2-S9, 'burst' wasn't in `allowedEffectKinds` at all, so ANY burst
     // bundle tripped that gate first. Since sv13 'burst' joins `allowedEffectKinds`
     // (capability.ts's header comment — it now defers to the schema, exactly the
@@ -201,7 +201,7 @@ describe('compileRuleset — tower catalog domains', () => {
     // precisely why the profile's own `allowedBurstForms` ceiling has to reject it.
     b.towerCatalog[0]!.effects = [{ kind: 'burst', form: 'single', damage: 10 }];
     expect(() => compileRuleset(b as Ruleset, 'test')).toThrow(
-      "burst effect form 'single' unsupported at simVersion 17",
+      "burst effect form 'single' unsupported at simVersion 18",
     );
   });
 
@@ -499,7 +499,9 @@ describe('compileRuleset — success', () => {
     expect(compiled.waves).toHaveLength(1);
     expect(compiled.waves[0]!.spawns).toHaveLength(4);
     expect(compiled.waves[0]!.spawns.map((s) => s.offsetTicks)).toEqual([0, 5, 10, 15]);
-    expect(compiled.waves[0]!.entriesSummary).toEqual([{ creepId: 'normal', count: 4 }]);
+    expect(compiled.waves[0]!.entriesSummary).toEqual([
+      { creepId: 'normal', entrance: 'in', destination: ['out'], count: 4 },
+    ]);
     expect(compiled.towers).toHaveLength(1);
     expect(compiled.towerById['basic']!.cost).toBe(5);
     expect(compiled.digest).toMatch(/^[0-9a-f]{64}$/);
@@ -526,7 +528,13 @@ describe('compileRuleset — success', () => {
     const mutable = JSON.parse(JSON.stringify(bundle)) as {
       boards: {
         waves: {
-          entries: { creepId: string; count: number; spacingTicks: number; offsetTicks?: number }[];
+          entries: {
+            creepId: string;
+            entrance: string;
+            count: number;
+            spacingTicks: number;
+            offsetTicks?: number;
+          }[];
         }[];
       }[];
     };
@@ -534,12 +542,15 @@ describe('compileRuleset — success', () => {
     // Entry 1: 2 × 'normal' spacing 30, offset 5 → ticks [5, 35] — interleaves.
     mutable.boards[0]!.waves[0]!.entries.push({
       creepId: 'normal',
+      entrance: 'in',
       count: 2,
       spacingTicks: 30,
       offsetTicks: 5,
     });
     const compiled = compileRuleset(mutable as unknown as Ruleset, 'test');
     expect(compiled.waves[0]!.spawns.map((s) => s.offsetTicks)).toEqual([0, 5, 35, 100]);
-    expect(compiled.waves[0]!.entriesSummary).toEqual([{ creepId: 'normal', count: 4 }]);
+    expect(compiled.waves[0]!.entriesSummary).toEqual([
+      { creepId: 'normal', entrance: 'in', destination: ['out'], count: 4 },
+    ]);
   });
 });

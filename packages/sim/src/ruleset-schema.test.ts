@@ -1,4 +1,5 @@
-// ruleset-schema.test.ts — the v2 structural validator (ADR 0007, M2-S1): every
+// ruleset-schema.test.ts — the structural validator (ADR 0007, M2-S1; format 3 since M3,
+// ADR 0015): every
 // type/bound/pattern violation, duplicate id, dangling reference, cross-field rule,
 // unknown-key rejection (at every nesting level), null (at every nesting level),
 // canonical-default application, and the parse-text cap boundary.
@@ -8,10 +9,10 @@ import type { Ruleset } from '@wynding/types';
 import { RulesetError } from './ruleset';
 import { validateRulesetShape, parseRulesetJson, MAX_RULESET_TEXT_UNITS } from './ruleset-schema';
 
-/** A minimal, fully valid v2 bundle — every field present, one of everything. */
+/** A minimal, fully valid format-3 bundle — every field present, one of everything. */
 function validBundle(): Ruleset {
   return {
-    formatVersion: 2,
+    formatVersion: 3,
     rulesetId: 'wynding-core-m1',
     version: 1,
     creepCatalog: [
@@ -49,14 +50,15 @@ function validBundle(): Ruleset {
         id: 'field-01',
         widthTiles: 9,
         heightTiles: 5,
-        entrance: { col: 0, row: 2 },
-        exit: { col: 8, row: 2 },
+        entrances: [{ id: 'west', cell: { col: 0, row: 2 }, destination: ['east'] }],
+        exits: [{ id: 'east', cell: { col: 8, row: 2 } }],
         waves: [
           {
             index: 0,
             countdownTicks: 500,
             clearBonus: 0,
-            entries: [{ creepId: 'normal', count: 10, spacingTicks: 20 }],
+            hpPercent: 100,
+            entries: [{ creepId: 'normal', entrance: 'west', count: 10, spacingTicks: 20 }],
           },
         ],
       },
@@ -68,6 +70,12 @@ function validBundle(): Ruleset {
 function clone(): Record<string, unknown> {
   return JSON.parse(JSON.stringify(validBundle())) as Record<string, unknown>;
 }
+
+type Rec = Record<string, unknown>;
+const entrancesOf = (b: Rec): Rec[] => (b.boards as Rec[])[0]!.entrances as Rec[];
+const exitsOf = (b: Rec): Rec[] => (b.boards as Rec[])[0]!.exits as Rec[];
+const firstWave = (b: Rec): Rec => ((b.boards as Rec[])[0]!.waves as Rec[])[0]!;
+const firstEntry = (b: Rec): Rec => (firstWave(b).entries as Rec[])[0]!;
 
 function rejects(mutate: (b: Record<string, unknown>) => void): void {
   const b = clone();
@@ -101,7 +109,10 @@ describe('validateRulesetShape — top level', () => {
 
   it('rejects an unsupported formatVersion', () => {
     rejects((b) => (b.formatVersion = 1));
-    rejects((b) => (b.formatVersion = 3));
+    // Format 2's single `entrance`/`exit` shape is gone (M3, ADR 0015) — a v2 bundle
+    // must fail on its version, never be half-read.
+    rejects((b) => (b.formatVersion = 2));
+    rejects((b) => (b.formatVersion = 4));
   });
 
   it('rejects a malformed rulesetId', () => {
@@ -480,14 +491,108 @@ describe('validateRulesetShape — boards / waves / entries', () => {
     rejects((b) => ((b.boards as Record<string, unknown>[])[0]!.widthTiles = 0));
     rejects((b) => ((b.boards as Record<string, unknown>[])[0]!.heightTiles = 0));
     rejects((b) => {
-      (b.boards as Record<string, unknown>[])[0]!.entrance = { col: -1, row: 2 };
+      entrancesOf(b)[0]!.cell = { col: -1, row: 2 };
     });
     rejects((b) => {
-      (b.boards as Record<string, unknown>[])[0]!.exit = { col: 99, row: 2 };
+      exitsOf(b)[0]!.cell = { col: 99, row: 2 };
     });
     rejects((b) => {
-      (b.boards as Record<string, unknown>[])[0]!.entrance = { col: 0, row: 2, extra: 1 };
+      entrancesOf(b)[0]!.cell = { col: 0, row: 2, extra: 1 };
     });
+  });
+
+  it("rejects format 2's single entrance/exit keys as unknown properties", () => {
+    rejects((b) => {
+      (b.boards as Record<string, unknown>[])[0]!.entrance = { col: 0, row: 2 };
+    });
+    rejects((b) => {
+      (b.boards as Record<string, unknown>[])[0]!.exit = { col: 8, row: 2 };
+    });
+  });
+
+  it('rejects a missing, empty or oversized entrance / exit list', () => {
+    rejects((b) => delete (b.boards as Record<string, unknown>[])[0]!.entrances);
+    rejects((b) => delete (b.boards as Record<string, unknown>[])[0]!.exits);
+    rejects((b) => ((b.boards as Record<string, unknown>[])[0]!.entrances = []));
+    rejects((b) => ((b.boards as Record<string, unknown>[])[0]!.exits = []));
+    rejects((b) => {
+      const x = exitsOf(b)[0]!;
+      (b.boards as Record<string, unknown>[])[0]!.exits = Array.from({ length: 17 }, (_, i) => ({
+        ...x,
+        id: `x${i}`,
+      }));
+    });
+    rejects((b) => {
+      const e = entrancesOf(b)[0]!;
+      (b.boards as Record<string, unknown>[])[0]!.entrances = Array.from(
+        { length: 17 },
+        (_, i) => ({ ...e, id: `e${i}` }),
+      );
+    });
+  });
+
+  it('rejects a malformed or unknown-keyed entrance / exit record', () => {
+    rejects((b) => (entrancesOf(b)[0]!.extra = 1));
+    rejects((b) => (exitsOf(b)[0]!.extra = 1));
+    rejects((b) => (entrancesOf(b)[0]!.id = 'Bad Id'));
+    rejects((b) => (exitsOf(b)[0]!.id = 'Bad Id'));
+    rejects((b) => delete entrancesOf(b)[0]!.cell);
+    rejects((b) => delete exitsOf(b)[0]!.cell);
+    rejects((b) => ((b.boards as Record<string, unknown>[])[0]!.entrances = [null]));
+    rejects((b) => ((b.boards as Record<string, unknown>[])[0]!.exits = [null]));
+  });
+
+  it('rejects an entrance or exit id that collides with any other opening id on the board', () => {
+    // exit ↔ exit
+    rejects((b) => exitsOf(b).push({ id: 'east', cell: { col: 8, row: 3 } }));
+    // entrance ↔ entrance
+    rejects((b) =>
+      entrancesOf(b).push({ id: 'west', cell: { col: 0, row: 3 }, destination: ['east'] }),
+    );
+    // entrance ↔ exit: one namespace, so `east` names exactly one cell
+    rejects((b) => (entrancesOf(b)[0]!.id = 'east'));
+  });
+
+  it('rejects a destination that is missing, empty, oversized, dangling, repeated or non-string', () => {
+    rejects((b) => delete entrancesOf(b)[0]!.destination);
+    rejects((b) => (entrancesOf(b)[0]!.destination = []));
+    rejects((b) => (entrancesOf(b)[0]!.destination = 'east'));
+    rejects((b) => (entrancesOf(b)[0]!.destination = ['nowhere']));
+    rejects((b) => (entrancesOf(b)[0]!.destination = [7]));
+    rejects((b) => (entrancesOf(b)[0]!.destination = ['east', 'east']));
+    rejects((b) => {
+      const exits = exitsOf(b);
+      for (let i = 0; i < 16; i++) exits.push({ id: `x${i}`, cell: { col: 8, row: 1 } });
+      entrancesOf(b)[0]!.destination = ['east', ...exits.slice(1).map((x) => x.id)];
+    });
+  });
+
+  it('accepts a multi-exit destination as DATA and canonicalizes it into the exits order', () => {
+    // The format keeps the set shape (ADR 0015); whether a sim build can SIMULATE a
+    // multi-exit destination is the capability profile's call, not the schema's.
+    const b = clone();
+    exitsOf(b).push({ id: 'north', cell: { col: 4, row: 0 } });
+    entrancesOf(b)[0]!.destination = ['north', 'east'];
+    const normalized = validateRulesetShape(b);
+    expect(normalized.boards[0]!.entrances[0]!.destination).toEqual(['east', 'north']);
+  });
+
+  it('rejects a wave entry whose entrance is missing, dangling, an exit id, or not a string', () => {
+    rejects((b) => delete firstEntry(b).entrance);
+    rejects((b) => (firstEntry(b).entrance = 'nowhere'));
+    rejects((b) => (firstEntry(b).entrance = 'east')); // an EXIT id, not an entrance
+    rejects((b) => (firstEntry(b).entrance = 3));
+  });
+
+  it('rejects a missing or non-positive-int hpPercent, and keeps the authored value', () => {
+    rejects((b) => delete firstWave(b).hpPercent);
+    rejects((b) => (firstWave(b).hpPercent = 0));
+    rejects((b) => (firstWave(b).hpPercent = -100));
+    rejects((b) => (firstWave(b).hpPercent = 150.5));
+    rejects((b) => (firstWave(b).hpPercent = '100'));
+    const b = clone();
+    firstWave(b).hpPercent = 175;
+    expect(validateRulesetShape(b).boards[0]!.waves[0]!.hpPercent).toBe(175);
   });
 
   it('rejects a duplicate board id', () => {

@@ -50,7 +50,7 @@ function waveIndexForCreep(r: typeof ruleset, creepId: string): number {
 // between the two kinds.
 const SYNTHETIC_BOARD_ID = 'wave-preview-board';
 const syntheticBundle: Ruleset = {
-  formatVersion: 2,
+  formatVersion: 3,
   rulesetId: 'wave-preview-test',
   version: 1,
   creepCatalog: [
@@ -98,28 +98,32 @@ const syntheticBundle: Ruleset = {
       id: SYNTHETIC_BOARD_ID,
       widthTiles: 9,
       heightTiles: 5,
-      entrance: { col: 0, row: 2 },
-      exit: { col: 8, row: 2 },
+      entrances: [{ id: 'west', cell: { col: 0, row: 2 }, destination: ['east'] }],
+      exits: [{ id: 'east', cell: { col: 8, row: 2 } }],
       waves: [
         {
           index: 0,
           countdownTicks: 100,
           clearBonus: 4,
+          hpPercent: 100,
           // First-appearance order 'armored' then 'normal' — deliberately NOT alphabetical
           // or catalog order, so a bug that re-sorts the summary alphabetically or by
           // catalog position (rather than preserving entry order) would be caught. The two
           // 'normal' entries (counts 2 + 1) must aggregate to a single count-3 row.
           entries: [
-            { creepId: 'armored', count: 1, spacingTicks: 10, offsetTicks: 0 },
-            { creepId: 'normal', count: 2, spacingTicks: 10, offsetTicks: 0 },
-            { creepId: 'normal', count: 1, spacingTicks: 10, offsetTicks: 5 },
+            { creepId: 'armored', entrance: 'west', count: 1, spacingTicks: 10, offsetTicks: 0 },
+            { creepId: 'normal', entrance: 'west', count: 2, spacingTicks: 10, offsetTicks: 0 },
+            { creepId: 'normal', entrance: 'west', count: 1, spacingTicks: 10, offsetTicks: 5 },
           ],
         },
         {
           index: 1,
           countdownTicks: 50,
           clearBonus: 4,
-          entries: [{ creepId: 'normal', count: 1, spacingTicks: 10, offsetTicks: 0 }],
+          hpPercent: 150, // M3: the preview carries each wave's own hpPercent
+          entries: [
+            { creepId: 'normal', entrance: 'west', count: 1, spacingTicks: 10, offsetTicks: 0 },
+          ],
         },
       ],
     },
@@ -288,6 +292,24 @@ describe('view-model + hud derivation', () => {
     const two = deriveViewModel(s, ruleset);
     expect(two.creeps[0]?.hpFrac).toBeCloseTo(8 / 16);
     expect(two.creeps[1]?.hpFrac).toBeCloseTo(5 / 20);
+  });
+
+  it('measures a grown creep’s hpFrac against the hit points it SPAWNED with (M3 HP growth)', () => {
+    // The shipped bundle with its first wave at 175%: a `normal` (catalog 20) spawns at
+    // ⌊20 × 175 / 100⌋ = 35. Against the catalog's 20 the bar would read full until the
+    // creep had lost 15 hit points, and 17 left would read 85%; against its own 35 it
+    // reads 17/35.
+    const grownBundle = structuredClone(bundle) as Ruleset;
+    (grownBundle.boards[0]!.waves[0]! as { hpPercent: number }).hpPercent = 175;
+    const grown = compileRuleset(grownBundle, defaultBoardId(grownBundle));
+    let s = createInitialState(1, grown);
+    s = step(s, grown, [{ kind: 'callWaveEarly' }]);
+    expect(s.creeps.creepId[0]).toBe('normal');
+    expect(s.creeps.wave[0]).toBe(0);
+    expect(s.creeps.hp[0]).toBe(35);
+    expect(deriveViewModel(s, grown).creeps[0]?.hpFrac).toBe(1);
+    s.creeps.hp[0] = 17;
+    expect(deriveViewModel(s, grown).creeps[0]?.hpFrac).toBeCloseTo(17 / 35);
   });
 
   it('projects `slowed` from a live slowMulFp column value', () => {
@@ -605,10 +627,13 @@ describe('hud wave preview (M2-S2, PLAN.md P3 step 16)', () => {
       kind: 'upcoming',
       waveNumber: 1,
       waveCount: ruleset.waves.length,
+      hpPercent: 100,
       entries: [
         {
           creepId: 'normal',
           count: 10,
+          entrance: 'west',
+          destination: ['east'],
           domain: 'ground',
           armor: 0,
           leakCost: 1,
@@ -687,10 +712,13 @@ describe('hud wave preview — SYNTHETIC sv6-legal bundle (M2-S2, PLAN.md P3 ste
       kind: 'upcoming',
       waveNumber: 1,
       waveCount: 2,
+      hpPercent: 100,
       entries: [
         {
           creepId: 'armored',
           count: 1,
+          entrance: 'west',
+          destination: ['east'],
           domain: 'ground',
           armor: 0,
           leakCost: 1,
@@ -700,6 +728,8 @@ describe('hud wave preview — SYNTHETIC sv6-legal bundle (M2-S2, PLAN.md P3 ste
         {
           creepId: 'normal',
           count: 3,
+          entrance: 'west',
+          destination: ['east'],
           domain: 'ground',
           armor: 0,
           leakCost: 1,
@@ -735,10 +765,13 @@ describe('hud wave preview — SYNTHETIC sv6-legal bundle (M2-S2, PLAN.md P3 ste
       kind: 'upcoming',
       waveNumber: 2,
       waveCount: 2,
+      hpPercent: 150, // the wave's own value (M3), not a constant 100
       entries: [
         {
           creepId: 'normal',
           count: 1,
+          entrance: 'west',
+          destination: ['east'],
           domain: 'ground',
           armor: 0,
           leakCost: 1,

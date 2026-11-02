@@ -342,7 +342,8 @@ describe('domain-aware placement (M2-S7 P4) — flyers never block, never constr
     //
     // So: the known-legal (3,1) footprint the sibling tests use, both arms on the SAME
     // anchor, called directly so the row survives to the function under test.
-    const grid = RULESET_LANE_AIR.board.grid;
+    const board = RULESET_LANE_AIR.board;
+    const { grid } = board;
     const mask = new Uint8Array(grid.width * grid.height);
     const creepById = RULESET_LANE_AIR.creepById;
     const anchor = { col: 3, row: 1 };
@@ -354,16 +355,26 @@ describe('domain-aware placement (M2-S7 P4) — flyers never block, never constr
       headCol: [3],
       headRow: [1],
       progress: [0],
+      destination: [0],
     });
 
     // Control: the anchor is genuinely legal when nothing stands there — without this the
     // rejection below could again be the footprint's own fault rather than the fallback's.
     expect(
       canPlaceTower(
-        grid,
+        board,
         mask,
         anchor,
-        { id: [], creepId: [], fromX: [], fromY: [], headCol: [], headRow: [], progress: [] },
+        {
+          id: [],
+          creepId: [],
+          fromX: [],
+          fromY: [],
+          headCol: [],
+          headRow: [],
+          progress: [],
+          destination: [],
+        },
         80,
         TOWER_COST,
         creepById,
@@ -371,17 +382,17 @@ describe('domain-aware placement (M2-S7 P4) — flyers never block, never constr
     ).toBe(true);
 
     // A resolved AIR creep never blocks — the accept arm.
-    expect(canPlaceTower(grid, mask, anchor, at('flyer'), 80, TOWER_COST, creepById)).toBe(true);
+    expect(canPlaceTower(board, mask, anchor, at('flyer'), 80, TOWER_COST, creepById)).toBe(true);
 
     // An UNRESOLVED id falls back to ground, so it blocks exactly like one. This is the
     // assertion the `?? 'air'` mutation must turn red.
-    expect(canPlaceTower(grid, mask, anchor, at('ghost-creep-id'), 80, TOWER_COST, creepById)).toBe(
-      false,
-    );
+    expect(
+      canPlaceTower(board, mask, anchor, at('ghost-creep-id'), 80, TOWER_COST, creepById),
+    ).toBe(false);
 
     // And a genuinely resolved ground creep blocks too — pinning that the fallback lands
     // on the same behaviour, not merely on *a* rejection.
-    expect(canPlaceTower(grid, mask, anchor, at('normal'), 80, TOWER_COST, creepById)).toBe(false);
+    expect(canPlaceTower(board, mask, anchor, at('normal'), 80, TOWER_COST, creepById)).toBe(false);
   });
 });
 

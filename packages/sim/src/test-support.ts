@@ -4,13 +4,28 @@
 // determinism golden — build their rulesets inline, with no sim→content edge. The
 // numbers mirror the M1 content but tests may override the board/wave/economy.
 
-import type { CreepDef, Ruleset, TowerDef } from '@wynding/types';
+import type { Cell, CreepDef, Ruleset, TowerDef } from '@wynding/types';
 import { Rng } from '@wynding/engine';
-import type { GridSpec } from './board';
+import type { BoardSpec } from './context';
 import { compileRuleset, type CompiledRuleset } from './ruleset';
 import { cellCenterX, cellCenterY } from './movement';
 import type { SimState } from './index';
 import { runCombat } from './combat';
+
+/**
+ * `state` as the sim knew it before M3 story 3's `destination` creep column (ADR 0015):
+ * every field, minus that column. It is appended LAST on the creep SoA, so spreading it
+ * out leaves exactly the earlier state's JSON — same keys, same order — and
+ * `hashSimState` of the result is byte-comparable with a hash pinned before the column
+ * existed. Every re-pin that column caused asserts its previous pin under this
+ * projection, which is what makes "only the new column moved the hash" a test rather
+ * than a comment. `@wynding/content`'s `test-digest.ts` carries the same projection for
+ * its suite (a package boundary; neither exports test support).
+ */
+export function withoutDestination(state: SimState): SimState {
+  const { destination: _destination, ...creeps } = state.creeps;
+  return { ...state, creeps: creeps as SimState['creeps'] };
+}
 
 /** A fixed seed for `runCombatT`'s default `Rng` (M2-S6) — any fixed uint32 works,
  *  since a stun-free run never draws from it; pinned rather than random so a test
@@ -127,6 +142,8 @@ export interface TestWaveOpts {
   /** Which catalog creep this wave's single entry spawns (M2-S3; default 'normal') —
    *  pair with `TestBundleOpts.extraCreeps` to spawn a non-default catalog id. */
   readonly creepId?: string;
+  /** The wave's creep hit points as a percent of the catalog's (format 3; default 100). */
+  readonly hpPercent?: number;
 }
 export interface TestBundleOpts {
   readonly creepHp?: number;
@@ -159,8 +176,30 @@ export interface TestBundleOpts {
   readonly extraCreeps?: readonly CreepDef[];
 }
 
-/** Build a raw ruleset bundle for a board geometry, with M1-ish defaults. */
-export function testBundle(spec: GridSpec, opts: TestBundleOpts = {}): Ruleset {
+/** A one-pair board — the M1/M2 shape almost every sim test plays on (one entrance,
+ *  one exit, the entrance's destination that one exit). `testBundle` turns it into a
+ *  format-3 board with entrance id `in` and exit id `out`; `pairBoardSpec` turns it
+ *  into the `BoardSpec` `loadBoard` takes. */
+export interface PairSpec {
+  readonly widthTiles: number;
+  readonly heightTiles: number;
+  readonly entrance: Cell;
+  readonly exit: Cell;
+}
+
+/** `spec` as a {@link BoardSpec}: one entrance, one exit, entrance 0 bound for exit 0. */
+export function pairBoardSpec(spec: PairSpec): BoardSpec {
+  return {
+    widthTiles: spec.widthTiles,
+    heightTiles: spec.heightTiles,
+    entrances: [spec.entrance],
+    exits: [spec.exit],
+    destinations: [[0]],
+  };
+}
+
+/** Build a raw ruleset bundle for a one-pair board geometry, with M1-ish defaults. */
+export function testBundle(spec: PairSpec, opts: TestBundleOpts = {}): Ruleset {
   const waveOpts: readonly TestWaveOpts[] = opts.waves ?? [
     {
       waveCount: opts.waveCount,
@@ -170,7 +209,7 @@ export function testBundle(spec: GridSpec, opts: TestBundleOpts = {}): Ruleset {
     },
   ];
   return {
-    formatVersion: 2,
+    formatVersion: 3,
     rulesetId: 'test-ruleset',
     version: 1,
     creepCatalog: [
@@ -206,15 +245,17 @@ export function testBundle(spec: GridSpec, opts: TestBundleOpts = {}): Ruleset {
         id: 'test',
         widthTiles: spec.widthTiles,
         heightTiles: spec.heightTiles,
-        entrance: spec.entrance,
-        exit: spec.exit,
+        entrances: [{ id: 'in', cell: spec.entrance, destination: ['out'] }],
+        exits: [{ id: 'out', cell: spec.exit }],
         waves: waveOpts.map((w, index) => ({
           index,
           countdownTicks: w.countdownTicks ?? 500,
           clearBonus: w.waveClearBonus ?? 0,
+          hpPercent: w.hpPercent ?? 100,
           entries: [
             {
               creepId: w.creepId ?? 'normal',
+              entrance: 'in',
               count: w.waveCount ?? 10,
               spacingTicks: w.waveSpacing ?? 20,
               ...(w.offsetTicks !== undefined ? { offsetTicks: w.offsetTicks } : {}),
@@ -227,7 +268,7 @@ export function testBundle(spec: GridSpec, opts: TestBundleOpts = {}): Ruleset {
 }
 
 /** Compile a test bundle for its single board — the `CompiledRuleset` `step` takes. */
-export function testRuleset(spec: GridSpec, opts: TestBundleOpts = {}): CompiledRuleset {
+export function testRuleset(spec: PairSpec, opts: TestBundleOpts = {}): CompiledRuleset {
   return compileRuleset(testBundle(spec, opts), 'test');
 }
 
@@ -240,7 +281,8 @@ export function testRuleset(spec: GridSpec, opts: TestBundleOpts = {}): Compiled
  *  default bundle's catalog id — override to `'fast'`/a test-bundle `extraCreeps` id
  *  when the ruleset under test carries a different catalog); `slowMulFp`/
  *  `slowUntilTick` default to `(0, 0)` — no active slow (M2-S3); `stunUntilTick`
- *  defaults to `0` — not stunned (M2-S6). */
+ *  defaults to `0` — not stunned (M2-S6); `destination` defaults to `0` — the board's
+ *  first destination field, the only one on a one-pair board (M3). */
 export function pushCreep(
   state: SimState,
   args: {
@@ -255,6 +297,7 @@ export function pushCreep(
     readonly slowMulFp?: number;
     readonly slowUntilTick?: number;
     readonly stunUntilTick?: number;
+    readonly destination?: number;
     /** A committed mid-edge row: head differs from (col,row) and progress is nonzero
      *  (CodeRabbit #73 — `tower.test.ts`'s `committedCreep` delegates here so new SoA
      *  columns thread through ONE helper). Defaults keep the at-rest sentinel shape. */
@@ -277,6 +320,7 @@ export function pushCreep(
   state.creeps.slowMulFp.push(args.slowMulFp ?? 0);
   state.creeps.slowUntilTick.push(args.slowUntilTick ?? 0);
   state.creeps.stunUntilTick.push(args.stunUntilTick ?? 0);
+  state.creeps.destination.push(args.destination ?? 0);
 }
 
 // `runCombat` gained a REQUIRED `creepById` armor-lookup parameter at M2-S5a P1 —
@@ -333,6 +377,12 @@ export function pushCreep(
 // none of them touch `creepById` (every creep in those tests is the default
 // `'normal'`, armor 0 — identical whether resolved through a real ruleset map or the
 // `{}` this wrapper already hardcodes), so `dots` was the only real blocker.
+//
+// M3 story 3 turned `runCombat`'s single `field` into `fields` (one per destination, ADR
+// 0015). This wrapper keeps taking ONE field and passes `[field]`: every caller plays a
+// one-pair board whose creeps carry destination 0 (`pushCreep`'s default), so the
+// ~95 call sites keep compiling unchanged. Multi-destination combat goes through
+// `step()` (`story-destinations.test.ts`), never this wrapper.
 type RunCombatParams = Parameters<typeof runCombat>;
 export function runCombatT(
   creeps: RunCombatParams[0],
@@ -340,7 +390,7 @@ export function runCombatT(
   impacts: RunCombatParams[2],
   tick: RunCombatParams[4],
   bounty: RunCombatParams[5],
-  field: RunCombatParams[6],
+  field: RunCombatParams[6][number],
   grid: RunCombatParams[7],
   towerById: RunCombatParams[8],
   slowFloorNum: RunCombatParams[10],
@@ -356,7 +406,7 @@ export function runCombatT(
     dots,
     tick,
     bounty,
-    field,
+    [field],
     grid,
     towerById,
     // `creepById` is hardcoded EMPTY, and this wrapper deliberately offers no override.

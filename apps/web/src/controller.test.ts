@@ -2555,7 +2555,7 @@ describe('controller — combat feedback wiring the tests above could not tell a
     // ...and the one it never drew where the step left it: one budget past the entrance's
     // centre, on its way out. Its look is its catalog id's, its bounty what the sim paid.
     const unseen = kills.find((k) => k.id !== drawn.id)!;
-    const { entrance } = c.ruleset.board.grid;
+    const entrance = c.ruleset.board.grid.entrances[0]!;
     const normal = c.ruleset.creepById['normal']!;
     expect(unseen).toEqual({
       id: unseen.id,

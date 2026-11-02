@@ -91,6 +91,7 @@ import {
   TEST_SLOW_TOWER,
   TEST_FAST_CREEP,
   TEST_DOT_TOWER,
+  withoutDestination,
 } from './test-support';
 import { compileRuleset, type CompiledRuleset } from './ruleset';
 
@@ -206,20 +207,22 @@ function canonicalInputs(tick: number): SimInput[] {
 function runCanonical(
   seed = SCENARIO_SEED,
   ticks = SCENARIO_TICKS,
-): { state: SimState; trace: string[] } {
+): { state: SimState; trace: string[]; traceWithoutDestination: string[] } {
   let state = createInitialState(seed, SCENARIO_RULESET);
   const trace: string[] = [];
+  const traceWithoutDestination: string[] = [];
   for (let t = 0; t < ticks; t++) {
     state = step(state, SCENARIO_RULESET, canonicalInputs(t));
     trace.push(hashSimState(state));
+    traceWithoutDestination.push(hashSimState(withoutDestination(state)));
   }
-  return { state, trace };
+  return { state, trace, traceWithoutDestination };
 }
 
 // --- GOLDEN — a behavior change here requires a SIM_VERSION bump (CI-enforced) --
 // Recompute with: pnpm --filter @wynding/sim exec vitest run determinism
 const GOLDEN = {
-  finalHash: 'd93528da',
+  finalHash: 'b716ede6',
   // Re-pinned M2-S6 P5 ('31e0a94c'): the `stunUntilTick` column widens every creep's shape.
   // Re-pinned M2-S7 P6 (SIM_VERSION 10 → 11): `Impact` gained a `domain` mask, so every tick
   // with an impact IN FLIGHT hashed differently — but `finalHash` was deliberately NOT
@@ -233,9 +236,24 @@ const GOLDEN = {
   // exists to allow; the scenario's own witnesses were re-checked rather than assumed — all
   // three builds still land (the reduced bounty does not starve them), the detour, kills, slow
   // and DoT witnesses stand, and the run still ends `lost` with `lives === 0`.
-  traceDigest: '442f4adb', // fnv1a(trace.join(':'))
+  //
+  // Re-pinned M3 story 3 (SIM_VERSION 17 → 18; was 'd93528da' / '442f4adb'): the new
+  // `destination` creep column (ADR 0015) widens every creep's serialized shape — a
+  // HASH-ONLY move, asserted rather than claimed: `GOLDEN_BEFORE_DESTINATION` below holds
+  // the previous pair, tick for tick, for the state with that column projected out.
+  traceDigest: 'ecbad7af', // fnv1a(trace.join(':'))
 } as const;
 // -------------------------------------------------------------------------------
+
+/** The golden as it stood before M3 story 3's `destination` creep column — the values
+ *  `withoutDestination(state)` must still hash to. It proves THAT change was hash-only,
+ *  and nothing later: the next change that moves these hashes re-measures it (if a
+ *  column-free comparison still means something then) or deletes it, like every other
+ *  `withoutDestination` pin in the sim and content suites. */
+const GOLDEN_BEFORE_DESTINATION = {
+  finalHash: 'd93528da',
+  traceDigest: '442f4adb',
+} as const;
 
 describe('determinism gate', () => {
   it('reproduces a byte-identical trace from the same (seed, inputs)', () => {
@@ -249,6 +267,15 @@ describe('determinism gate', () => {
     const { state, trace } = runCanonical();
     expect(hashSimState(state)).toBe(GOLDEN.finalHash);
     expect(fnv1a(trace.join(':'))).toBe(GOLDEN.traceDigest);
+  });
+
+  it('still reproduces the golden from BEFORE the destination column, tick for tick, once that column is projected out (M3 story 3)', () => {
+    // The `destination` creep column (ADR 0015) re-pinned the golden above; this is the
+    // proof that it is the ONLY thing that moved it. The state minus that column hashes,
+    // on every tick, exactly as the whole state did before the column existed.
+    const { state, traceWithoutDestination } = runCanonical();
+    expect(hashSimState(withoutDestination(state))).toBe(GOLDEN_BEFORE_DESTINATION.finalHash);
+    expect(fnv1a(traceWithoutDestination.join(':'))).toBe(GOLDEN_BEFORE_DESTINATION.traceDigest);
   });
 
   it('witnesses creeps crossing and leaking to a LOSS (selling the basic+venom towers leaves the lane thin)', () => {
@@ -453,9 +480,9 @@ describe('compiled-board mutation regression (#21/P4)', () => {
   // entry — compiling ONCE and running ≥2 full matches on the SAME compiled object
   // below models that reuse directly (sim tests must not import replay; actual
   // cache-hit coverage lives in replay's own tests).
-  it('board.field.dist/blockedMask and board.grid.baseMask are never mutated across 2 full matches on ONE compiled ruleset', () => {
-    const distSnapshot = SCENARIO_RULESET.board.field.dist.slice();
-    const blockedMaskSnapshot = SCENARIO_RULESET.board.field.blockedMask.slice();
+  it('board.fields[0].dist/blockedMask and board.grid.baseMask are never mutated across 2 full matches on ONE compiled ruleset', () => {
+    const distSnapshot = SCENARIO_RULESET.board.fields[0]!.dist.slice();
+    const blockedMaskSnapshot = SCENARIO_RULESET.board.fields[0]!.blockedMask.slice();
     const baseMaskSnapshot = SCENARIO_RULESET.board.grid.baseMask.slice();
 
     // toEqual does a deep, element-by-element structural comparison meant for
@@ -474,8 +501,12 @@ describe('compiled-board mutation regression (#21/P4)', () => {
 
     const assertUnmutated = (): void => {
       const checks: Array<[string, ArrayLike<number>, ArrayLike<number>]> = [
-        ['board.field.dist', SCENARIO_RULESET.board.field.dist, distSnapshot],
-        ['board.field.blockedMask', SCENARIO_RULESET.board.field.blockedMask, blockedMaskSnapshot],
+        ['board.fields[0].dist', SCENARIO_RULESET.board.fields[0]!.dist, distSnapshot],
+        [
+          'board.fields[0].blockedMask',
+          SCENARIO_RULESET.board.fields[0]!.blockedMask,
+          blockedMaskSnapshot,
+        ],
         ['board.grid.baseMask', SCENARIO_RULESET.board.grid.baseMask, baseMaskSnapshot],
       ];
       for (const [name, actual, expected] of checks) {

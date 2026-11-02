@@ -460,8 +460,10 @@ export function createApp(doc: Document, root: HTMLElement, deps: AppDeps): AppH
   const geometry: BoardGeometry = {
     cols: grid.width,
     rows: grid.height,
-    entrance: { col: grid.entrance.col, row: grid.entrance.row },
-    exit: { col: grid.exit.col, row: grid.exit.row },
+    // One pair drawn, as before (M3 story 3 changes data only): the shipped board is a
+    // single entrance → exit pair, and drawing every pair is M3 story 4's.
+    entrance: { col: grid.entrances[0]!.col, row: grid.entrances[0]!.row },
+    exit: { col: grid.exits[0]!.col, row: grid.exits[0]!.row },
   };
   const handle = deps.sceneFactory(board, geometry);
   const inputCards = shell.cards.map((c) => ({ el: c.root, towerId: c.towerId }));

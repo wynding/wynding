@@ -23,7 +23,8 @@
 
 import type { Cell } from '@wynding/types';
 import type { Grid } from './board';
-import { computeDistanceField, isReachable } from './pathfinding';
+import type { BoardContext } from './context';
+import { computeDistanceField, isReachable, type DistanceField } from './pathfinding';
 import { deriveValidCreepPosition } from './movement';
 import { resolveCreepDomain, type CreepDomainLookup } from './domain';
 
@@ -169,7 +170,7 @@ export function forEachValidTower(
  * Rematerialize the row-major tower blocked mask from the SoA — a pure function
  * of `(grid, towers, towerById)`, recomputed rather than cached so it can never
  * desync from the state it derives from. Only valid rows contribute; every marked
- * cell is buildable-open, so the mask can never cover an opening (the exit stays
+ * cell is buildable-open, so the mask can never cover an opening (every exit stays
  * legal for `computeDistanceField`).
  */
 export function materializeTowerMask(
@@ -238,6 +239,7 @@ export interface CreepPlacementView {
   readonly headRow: number[];
   readonly progress: number[];
   readonly creepId: string[];
+  readonly destination: number[];
 }
 
 /**
@@ -264,6 +266,18 @@ function creepOccupiedCell(
   return geom === null ? null : geom.occupancyCell;
 }
 
+/** The candidate field a creep row's maze-invariant check must hold in: its OWN
+ *  destination's — or `undefined` for a forged destination naming no field, which the
+ *  check then skips. That is the sim's one policy for such a row (combat.ts's step (4)
+ *  states it): it constrains nothing, because `coerceSoa` drops it before the input
+ *  phase, so through `step` this never sees one. */
+function ownField(
+  candidates: readonly DistanceField[],
+  destination: number | undefined,
+): DistanceField | undefined {
+  return Number.isSafeInteger(destination) ? candidates[destination as number] : undefined;
+}
+
 /**
  * Full `placeTower` acceptance test (ADR 0006 §4 — anything short of full
  * acceptance is a deterministic no-op, never a throw):
@@ -283,22 +297,30 @@ function creepOccupiedCell(
  *      even while it is passing over.
  *   4. AFFORDABLE — `bounty` is a nonnegative safe integer ≥ the tower `cost`, so a
  *      corrupt restored bounty can never flow through the spend arithmetic.
- *   5. MAZE INVARIANT — in the candidate field (current mask + footprint) the exit
- *      remains reachable from the entrance and from every live GROUND creep's
- *      occupied cell (PRD 0001 §1), so no build can strand a creep. A flyer never
- *      constrains this — it does not path the maze, so nothing it stands over can
- *      strand it.
+ *   5. MAZE INVARIANT, PER DESTINATION (PRD 0001 §1, ADR 0015) — in the candidate
+ *      fields (current mask + footprint, one per destination), every entrance still
+ *      reaches its OWN destination's exit, and every live GROUND creep still reaches
+ *      its own destination from its occupied cell, so no build can seal either route
+ *      or strand a creep. A flyer never constrains this — it does not path the maze,
+ *      so nothing it stands over can strand it, and neither does a row whose
+ *      destination names no field (the forged-row policy, {@link ownField}). CHECK
+ *      ORDER (a story-3 choice the spec leaves open; the result is a boolean, so the
+ *      order is unobservable beyond cost): every destination's candidate field is
+ *      built first, in field order, then the entrances in board order, then the creeps
+ *      in SoA row order.
  *
  * `creepById` resolves each row's domain via {@link resolveCreepDomain} — the same
  * totality rail combat and movement use: an unresolved `creepId` falls back to
  * `ground`, so it still constrains clauses 3 and 5 (the conservative direction,
  * byte-identical to pre-S7 behavior for every existing row).
  *
- * The candidate field is validation-scoped and discarded; `step` derives the
- * post-input field once, separately, for movement.
+ * The candidate fields are validation-scoped and discarded; `step` derives the
+ * post-input fields once, separately, for movement. Cost: one full-board Dijkstra per
+ * DISTINCT destination (≤ `maxDestinationsPerBoard`, capability.ts) per placement that
+ * reaches clause 5.
  */
 export function canPlaceTower(
-  grid: Grid,
+  board: BoardContext,
   towerMask: Uint8Array,
   anchor: unknown,
   creeps: CreepPlacementView,
@@ -306,6 +328,7 @@ export function canPlaceTower(
   cost: number,
   creepById: Readonly<Partial<Record<string, CreepDomainLookup>>>,
 ): boolean {
+  const { grid } = board;
   // 1) structural
   if (anchor === null || typeof anchor !== 'object') return false;
   const { col, row } = anchor as { col?: unknown; row?: unknown };
@@ -332,17 +355,22 @@ export function canPlaceTower(
   // 4) affordable
   if (!Number.isSafeInteger(bounty) || bounty < 0 || bounty < cost) return false;
 
-  // 5) maze invariant on the candidate field
+  // 5) maze invariant, per destination, on the candidate fields
   const candidateMask = new Uint8Array(towerMask);
   for (const [dc, dr] of FOOTPRINT_DELTAS) {
     candidateMask[(r + dr) * grid.width + (c + dc)] = 1;
   }
-  const candidate = computeDistanceField(grid, candidateMask);
-  if (!isReachable(candidate, grid.entrance)) return false;
+  const candidates = board.fields.map((f) => computeDistanceField(grid, f.exit, candidateMask));
+  for (let e = 0; e < grid.entrances.length; e++) {
+    const own = candidates[board.entranceDestination[e] as number] as DistanceField;
+    if (!isReachable(own, grid.entrances[e] as Cell)) return false;
+  }
   for (let i = 0; i < creeps.id.length; i++) {
     if (resolveCreepDomain(creepById, creeps.creepId[i]) === 'air') continue;
     const occ = creepOccupiedCell(grid, creeps, i);
-    if (occ !== null && !isReachable(candidate, occ)) return false;
+    const own = ownField(candidates, creeps.destination[i]);
+    if (occ === null || own === undefined) continue;
+    if (!isReachable(own, occ)) return false;
   }
   return true;
 }

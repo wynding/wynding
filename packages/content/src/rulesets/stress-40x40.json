@@ -1,5 +1,5 @@
 {
-  "formatVersion": 2,
+  "formatVersion": 3,
   "rulesetId": "stress-40x40",
   "version": 1,
   "creepCatalog": [
@@ -80,30 +80,31 @@
       "id": "stress-40x40",
       "widthTiles": 40,
       "heightTiles": 40,
-      "entrance": { "col": 0, "row": 20 },
-      "exit": { "col": 39, "row": 20 },
+      "entrances": [{ "id": "west", "cell": { "col": 0, "row": 20 }, "destination": ["east"] }],
+      "exits": [{ "id": "east", "cell": { "col": 39, "row": 20 } }],
       "waves": [
         {
           "index": 0,
           "countdownTicks": 100,
           "clearBonus": 1,
+          "hpPercent": 100,
           "entries": [
-            { "creepId": "stress-armored", "count": 19, "spacingTicks": 100 },
-            { "creepId": "stress-runner", "count": 19, "spacingTicks": 100 },
-            { "creepId": "stress-runner", "count": 19, "spacingTicks": 100 },
-            { "creepId": "stress-armored", "count": 19, "spacingTicks": 100 },
-            { "creepId": "stress-runner", "count": 19, "spacingTicks": 100 },
-            { "creepId": "stress-runner", "count": 19, "spacingTicks": 100 },
-            { "creepId": "stress-armored", "count": 19, "spacingTicks": 100 },
-            { "creepId": "stress-runner", "count": 19, "spacingTicks": 100 },
-            { "creepId": "stress-runner", "count": 19, "spacingTicks": 100 },
-            { "creepId": "stress-armored", "count": 19, "spacingTicks": 100 },
-            { "creepId": "stress-runner", "count": 19, "spacingTicks": 100 },
-            { "creepId": "stress-runner", "count": 19, "spacingTicks": 100 },
-            { "creepId": "stress-armored", "count": 19, "spacingTicks": 100 },
-            { "creepId": "stress-runner", "count": 19, "spacingTicks": 100 },
-            { "creepId": "stress-runner", "count": 19, "spacingTicks": 100 },
-            { "creepId": "stress-armored", "count": 19, "spacingTicks": 100 }
+            { "creepId": "stress-armored", "entrance": "west", "count": 19, "spacingTicks": 100 },
+            { "creepId": "stress-runner", "entrance": "west", "count": 19, "spacingTicks": 100 },
+            { "creepId": "stress-runner", "entrance": "west", "count": 19, "spacingTicks": 100 },
+            { "creepId": "stress-armored", "entrance": "west", "count": 19, "spacingTicks": 100 },
+            { "creepId": "stress-runner", "entrance": "west", "count": 19, "spacingTicks": 100 },
+            { "creepId": "stress-runner", "entrance": "west", "count": 19, "spacingTicks": 100 },
+            { "creepId": "stress-armored", "entrance": "west", "count": 19, "spacingTicks": 100 },
+            { "creepId": "stress-runner", "entrance": "west", "count": 19, "spacingTicks": 100 },
+            { "creepId": "stress-runner", "entrance": "west", "count": 19, "spacingTicks": 100 },
+            { "creepId": "stress-armored", "entrance": "west", "count": 19, "spacingTicks": 100 },
+            { "creepId": "stress-runner", "entrance": "west", "count": 19, "spacingTicks": 100 },
+            { "creepId": "stress-runner", "entrance": "west", "count": 19, "spacingTicks": 100 },
+            { "creepId": "stress-armored", "entrance": "west", "count": 19, "spacingTicks": 100 },
+            { "creepId": "stress-runner", "entrance": "west", "count": 19, "spacingTicks": 100 },
+            { "creepId": "stress-runner", "entrance": "west", "count": 19, "spacingTicks": 100 },
+            { "creepId": "stress-armored", "entrance": "west", "count": 19, "spacingTicks": 100 }
           ]
         }
       ]
