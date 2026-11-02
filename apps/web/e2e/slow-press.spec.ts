@@ -202,13 +202,14 @@ test("a 220 ms press on a Card whose can't-afford state flips UNDER the press st
   });
   const bounty = page.locator('.wy-chip[data-wy-chip="bounty"] .wy-chip-full');
 
-  // Pre-start, spend the Bounty to 11 with pending builds (which it already counts as spent):
-  // four Frost Splash (16) and a Basic (5). Splash (12) is then short by one.
+  // Pre-start, spend the Bounty to 14 with pending builds (which it already counts as spent):
+  // two Frost Splash (20), two Beacons (18) and a Basic (6), from 96. Splash (15) is then short
+  // by one. (M3 story 8's prices; at the first pass's it was 80 to 11.)
   const builds: [string, number, number][] = [
     ['9', 3, 3],
     ['9', 6, 3],
-    ['9', 9, 3],
-    ['9', 12, 3],
+    ['7', 9, 3],
+    ['7', 12, 3],
     ['1', 15, 3],
   ];
   for (const [key, col, row] of builds) {
@@ -218,7 +219,7 @@ test("a 220 ms press on a Card whose can't-afford state flips UNDER the press st
     await page.keyboard.press('Escape');
   }
   await expect(board).toHaveAttribute('data-pending-adds', String(builds.length));
-  await expect(bounty).toHaveText('Bounty: 11');
+  await expect(bounty).toHaveText('Bounty: 14');
   const splash = page.getByRole('button', { name: /^Splash Tower/ });
   await expect(splash).toHaveClass(/wy-card--short/);
 
@@ -237,7 +238,7 @@ test("a 220 ms press on a Card whose can't-afford state flips UNDER the press st
   await page.mouse.down();
   await board.dispatchEvent('keydown', { code: 'KeyX', key: 'x', bubbles: true });
   await expect(splash).not.toHaveClass(/wy-card--short/); // flipped mid-press
-  await expect(bounty).not.toHaveText('Bounty: 11');
+  await expect(bounty).not.toHaveText('Bounty: 14');
   // The rest of the hold — the same 220ms the other presses here take.
   await page.waitForTimeout(220);
   await page.mouse.up();

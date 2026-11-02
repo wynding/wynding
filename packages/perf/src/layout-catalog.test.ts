@@ -211,15 +211,15 @@ describe('the committed 165-placement table', () => {
     expect(135).toBe(19 * 7 + 2);
   });
 
-  it('costs exactly 1,601 — the bundle’s startingBounty, so leftover bounty is a real oracle', () => {
+  it('costs exactly 1,983 — the bundle’s startingBounty, so leftover bounty is a real oracle', () => {
     const spend = placements.reduce((s, p) => s + compiled.towerById[p.towerId]!.cost, 0);
     expect(spend).toBe(CATALOG_TOTAL_SPEND);
-    expect(spend).toBe(1_601);
+    expect(spend).toBe(1_983);
     expect(spend).toBe(bundle.balance.startingBounty);
     // The three components, so a shifted count is visible rather than merely summed away.
-    const attackers = 20 * 5 + 20 * 8 + 19 * 12 + 19 * 9 + 19 * 10 + 19 * 7 + 19 * 16;
-    expect(attackers).toBe(1_286);
-    expect(attackers + 15 * 15 + 15 * 6).toBe(1_601);
+    const attackers = 20 * 6 + 20 * 10 + 19 * 15 + 19 * 11 + 19 * 12 + 19 * 9 + 19 * 20;
+    expect(attackers).toBe(1_593);
+    expect(attackers + 15 * 18 + 15 * 8).toBe(1_983);
   });
 
   it('no two placements’ 2x2 footprints overlap, and every cell is in the buildable interior', () => {

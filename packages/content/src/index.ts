@@ -31,5 +31,7 @@ export {
   defaultBoardId,
 } from './registry';
 // The current ground path from an entrance to its destination (M3 story 3) — read-only,
-// for the balance checker's merged-or-separate classification of a two-route build.
+// for the balance checker's merged-or-separate classification of a two-route build. Also
+// its own subpath, `@wynding/content/paths`, for consumers Node loads unbundled, which
+// cannot take this barrel's `?raw` registry import.
 export { currentPath } from './paths';

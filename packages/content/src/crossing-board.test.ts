@@ -141,12 +141,13 @@ describe('the arc keeps the spec’s authoring rules (m3.md, "Waves & timing")',
             .map((e) => e.entrance),
         ),
     );
-    // The north lane joins with ten flyers and nothing else: before it, the north route
-    // carries ground creeps only.
+    // The north lane joins with twelve flyers, 8 ticks apart (M3 story 8; ten, 12 apart, in
+    // the first pass), and nothing else: before it, the north route carries ground creeps
+    // only.
     const north = flown.findIndex((lanes) => lanes.has('north'));
     expect(north).toBe(15);
     expect(board.waves[north]!.entries).toEqual([
-      { creepId: 'flying', entrance: 'north', count: 10, spacingTicks: 12, offsetTicks: 0 },
+      { creepId: 'flying', entrance: 'north', count: 12, spacingTicks: 8, offsetTicks: 0 },
     ]);
     // Both lanes at once is block 3's air headline, wave 26: armored flyers down the west lane,
     // flyers down the north, and nothing else. No earlier wave flies both; the wall and the
@@ -274,7 +275,9 @@ describe('the arc keeps the spec’s authoring rules (m3.md, "Waves & timing")',
 // the lives, economy and score knobs re-pin to the longer run.
 // Re-pinned M3 story 6 (measured): block 2's ten waves follow block 1's.
 // Re-pinned M3 story 7 (measured): block 3's ten waves complete the arc.
-const SHIPPED_RULESET_HASH = '4fc31b60bc6abb30098f6942f066a5997966bac8556732f5e3417efe8a735260';
+// Re-pinned M3 story 8 (measured): the balance pass — every tower a fifth dearer and the
+// starting bounty with them, block 2's air firmed at waves 16 and 19, wave 24 at 270%.
+const SHIPPED_RULESET_HASH = '64afa10a5e1e822a049a51719eca88898e5e93b39c0d3e7bf7e8b9768762073d';
 // ------------------------------------------------------------------------------------------
 
 describe('digest golden — the shipped artifact’s content hash', () => {

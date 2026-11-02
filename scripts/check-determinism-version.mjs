@@ -28,7 +28,9 @@ const BASE_REF = process.env.BASE_REF || 'main';
 // the M2 bundle (shipped through M2, frozen as a test fixture since M3 story 4), where
 // `determinism.test.ts` runs a deliberately narrow synthetic one (no stun, no AoE, no burst,
 // no support, no air, no armor) — so the widest behavioural pin in the repo was the one
-// this guard did not watch.
+// this guard did not watch. `m3-golden.test.ts` is M3's (m3.md, A4): the strongest reference
+// build over the shipped thirty-wave arc on the crossing board (two entrances, air down both
+// lanes, six of the nine tower kinds), joined here at M3 story 8.
 //
 // The three `story-*.test.ts` files listed in #107 stay out, and that one IS a parser
 // limit rather than a preference: they pin hashes as bare inline
@@ -38,6 +40,7 @@ const BASE_REF = process.env.BASE_REF || 'main';
 const TEST_PATHS = [
   'packages/sim/src/determinism.test.ts',
   'packages/content/src/m2-golden.test.ts',
+  'packages/content/src/m3-golden.test.ts',
 ];
 // SIM_VERSION's home moved with M2-S2's single-sourcing (PLAN step 1): it now
 // lives on the dependency-free leaf `ruleset-shared.ts`, re-exported from

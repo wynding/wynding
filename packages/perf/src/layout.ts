@@ -17,7 +17,10 @@
 //      re-deriving "why col 25, row 36" from first principles is not possible — they are
 //      the output of a search, not a design. They buy the route from 307 → 329 cells.
 
-import { currentPath } from '@wynding/content';
+// The subpath, not the barrel: the barrel's registry embeds the shipped ruleset as a `?raw`
+// import only a bundler resolves, and this module reaches the Playwright perf specs, which
+// Node loads unbundled (M3 story 8).
+import { currentPath } from '@wynding/content/paths';
 import { DIAG_LEN, type CompiledRuleset, type TowerValidityView } from '@wynding/sim';
 
 /** The eight vertical band columns (anchor col, i.e. the band's left edge). */
@@ -194,8 +197,8 @@ export type CatalogTowerId =
  * anchors keeps the whole assignment a single deterministic rule application, provable by
  * re-running it — which `layout-catalog.test.ts` does.
  *
- * Placement cost (see `CATALOG_TOTAL_SPEND`): attackers 1,286 + beacons 225 + mines 90 =
- * **1,601**, which IS the bundle's `startingBounty`. That equality is the scene's
+ * Placement cost (see `CATALOG_TOTAL_SPEND`): every attacker, beacon and mine at the
+ * shipped prices, **1,983**, which IS the bundle's `startingBounty`. That equality is the scene's
  * zero-leftover oracle: the stress scene's equal-cost assumption (150 × 12) does not
  * survive a real catalog, so the bounty is derived from the table instead of assumed.
  */
@@ -420,10 +423,11 @@ export function catalogDetonatorLowerBoundTicks(compiled: CompiledRuleset): read
 /** Total placements — 150 anchors + 15 mine pads. */
 export const CATALOG_TOWER_COUNT = 165;
 
-/** Total placement cost, and therefore the bundle's `startingBounty`: attackers 1,286 +
- *  beacons 225 + mines 90. Pinned here and re-derived from the compiled catalog in
+/** Total placement cost, and therefore the bundle's `startingBounty`: every attacker, beacon
+ *  and mine at the shipped prices (1,601 before M3 story 8 made every tower a fifth dearer).
+ *  Pinned here and re-derived, component by component, from the compiled catalog in
  *  `layout-catalog.test.ts`, so a cost edit anywhere fails at author time. */
-export const CATALOG_TOTAL_SPEND = 1601;
+export const CATALOG_TOTAL_SPEND = 1983;
 
 /** One placement the catalog scene makes, in commit order. */
 export interface CatalogPlacement {

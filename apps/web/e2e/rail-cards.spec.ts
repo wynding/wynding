@@ -39,12 +39,13 @@ async function place(page: Page, key: string, col: number, row: number): Promise
   await expect(page.locator('.wy-panel')).toBeHidden();
 }
 
-/** Spend the Bounty from 80 to 11: four Frost Splash (16 each) and a Basic (5). Splash (12),
- *  Beacon (15) and Frost Splash (16) are then short; everything else is affordable. */
-async function spendTo11(page: Page): Promise<void> {
-  for (const col of [3, 6, 9, 12]) await place(page, '9', col, 3);
-  await place(page, '1', 15, 3);
-  await expect(bounty(page)).toHaveText('Bounty: 11');
+/** Spend the Bounty from 96 to 14: three Frost Splash (20 each) and two Venom (11 each).
+ *  Splash (15), Beacon (18) and Frost Splash (20) are then short; everything else is
+ *  affordable. (M3 story 8's prices; at the first pass's it was 80 to 11.) */
+async function spendTo14(page: Page): Promise<void> {
+  for (const col of [3, 6, 9]) await place(page, '9', col, 3);
+  for (const col of [12, 15]) await place(page, '4', col, 3);
+  await expect(bounty(page)).toHaveText('Bounty: 14');
 }
 
 test.describe("#181 H3: the can't-afford state", () => {
@@ -52,7 +53,7 @@ test.describe("#181 H3: the can't-afford state", () => {
     page,
   }) => {
     await gotoAt(page, WIDE);
-    await spendTo11(page);
+    await spendTo14(page);
     const splash = page.locator('.wy-card').nth(2);
     const basic = page.locator('.wy-card').nth(0);
 
@@ -61,7 +62,7 @@ test.describe("#181 H3: the can't-afford state", () => {
     await expect(splash.locator('.wy-card-need')).toBeVisible();
     await expect(splash.locator('.wy-card-need')).toHaveText('need 1');
     await expect(splash).toHaveAccessibleDescription('Not enough Bounty: 1 more needed.');
-    await expect(splash).toHaveAccessibleName('Splash Tower Cost: 12 3');
+    await expect(splash).toHaveAccessibleName('Splash Tower Cost: 15 3');
     const shortLook = await splash.evaluate((card) => ({
       art: getComputedStyle(card.querySelector('.wy-card-swatch') as HTMLElement).opacity,
       cost: getComputedStyle(card.querySelector('.wy-card-cost-value') as HTMLElement).color,
@@ -73,7 +74,7 @@ test.describe("#181 H3: the can't-afford state", () => {
     await expect(basic).not.toHaveClass(/wy-card--short/);
     await expect(basic.locator('.wy-card-need')).toBeHidden();
     await expect(basic).toHaveAccessibleDescription('');
-    await expect(basic).toHaveAccessibleName('Basic Tower Cost: 5 1');
+    await expect(basic).toHaveAccessibleName('Basic Tower Cost: 6 1');
     const fine = await basic.evaluate(
       (card) => getComputedStyle(card.querySelector('.wy-card-swatch') as HTMLElement).opacity,
     );
@@ -84,7 +85,7 @@ test.describe("#181 H3: the can't-afford state", () => {
     page,
   }) => {
     await gotoAt(page, WIDE);
-    await spendTo11(page);
+    await spendTo14(page);
     const splash = page.locator('.wy-card').nth(2);
     // Tag the nodes a press could be resting on (#98): the "need N" text and the cost number.
     await splash.evaluate((card) => {
@@ -95,10 +96,10 @@ test.describe("#181 H3: the can't-afford state", () => {
       tag(card.querySelector('.wy-card-cost-value')!.firstChild);
       tag(card);
     });
-    await place(page, '1', 18, 3); // another Basic: 11 -> 6
-    await expect(bounty(page)).toHaveText('Bounty: 6');
-    await expect(splash.locator('.wy-card-need')).toHaveText('need 6');
-    await expect(splash).toHaveAccessibleDescription('Not enough Bounty: 6 more needed.');
+    await place(page, '1', 18, 3); // a Basic: 14 -> 8
+    await expect(bounty(page)).toHaveText('Bounty: 8');
+    await expect(splash.locator('.wy-card-need')).toHaveText('need 7');
+    await expect(splash).toHaveAccessibleDescription('Not enough Bounty: 7 more needed.');
     const same = await splash.evaluate((card) => {
       const probe = (n: Node | null): boolean =>
         (n as unknown as { wyProbe?: number } | null)?.wyProbe === 1;
@@ -113,7 +114,7 @@ test.describe("#181 H3: the can't-afford state", () => {
       cost: true,
       card: true,
     });
-    // A Card that has just become short says so too: Slow (8) at 6.
+    // A Card that has just become short says so too: Slow (10) at 8.
     await expect(page.locator('.wy-card').nth(1)).toHaveAccessibleDescription(
       'Not enough Bounty: 2 more needed.',
     );
@@ -121,7 +122,7 @@ test.describe("#181 H3: the can't-afford state", () => {
 
   test('a short Card still arms — placement, not the Card, refuses the build', async ({ page }) => {
     await gotoAt(page, WIDE);
-    await spendTo11(page);
+    await spendTo14(page);
     const splash = page.locator('.wy-card').nth(2);
     await splash.click();
     await expect(splash).toHaveAttribute('aria-pressed', 'true');
@@ -218,7 +219,7 @@ test.describe('#181 H3: the Panel docked below the Cards', () => {
       expect(m.roleVisible).toBe(true);
       // Label-value rows: the label on the left, the value at the right edge.
       expect(m.rows.map((r) => [r.label, r.value])).toEqual([
-        ['Cost', '9'],
+        ['Cost', '11'],
         ['Damage', '2'],
         ['Range', '4.0 tiles'],
         ['Fire rate', '0.7/s'],
@@ -314,7 +315,7 @@ test.describe('#181 L2: a narrow Rail never scrolls sideways', () => {
     page,
   }) => {
     await gotoAt(page, { width: 360, height: 640 });
-    await spendTo11(page);
+    await spendTo14(page);
     await page.addStyleTag({ content: ':root { font-size: 200% }' });
     const m = await sideways(page);
     expect(m.chipsShown, 'three Cards short, so three chips to check').toBe(3);
@@ -338,7 +339,7 @@ test.describe('#181 H3/L2: axe in every state the Rail redesign adds', () => {
       };
       await gotoAt(page, size);
       await audit('at rest');
-      await spendTo11(page);
+      await spendTo14(page);
       await audit('three Cards short');
       await page.keyboard.press('3'); // Splash, short by one
       await expect(page.locator('.wy-panel')).toBeVisible();
@@ -515,9 +516,9 @@ test.describe('#181 H3: the corner hotkey never paints over its Card', () => {
       await page.keyboard.press('Escape');
       await expect(page.getByRole('dialog', { name: 'Settings' })).toBeHidden();
       const cards = page.locator('.wy-card');
-      await expect(cards.nth(0)).toHaveAccessibleName('Basic Tower Cost: 5 BracketLeft');
-      await expect(cards.nth(2)).toHaveAccessibleName('Splash Tower Cost: 12 ArrowDown');
-      await expect(cards.nth(8)).toHaveAccessibleName('Frost Splash Tower Cost: 16 Unbound');
+      await expect(cards.nth(0)).toHaveAccessibleName('Basic Tower Cost: 6 BracketLeft');
+      await expect(cards.nth(2)).toHaveAccessibleName('Splash Tower Cost: 15 ArrowDown');
+      await expect(cards.nth(8)).toHaveAccessibleName('Frost Splash Tower Cost: 20 Unbound');
       expect(await page.evaluate(paintedClashes)).toEqual([]);
     });
   }
@@ -560,7 +561,7 @@ test.describe('#181 H3: the armed and the short Card, as painted', () => {
     page,
   }) => {
     await gotoAt(page, WIDE);
-    await spendTo11(page);
+    await spendTo14(page);
     const ink = (n: number) =>
       page
         .locator('.wy-card')
@@ -606,9 +607,9 @@ test.describe('#181 H3: only a digit is painted in the corner', () => {
       await page.keyboard.press('Escape');
       await expect(page.getByRole('dialog', { name: 'Settings' })).toBeHidden();
       const cards = page.locator('.wy-card');
-      await expect(cards.nth(0)).toHaveAccessibleName('Basic Tower Cost: 5 F1');
-      await expect(cards.nth(1)).toHaveAccessibleName('Slow Tower Cost: 8 W');
-      await expect(cards.nth(2)).toHaveAccessibleName('Splash Tower Cost: 12 M');
+      await expect(cards.nth(0)).toHaveAccessibleName('Basic Tower Cost: 6 F1');
+      await expect(cards.nth(1)).toHaveAccessibleName('Slow Tower Cost: 10 W');
+      await expect(cards.nth(2)).toHaveAccessibleName('Splash Tower Cost: 15 M');
       // Cards 4-9 keep their digits, so a digit that is not painted was hidden by its tile.
       const hotkeys = page.locator('.wy-card-hotkey');
       await expect(hotkeys).toHaveText(['F1', 'W', 'M', '4', '5', '6', '7', '8', '9']);
@@ -689,7 +690,7 @@ test.describe('#181 H3: under forced colours, arming moves nothing inside the Ca
     }) => {
       await page.emulateMedia({ forcedColors: 'active' });
       await gotoAt(page, size);
-      await spendTo11(page); // Splash (Card 3) is short by one, so "need 1" paints
+      await spendTo14(page); // Splash (Card 3) is short by one, so "need 1" paints
       const card = page.locator('.wy-card').nth(2);
       const parts = () =>
         card.evaluate((c) => {

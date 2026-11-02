@@ -22,7 +22,7 @@ import { PROFILES } from './profiles';
 // RECORDED-ONLY, exactly like `stress.perf.spec.ts`: the only HARD assertions are the
 // ones that prove the scene was genuinely at load before any number is believed — never a
 // budget number. Those are the browser-side echoes of the Node oracle's own rows
-// (`pnpm perf:catalog`): 165 towers standing, the entire 1,601 starting bounty spent, the
+// (`pnpm perf:catalog`): 165 towers standing, the entire 1,983 starting bounty spent, the
 // sustained ≥ 300 live creeps, the sim still advancing, the phase still `running`.
 //
 // The tower count is 165 and not 155 at every point this spec reads it: every mine pad is
@@ -142,7 +142,7 @@ test('catalog scene: fps / heap / input latency', async ({ page }, testInfo) => 
   const setupMs = Date.now() - setupStart;
 
   // The scene must have SPENT ITS WHOLE BOUNTY — the catalog table's placement cost is
-  // exactly the bundle's `startingBounty` (1601), so a non-zero leftover proves a
+  // exactly the bundle's `startingBounty` (1983), so a non-zero leftover proves a
   // placement was silently refused. This is the one placement oracle that survives the
   // detonating-mine finding intact: it is read after the build, before any detonation.
   const bounty = await page.evaluate(() => window.wyndingPerfCatalog!.bounty());

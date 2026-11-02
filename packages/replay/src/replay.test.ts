@@ -182,7 +182,8 @@ describe('replay validate() — re-simulation budget caps', { timeout: 120_000 }
    * Play a juggling build on the shipped board and validate its log (it doesn't depend on the
    * board's shape): `kept` basics placed and
    * kept, then `flips` sell-and-rebuild flips of one more, every command committed and paid
-   * for (5 a placement, 5 − 3 a flip). The bundle starts with enough bounty and a long first
+   * for (a basic's cost a placement, that cost less its refund a flip — read from the catalog,
+   * which M3 story 8 retuned). The bundle starts with enough bounty and a long first
    * countdown that the whole script plays before a creep exists, so nothing blocks an anchor.
    */
   function juggle(kept: number, flips: number) {
@@ -216,7 +217,9 @@ describe('replay validate() — re-simulation budget caps', { timeout: 120_000 }
     }
     expect(state.waveCursor, 'the script ran before any wave launched').toBe(0);
     expect(state.towers.id, 'every flip committed and was undone').toHaveLength(kept);
-    expect(state.bounty).toBe(3_000 - 5 * kept - 2 * flips);
+    const cost = ruleset.towerById.basic!.cost;
+    const refund = Math.floor((cost * ruleset.balance.refundNum) / ruleset.balance.refundDen);
+    expect(state.bounty).toBe(3_000 - cost * kept - (cost - refund) * flips);
     while (!isTerminalPhase(state.phase)) play([]);
 
     const commands = tickInputs.flat();

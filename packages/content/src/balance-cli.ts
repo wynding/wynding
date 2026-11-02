@@ -3,8 +3,9 @@
 // bundle from disk (`balance-artifacts.ts`). Opt-in: it is not part of `verify`. It exits
 // nonzero when the report can't be trusted — every failure `balance-report.ts` names: nothing
 // registered, a set with no builds, a build whose plan didn't finish or whose run never
-// ended, or a capacity drawing the sim won't take as drawn or that doesn't draw the
-// strongest build.
+// ended, a juggling or centre-only build that isn't one of the set's, a juggling build that
+// never juggles or goes over the replay's command budgets, or a capacity drawing the sim
+// won't take as drawn or that doesn't draw the strongest build.
 
 import { loadArtifactRuleset } from './balance-artifacts';
 import { balanceReport } from './balance-report';

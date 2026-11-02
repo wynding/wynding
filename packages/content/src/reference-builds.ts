@@ -7,10 +7,12 @@
 // pinned loser, drawn from the plans in `showcase-builds.ts`. `balance-calibration.test.ts`
 // proves each compiles to exactly that plan and reproduces M2's pinned outcome.
 //
-// The second is M3's, on the shipped crossing board (M3 stories 5–7): three winners of the
+// The second is M3's, on the shipped crossing board (M3 stories 5–8): three winners of the
 // whole run — one maze both routes walk, one maze per route, one straight channel both routes
-// walk — and the five losers section A names. The first winner fills the board, so it is
-// also the set's capacity drawing. `balance-crossing.test.ts` pins their outcomes.
+// walk — the five losers section A names, and the two builds section B reports beside them: a
+// juggling build and one whose only anti-air is a centre cluster. The first winner fills the
+// board, so it is also the set's capacity drawing. `balance-crossing.test.ts` pins their
+// outcomes.
 //
 // Every grid below is the whole 28 × 24 board, so a cell's column is its position in the
 // line and its row is the line's (both from 0):
@@ -141,23 +143,25 @@ export const M2_SHOWCASE: ReferenceSet = {
   builds: [M2_WINNER_A, M2_WINNER_B, M2_PINNED_LOSER],
 };
 
-// --- M3: the crossing board (M3 stories 5–7, the whole run) --------------------------------
+// --- M3: the crossing board (M3 stories 5–8, the whole run) --------------------------------
 //
 // THE SERPENTINE merges both routes into one maze. A wall down the west side (columns 2–3)
 // turns west creeps up to row 1, where the north route starts; both then wind east and back
 // between the horizontal walls, and a wall down the east side (columns 24–25) keeps west
 // creeps from cutting across to their exit until the maze is behind them. Block 1 affords
 // the first two horizontal walls; the antiair over the west lane stands where the third and
-// fourth will, its first two placed before the west wall's lower half, so they stand by the
-// first flyers even when towers cost more. Splash at the entrance for the swarm, venom along
-// the corridors for armor and the bosses. Block 2 builds the other five walls, down to the
-// bottom border, all but the last tower, which goes down in wave 21; the finished maze fills
-// the board: no 2 × 2 is left clear of both routes' paths. The three walls along the west
-// lane (rows 8, 11 and 14) carry its antiair for block 3's armored flyers: row 11 alternates
-// antiair and beacons, row 8 sets a beacon among its antiair, rows 8 and 14 each have a slow
-// at the west end to hold the flyers in range, and row 17 sets a beacon between two antiair
-// across the north lane. The rest is basic and splash, level by spend, splash along every
-// corridor both routes walk; by spend the whole build is a basic and splash build.
+// fourth will. The west wall reaches the bottom border before the first antiair goes down,
+// so the first fast creeps walk the whole maze; the fifth and sixth go down before the third
+// wall, so the armored-flyer wall meets six. Splash at the entrance for the swarm, venom
+// along the corridors for armor and the bosses. Block 2 builds the other five walls, down to
+// the bottom border, and their last towers go down in block 3, the last in wave 23; the
+// finished maze fills the board: no 2 × 2 is left clear of both routes' paths. The three
+// walls along the west lane (rows 8, 11 and 14) carry its antiair for block 3's armored
+// flyers: row 11 alternates antiair and beacons, row 8 sets a beacon among its antiair, rows
+// 8 and 14 each have a slow at the west end to hold the flyers in range, and row 17 sets a
+// beacon between two antiair across the north lane. The rest is basic and splash, nearly
+// level by spend, splash along every corridor both routes walk; by spend the whole build is
+// a splash and basic build.
 //
 // TWO MAZES defends the routes separately. Three vertical walls (columns 3–4 and 10–11 from
 // the top border, 7–8 from the bottom) wind the west route; two horizontal walls east of
@@ -167,11 +171,11 @@ export const M2_SHOWCASE: ReferenceSet = {
 // run, over its top turn, beside the north route's east turn), and antiair rings both lanes
 // — a block beside the north lane's south half, a row along the west lane's east half around
 // a beacon, three more at the crossing; its first two antiair stand before the north maze's
-// last walls, so they are up for the first flyers even when towers cost more. Six more,
-// placed late in block 2 against block 3's air, stand down the north lane above the crossing
-// (two antiair and a beacon) and over the west lane east of it, with a venom beside the west
-// route's last run. It still lets a few of block 3's armored flyers and its north boss
-// through, so it wins on fewer lives. By spend it is a venom and antiair build.
+// last walls, so they are up for the first flyers. Six more, placed late in block 2 against
+// block 3's air, stand down the north lane above the crossing (two antiair and a beacon) and
+// over the west lane east of it, with a venom beside the west route's last run. It lets a
+// few armored flyers through at each wall and the finale, and the finale's north boss, so it
+// wins on fewer lives. By spend it is a venom and antiair build.
 //
 // THE CHANNEL sends both routes down one straight channel. A wall from the top border
 // (columns 3–4) turns west creeps down at the entrance; a block three towers wide from the
@@ -217,9 +221,9 @@ export const M3_SERPENTINE: ReferenceBuild = {
     #############+##############
   `,
   order: `
-    b2,11 b2,13 p2,9 p2,7 p2,5 b2,3 b12,2 v14,2 v10,2 b16,2 b8,2 v18,2 b6,2 b20,2 b4,2 a10,11
-    a14,11 b2,15 b2,17 b2,19 b2,21 a6,11 s24,11 s24,9 b24,13 b24,7 b24,15 b24,5 b24,17 b24,3
-    b24,19 b24,1 a18,11 b22,5 v20,5 b18,5 p16,5 b14,5 v12,5 a22,11 a12,8 a20,8 b10,5 v8,5 b6,5
+    b2,11 b2,13 p2,9 p2,7 p2,5 b2,3 b12,2 v14,2 v10,2 b16,2 b8,2 v18,2 b6,2 b20,2 b4,2 b2,15
+    b2,17 b2,19 b2,21 a10,11 a14,11 a6,11 s24,11 s24,9 b24,13 b24,7 b24,15 b24,5 b24,17 b24,3
+    b24,19 b24,1 a18,11 a22,11 a12,8 b22,5 v20,5 b18,5 p16,5 b14,5 v12,5 a20,8 b10,5 v8,5 b6,5
     s4,8 p6,8 p8,8 a10,8 a14,8 c16,8 a18,8 c8,11 c12,11 c16,11 c20,11 s4,14 p6,14 p8,14 a10,14
     a12,14 a14,14 b16,14 p18,14 b20,14 b6,17 p8,17 a10,17 c12,17 a14,17 b16,17 p18,17 b20,17
     b22,17 b4,20 p6,20 b8,20 p10,20 a12,20 p14,20 p16,20 b18,20 b20,20
@@ -408,9 +412,9 @@ export const M3_NO_ANTI_AIR: ReferenceBuild = {
     #############+##############
   `,
   order: `
-    b2,11 b2,13 p2,9 p2,7 p2,5 b2,3 b12,2 v14,2 v10,2 b16,2 b8,2 v18,2 b6,2 b20,2 b4,2 v10,11
-    v14,11 b2,15 b2,17 b2,19 b2,21 v6,11 b24,11 b24,9 b24,13 b24,7 b24,15 b24,5 b24,17 b24,3
-    b24,19 b24,1 v18,11 b22,5 v20,5 b18,5 p16,5 b14,5 v12,5 v22,11 v12,8 v20,8 b10,5 v8,5 b6,5
+    b2,11 b2,13 p2,9 p2,7 p2,5 b2,3 b12,2 v14,2 v10,2 b16,2 b8,2 v18,2 b6,2 b20,2 b4,2 b2,15
+    b2,17 b2,19 b2,21 v10,11 v14,11 v6,11 b24,11 b24,9 b24,13 b24,7 b24,15 b24,5 b24,17 b24,3
+    b24,19 b24,1 v18,11 v22,11 v12,8 b22,5 v20,5 b18,5 p16,5 b14,5 v12,5 v20,8 b10,5 v8,5 b6,5
     b4,8 p6,8 p8,8 v10,8 v14,8 b16,8 v18,8 b8,11 b12,11 b16,11 b20,11 b4,14 p6,14 p8,14 v10,14
     v12,14 v14,14 b16,14 p18,14 b20,14 b6,17 p8,17 v10,17 b12,17 v14,17 b16,17 p18,17 b20,17
     b22,17 b4,20 p6,20 b8,20 p10,20 v12,20 p14,20 p16,20 b18,20 b20,20
@@ -451,9 +455,9 @@ export const M3_DAMAGE_ONLY: ReferenceBuild = {
     #############+##############
   `,
   order: `
-    b2,11 b2,13 p2,9 p2,7 p2,5 b2,3 b12,2 b14,2 b10,2 b16,2 b8,2 b18,2 b6,2 b20,2 b4,2 a10,11
-    a14,11 b2,15 b2,17 b2,19 b2,21 a6,11 b24,11 b24,9 b24,13 b24,7 b24,15 b24,5 b24,17 b24,3
-    b24,19 b24,1 a18,11 b22,5 b20,5 b18,5 p16,5 b14,5 b12,5 a22,11 a12,8 a20,8 b10,5 b8,5 b6,5
+    b2,11 b2,13 p2,9 p2,7 p2,5 b2,3 b12,2 b14,2 b10,2 b16,2 b8,2 b18,2 b6,2 b20,2 b4,2 b2,15
+    b2,17 b2,19 b2,21 a10,11 a14,11 a6,11 b24,11 b24,9 b24,13 b24,7 b24,15 b24,5 b24,17 b24,3
+    b24,19 b24,1 a18,11 a22,11 a12,8 b22,5 b20,5 b18,5 p16,5 b14,5 b12,5 a20,8 b10,5 b8,5 b6,5
     b4,8 p6,8 p8,8 a10,8 a14,8 a16,8 a18,8 a8,11 a12,11 a16,11 a20,11 b4,14 p6,14 p8,14 a10,14
     a12,14 a14,14 b16,14 p18,14 b20,14 b6,17 p8,17 a10,17 a12,17 a14,17 b16,17 p18,17 b20,17
     b22,17 b4,20 p6,20 b8,20 p10,20 a12,20 p14,20 p16,20 b18,20 b20,20
@@ -504,9 +508,114 @@ export const M3_CORRIDOR: ReferenceBuild = {
   `,
 };
 
-/** M3's set on the shipped crossing board: the three winners of the whole run, then the five
- *  losers. The serpentine is the strongest — the only winner on all 20 lives — and it fills
- *  the board, so it is its own capacity drawing. */
+/** The serpentine's maze with its anti-air pulled into the centre (m3.md, B's centre-only
+ *  check): tower for tower its plan, with every tower it anchors in columns 8–17 and rows
+ *  8–14 — the middles of its three walls along the west lane, around the crossing at
+ *  (13, 11) — an antiair or a beacon, and nothing outside that block that can hit a flyer:
+ *  a venom wherever else it places an antiair, a basic wherever it places a slow (the one
+ *  other kind that reaches the air). Eleven antiair at the crossing, four beacons among them. */
+export const M3_CENTRE_ANTI_AIR: ReferenceBuild = {
+  id: 'm3-centre-anti-air',
+  summary:
+    'the serpentine with its only anti-air a cluster at the crossing: eleven antiair and four beacons around (13, 11), nothing else that can hit a flyer',
+  grid: `
+    #############+##############
+    #.......................bb.#
+    #...bbbbbbvvbbvvbbvvbb..bb.#
+    #.bbbbbbbbvvbbvvbbvvbb..bb.#
+    #.bb....................bb.#
+    #.pp..bbvvbbvvbbppbbvvbbbb.#
+    #.pp..bbvvbbvvbbppbbvvbbbb.#
+    #.pp....................bb.#
+    #.ppbbppaaaaaaaaccvvvv..bb.#
+    #.ppbbppaaaaaaaaccvvvv..bb.#
+    #.pp....................bb.#
+    +.bb..vvccaaccaaccvvccvvbb.+
+    #.bb..vvccaaccaaccvvccvvbb.#
+    #.bb....................bb.#
+    #.bbbbppaaaaaaaaaappbb..bb.#
+    #.bbbbppaaaaaaaaaappbb..bb.#
+    #.bb....................bb.#
+    #.bb..bbppvvccvvbbppbbbbbb.#
+    #.bb..bbppvvccvvbbppbbbbbb.#
+    #.bb....................bb.#
+    #.bbbbppbbppvvppppbbbb..bb.#
+    #.bbbbppbbppvvppppbbbb.....#
+    #.bb.......................#
+    #############+##############
+  `,
+  order: `
+    b2,11 b2,13 p2,9 p2,7 p2,5 b2,3 b12,2 v14,2 v10,2 b16,2 b8,2 v18,2 b6,2 b20,2 b4,2 b2,15
+    b2,17 b2,19 b2,21 a10,11 a14,11 v6,11 b24,11 b24,9 b24,13 b24,7 b24,15 b24,5 b24,17 b24,3
+    b24,19 b24,1 v18,11 v22,11 a12,8 b22,5 v20,5 b18,5 p16,5 b14,5 v12,5 v20,8 b10,5 v8,5 b6,5
+    b4,8 p6,8 a8,8 a10,8 a14,8 c16,8 v18,8 c8,11 c12,11 c16,11 c20,11 b4,14 p6,14 a8,14 a10,14
+    a12,14 a14,14 a16,14 p18,14 b20,14 b6,17 p8,17 v10,17 c12,17 v14,17 b16,17 p18,17 b20,17
+    b22,17 b4,20 p6,20 b8,20 p10,20 v12,20 p14,20 p16,20 b18,20 b20,20
+  `,
+};
+
+/** The juggling build (m3.md, "Juggling"; section B reports it beside the honest winners):
+ *  the serpentine's plan with a basic wherever it places a venom — so nothing it builds
+ *  answers the bosses' armor, and played straight it loses the finale by a life — and then,
+ *  once the finale's bosses reach the maze's last corridor (row 19), it juggles them there.
+ *  That corridor runs east to the gap above the last wall's east end; the juggle trades the
+ *  basic at that wall's west end, (4, 20), for one in the east gap, (22, 20), and back, a
+ *  sell then a placement each time, so the corridor's exit swaps ends and north creeps turn
+ *  back the length of it under its towers. A west creep's way out is as long by either end,
+ *  so it is not held. The flip ticks are measured: each turns the lead boss as it nears the
+ *  open end. Every flip is a sell with creeps alive, so the report never counts it a winner. */
+export const M3_JUGGLER: ReferenceBuild = {
+  id: 'm3-juggler',
+  summary:
+    'the serpentine without its venom, juggling the finale’s north boss along the maze’s last corridor: the basic at its west end traded for one at its east end and back',
+  grid: `
+    #############+##############
+    #.......................bb.#
+    #...bbbbbbbbbbbbbbbbbb..bb.#
+    #.bbbbbbbbbbbbbbbbbbbb..bb.#
+    #.bb....................bb.#
+    #.pp..bbbbbbbbbbppbbbbbbbb.#
+    #.pp..bbbbbbbbbbppbbbbbbbb.#
+    #.pp....................bb.#
+    #.ppssppppaaaaaaccaaaa..bb.#
+    #.ppssppppaaaaaaccaaaa..ss.#
+    #.pp....................ss.#
+    +.bb..aaccaaccaaccaaccaass.+
+    #.bb..aaccaaccaaccaaccaass.#
+    #.bb....................bb.#
+    #.bbssppppaaaaaabbppbb..bb.#
+    #.bbssppppaaaaaabbppbb..bb.#
+    #.bb....................bb.#
+    #.bb..bbppaaccaabbppbbbbbb.#
+    #.bb..bbppaaccaabbppbbbbbb.#
+    #.bb....................bb.#
+    #.bbbbppbbppaappppbbbbbbbb.#
+    #.bbbbppbbppaappppbbbbbb...#
+    #.bb.......................#
+    #############+##############
+  `,
+  order: `
+    b2,11 b2,13 p2,9 p2,7 p2,5 b2,3 b12,2 b14,2 b10,2 b16,2 b8,2 b18,2 b6,2 b20,2 b4,2 b2,15
+    b2,17 b2,19 b2,21 a10,11 a14,11 a6,11 s24,11 s24,9 b24,13 b24,7 b24,15 b24,5 b24,17 b24,3
+    b24,19 b24,1 a18,11 a22,11 a12,8 b22,5 b20,5 b18,5 p16,5 b14,5 b12,5 a20,8 b10,5 b8,5 b6,5
+    s4,8 p6,8 p8,8 a10,8 a14,8 c16,8 a18,8 c8,11 c12,11 c16,11 c20,11 s4,14 p6,14 p8,14 a10,14
+    a12,14 a14,14 b16,14 p18,14 b20,14 b6,17 p8,17 a10,17 c12,17 a14,17 b16,17 p18,17 b20,17
+    b22,17 b4,20 p6,20 b8,20 p10,20 a12,20 p14,20 p16,20 b18,20 b20,20
+    -b4,20@19087 b22,20@19088 -b22,20@19258 b4,20@19259 -b4,20@19428 b22,20@19429
+    -b22,20@19599 b4,20@19600 -b4,20@19770 b22,20@19771 -b22,20@19940 b4,20@19941
+    -b4,20@20111 b22,20@20112 -b22,20@20282 b4,20@20283 -b4,20@20452 b22,20@20453
+    -b22,20@20623 b4,20@20624 -b4,20@20794 b22,20@20795 -b22,20@20964 b4,20@20965
+    -b4,20@21135 b22,20@21136 -b22,20@21306 b4,20@21307 -b4,20@21476 b22,20@21477
+    -b22,20@21647 b4,20@21648 -b4,20@21818 b22,20@21819 -b22,20@21988 b4,20@21989
+    -b4,20@22159 b22,20@22160 -b22,20@22330 b4,20@22331 -b4,20@22500 b22,20@22501
+    -b22,20@22671 b4,20@22672 -b4,20@22842 b22,20@22843 -b22,20@23012 b4,20@23013
+  `,
+};
+
+/** M3's set on the shipped crossing board: the three winners of the whole run, the five
+ *  losers, then the two builds section B reports beside them. The serpentine is the
+ *  strongest — the only winner on all 20 lives — and it fills the board, so it is its own
+ *  capacity drawing. */
 export const M3_CROSSING: ReferenceSet = {
   id: 'm3-crossing',
   rulesetId: 'wynding-core',
@@ -521,8 +630,12 @@ export const M3_CROSSING: ReferenceSet = {
     M3_NO_ANTI_AIR,
     M3_DAMAGE_ONLY,
     M3_CORRIDOR,
+    M3_JUGGLER,
+    M3_CENTRE_ANTI_AIR,
   ],
   fullBoard: M3_SERPENTINE,
+  juggling: M3_JUGGLER,
+  centreAntiAir: M3_CENTRE_ANTI_AIR,
 };
 
 /** Every set the balance report runs. */

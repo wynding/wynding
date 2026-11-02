@@ -200,7 +200,7 @@ export const CATALOG_BUILD_TICKS = 55;
  *  `boardId` is the catalog bundle's own board, so it is unusable against the stress
  *  bundle by construction — the two scenes share geometry, never a replay.
  *
- *  Placement cost sums to exactly 1,601, which IS the catalog bundle's `startingBounty`,
+ *  Placement cost sums to exactly 1,983, which IS the catalog bundle's `startingBounty`,
  *  so the zero-leftover oracle works here for the same reason it does on the stress
  *  scene — but derived from the real per-tower costs rather than from an equal-cost
  *  assumption the real catalog would break. */

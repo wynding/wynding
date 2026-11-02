@@ -1205,12 +1205,12 @@ test.describe('M2-S12a: the condensed Panel and the Rail affordance', () => {
     expect(m.fullClip).toContain('inset');
     expect(m.fullWidth).toBeLessThanOrEqual(2);
     expect(m.glanceAriaHidden).toBe('true');
-    expect(m.fullText).toContain('Cost: 16');
+    expect(m.fullText).toContain('Cost: 20');
     // The cost leads with the HUD's gem (#181: the inline-SVG icon, where it was the `◈`
     // glyph), painted at a real size, then the number.
     expect(m.gemClass).toContain('wy-icon--bounty');
     expect(m.gemWidth, 'the gem must be painted, not collapsed').toBeGreaterThan(6);
-    expect(m.costRowText).toMatch(/^16 · /);
+    expect(m.costRowText).toMatch(/^20 · /);
 
     // The BOUND, asserted on intrinsic `scrollHeight` rather than rendered height: P3's cap
     // already squeezes any Panel in a 320px Rail, so a rendered-height bound could not tell

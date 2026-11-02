@@ -134,16 +134,18 @@ describe('getBundledRuleset (happy path + authored values)', () => {
   });
 
   it('carries the tower catalog: `basic`, the S3 `slow` tower (S7: attack domain widens ground → both), the S4a `splash` tower, the S5a `venom` tower, the S6 `stun` tower, the S7 `antiair` tower, the S8 `beacon` (attackless — a support bundle carries no `attack` key at all), the S9 `mine` (a burst bundle: its `attack` carries a trigger range, not a firing cadence — it never fires twice), and the S10 `frost-splash` tower', () => {
+    // Re-pinned M3 story 8 (m3.md, "Economy" — the balance pass's lever on the board-full
+    // wave): every cost a fifth dearer, rounded up to a whole bounty, in the same order.
     expect(ruleset.towerCatalog).toEqual([
       {
         id: 'basic',
-        cost: 5,
+        cost: 6,
         attack: { domain: 'ground', rangeFp: 1024, cadenceTicks: 30, travelTicks: 4 },
         effects: [{ kind: 'direct', form: 'single', damage: 10 }],
       },
       {
         id: 'slow',
-        cost: 8,
+        cost: 10,
         attack: { domain: 'both', rangeFp: 1024, cadenceTicks: 30, travelTicks: 2 },
         effects: [
           { kind: 'direct', form: 'single', damage: 2 },
@@ -152,13 +154,13 @@ describe('getBundledRuleset (happy path + authored values)', () => {
       },
       {
         id: 'splash',
-        cost: 12,
+        cost: 15,
         attack: { domain: 'ground', rangeFp: 1024, cadenceTicks: 60, travelTicks: 8 },
         effects: [{ kind: 'direct', form: 'aoe', damage: 8, radiusFp: 384 }],
       },
       {
         id: 'venom',
-        cost: 9,
+        cost: 11,
         attack: { domain: 'ground', rangeFp: 1024, cadenceTicks: 30, travelTicks: 2 },
         effects: [
           { kind: 'direct', form: 'single', damage: 2 },
@@ -167,7 +169,7 @@ describe('getBundledRuleset (happy path + authored values)', () => {
       },
       {
         id: 'stun',
-        cost: 10,
+        cost: 12,
         attack: { domain: 'ground', rangeFp: 768, cadenceTicks: 40, travelTicks: 2 },
         effects: [
           { kind: 'direct', form: 'single', damage: 4 },
@@ -176,7 +178,7 @@ describe('getBundledRuleset (happy path + authored values)', () => {
       },
       {
         id: 'antiair',
-        cost: 7,
+        cost: 9,
         // Re-pinned M2-S11 P4: `cadenceTicks` 20 → 15. The wave-8 wall (arc row 8, 6 ×
         // `armored-flyer`: air, armor 5, so `antiair`'s 8 nets 3 a hit and nothing else in
         // the catalog touches air for more than 2) could not be cleared at cadence 20
@@ -189,18 +191,18 @@ describe('getBundledRuleset (happy path + authored values)', () => {
       },
       {
         id: 'beacon',
-        cost: 15,
+        cost: 18,
         effects: [{ kind: 'support', damageMulFp: 384 }],
       },
       {
         id: 'mine',
-        cost: 6,
+        cost: 8,
         attack: { domain: 'ground', rangeFp: 576, travelTicks: 1 },
         effects: [{ kind: 'burst', form: 'aoe', damage: 45, radiusFp: 640 }],
       },
       {
         id: 'frost-splash',
-        cost: 16,
+        cost: 20,
         attack: { domain: 'ground', rangeFp: 1024, cadenceTicks: 60, travelTicks: 8 },
         effects: [
           { kind: 'direct', form: 'aoe', damage: 6, radiusFp: 384 },
@@ -213,10 +215,12 @@ describe('getBundledRuleset (happy path + authored values)', () => {
   it('carries the starting economy, refund/slow-floor fractions and early-call bounty divisor', () => {
     // Re-pinned M3 story 5 (m3.md, "Lives" and "Economy"): 20 starting lives for a run three
     // times M2's length, and the early-call bounty divisor 50 → 100, so a call on M3's
-    // 500–800-tick countdowns pays at most 5–8. Starting bounty and refund are M2's.
+    // 500–800-tick countdowns pays at most 5–8. Refund is M2's. Re-pinned M3 story 8: the
+    // starting bounty 80 → 96 with the towers' costs (a fifth dearer), so the opening still
+    // buys sixteen basics.
     expect(ruleset.balance).toEqual({
       startingLives: 20,
-      startingBounty: 80,
+      startingBounty: 96,
       refundNum: 3,
       refundDen: 4,
       slowFloorNum: 1,
@@ -256,7 +260,8 @@ describe('getBundledRuleset (happy path + authored values)', () => {
     ]);
     // The creep HP curve (m3.md, "Creep HP growth"): flat at 100 through block 1, then rising
     // every wave of block 2 to 175 at wave 20 (M3 story 6), and on through block 3 to 270 at
-    // wave 25, flat from there to wave 30 (M3 story 7).
+    // wave 25, flat from there to wave 30 (M3 story 7). Re-pinned M3 story 8: 270 from wave 24
+    // (was 255), so the curve flattens the wave after the measured board-full wave, 23.
     expect(board.waves.map((w) => w.hpPercent)).toEqual([
       ...Array<number>(10).fill(100),
       110,
@@ -272,8 +277,7 @@ describe('getBundledRuleset (happy path + authored values)', () => {
       195,
       215,
       235,
-      255,
-      ...Array<number>(6).fill(270),
+      ...Array<number>(7).fill(270),
     ]);
   });
 
@@ -293,6 +297,9 @@ describe('getBundledRuleset (happy path + authored values)', () => {
   // flies both lanes at once; the wall is wave 29's armored flyers down both lanes; wave 30
   // sends two bosses from the west, 400 ticks apart, and one from the north, each route's
   // armored-flyer escort 600 ticks behind its last boss. Clear bonuses are 4, and 8 on wave 30.
+  // Re-pinned M3 story 8 (the balance pass): wave 16 flies 12 flyers down the north lane, 8
+  // ticks apart (was 10, 12 apart); the wall, wave 19, sends 10 armored flyers (was 8) and 4
+  // north swarm (was 10); wave 24 rises to 270% (was 255).
   it('carries the whole first-pass arc, row for row: compositions, routes, spacings, offsets, countdowns, clear bonuses, hit points', () => {
     const e = (
       creepId: string,
@@ -337,15 +344,15 @@ describe('getBundledRuleset (happy path + authored values)', () => {
       wave(12, 500, 3, [e('resolute', 'west', 8, 15), e('resolute', 'north', 8, 15)], 130),
       wave(13, 500, 3, [e('armored', 'west', 6, 25), e('armored', 'north', 6, 25)], 140),
       wave(14, 500, 3, [e('normal', 'west', 10, 15), e('swarm', 'north', 10, 5), e('fast', 'north', 6, 15, 120)], 150),
-      wave(15, 550, 3, [e('flying', 'north', 10, 12)], 155),
+      wave(15, 550, 3, [e('flying', 'north', 12, 8)], 155),
       wave(16, 500, 3, [e('fast', 'north', 12, 12), e('resolute', 'west', 8, 15)], 160),
       wave(17, 500, 3, [e('armored', 'north', 8, 20), e('swarm', 'west', 16, 5)], 165),
-      wave(18, 550, 3, [e('armored-flyer', 'west', 8, 18), e('armored', 'north', 8, 20), e('swarm', 'north', 10, 5, 120)], 170),
+      wave(18, 550, 3, [e('armored-flyer', 'west', 10, 18), e('armored', 'north', 8, 20), e('swarm', 'north', 4, 5, 120)], 170),
       wave(19, 700, 7, [e('boss', 'west', 1, 20), e('boss', 'north', 1, 20, 200), e('normal', 'west', 8, 20, 600), e('normal', 'north', 8, 20, 800)], 175),
       wave(20, 800, 4, [e('normal', 'west', 6, 15), e('normal', 'north', 6, 15)], 195),
       wave(21, 500, 4, [e('swarm', 'west', 16, 4), e('swarm', 'north', 10, 4)], 215),
       wave(22, 550, 4, [e('fast', 'west', 10, 12), e('fast', 'north', 10, 12)], 235),
-      wave(23, 550, 4, [e('armored', 'west', 8, 20), e('armored', 'north', 8, 20)], 255),
+      wave(23, 550, 4, [e('armored', 'west', 8, 20), e('armored', 'north', 8, 20)], 270),
       wave(24, 550, 4, [e('normal', 'west', 10, 12), e('normal', 'north', 10, 12), e('swarm', 'north', 8, 4, 150)], 270),
       wave(25, 600, 4, [e('armored-flyer', 'west', 10, 15), e('flying', 'north', 10, 15)], 270),
       wave(26, 550, 4, [e('swarm', 'north', 14, 4), e('fast', 'north', 8, 12, 60), e('resolute', 'west', 6, 12)], 270),
@@ -670,9 +677,13 @@ describe('the win-over-loss score ordering invariant (m2.md §Scoring & star gra
     // 1,084 (m3.md's budget). A loss can forfeit at most 1,084 − 20 = 1,064; the worst win
     // leaks all six bosses (18 lives, 150) and one 3-bounty creep and keeps one life:
     // 1,084 − 153 + 25 = 956.
-    expect(B).toBe(1084);
-    expect(bestLossKillBounty).toBe(1064);
-    expect(worstWinScore).toBe(956);
+    // Re-pinned M3 story 8 (measured): the balance pass's block-2 moves add two flyers (4) and
+    // two armored flyers (6) and cut six swarm (6): 544 creeps, 1,088 bounty. A loss can
+    // forfeit at most 1,088 − 20 = 1,068; the worst win leaks the same 153: 1,088 − 153 + 25
+    // = 960.
+    expect(B).toBe(1088);
+    expect(bestLossKillBounty).toBe(1068);
+    expect(worstWinScore).toBe(960);
     // Re-pinned #25 (SIM_VERSION 15 → 16, measured): the best losing SCORE moves 201 → 0,
     // and the margin 17 → 218 with it.
     expect(bestLossScore).toBe(0);
@@ -691,7 +702,7 @@ describe('the win-over-loss score ordering invariant (m2.md §Scoring & star gra
     const lost = bestCaseLosingTerminal();
     // Anti-vacuity first: this terminal really is carrying both score inputs, and the
     // bounty half is the arc's own maximum, not a token value.
-    expect(lost.cumulativeKillBounty).toBe(1064);
+    expect(lost.cumulativeKillBounty).toBe(1068);
     expect(lost.cumulativeEarlyCallCredit).toBeGreaterThan(0);
     // ...and it grades 0 on both readouts, so no losing run of this bundle can reach any
     // winning run's score — without a leaderboard consumer gating on phase or stars.

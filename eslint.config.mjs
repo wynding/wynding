@@ -390,7 +390,7 @@ const neverShippedPerf = (message) =>
 
 /** `@wynding/content`'s exports map, PARTITIONED — every subpath is either shippable or a
  *  synthetic perf bundle, and the partition is asserted TOTAL against the manifest. */
-const CONTENT_SHIPPABLE = ['.', './artifact'];
+const CONTENT_SHIPPABLE = ['.', './artifact', './paths'];
 const CONTENT_SYNTHETIC = ['./stress', './catalog'];
 
 /** The never-shippable content subpaths, checked against the manifest rather than trusted.

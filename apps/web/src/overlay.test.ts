@@ -1138,7 +1138,7 @@ describe('overlay — Card/Panel/live region (PLAN.md P2)', () => {
   it('the Card shows the localized name/cost and a live hotkey badge, mirrored via aria-pressed', () => {
     const { overlay, card } = setup();
     expect(card.name.textContent).toBe('Basic Tower');
-    expect(card.cost.textContent).toBe('Cost: 5');
+    expect(card.cost.textContent).toBe('Cost: 6');
     expect(card.hotkey.textContent).toBe('1'); // Digit1 default
     expect(card.root.getAttribute('aria-keyshortcuts')).toBe('1');
 
@@ -1163,7 +1163,7 @@ describe('overlay — Card/Panel/live region (PLAN.md P2)', () => {
     const slowCard = shell.cards[1]!;
     expect(slowCard.towerId).toBe('slow');
     expect(slowCard.name.textContent).toBe('Slow Tower');
-    expect(slowCard.cost.textContent).toBe('Cost: 8');
+    expect(slowCard.cost.textContent).toBe('Cost: 10');
     expect(slowCard.hotkey.textContent).toBe('2'); // Digit2 default
     expect(slowCard.root.getAttribute('aria-keyshortcuts')).toBe('2');
   });
@@ -1174,7 +1174,7 @@ describe('overlay — Card/Panel/live region (PLAN.md P2)', () => {
     const splashCard = shell.cards[2]!;
     expect(splashCard.towerId).toBe('splash');
     expect(splashCard.name.textContent).toBe('Splash Tower');
-    expect(splashCard.cost.textContent).toBe('Cost: 12');
+    expect(splashCard.cost.textContent).toBe('Cost: 15');
     expect(splashCard.hotkey.textContent).toBe('3'); // Digit3 default
     expect(splashCard.root.getAttribute('aria-keyshortcuts')).toBe('3');
   });
@@ -1429,7 +1429,7 @@ describe('overlay — Card/Panel/live region (PLAN.md P2)', () => {
     });
     const text = panel.root.textContent!;
     expect(text).toContain('Beacon');
-    expect(text).toContain('Cost: 15');
+    expect(text).toContain('Cost: 18');
     // Derived from the def's own `damageMulFp` (384) — NOT a hardcoded "+50%", so a
     // modded bundle's Panel cannot lie. (384 - 256) / 256 = 50%.
     expect(text).toContain('Support: +50.0% damage to towers sharing a full edge'); // formatNumber's 1dp, as every other row
@@ -1544,7 +1544,7 @@ describe('overlay — Card/Panel/live region (PLAN.md P2)', () => {
     expect(panel.root.hidden).toBe(false);
     const text = panel.root.textContent!;
     expect(text).toContain('Basic Tower');
-    expect(text).toContain('Cost: 5');
+    expect(text).toContain('Cost: 6');
     expect(text).toContain('Damage: 10');
     expect(text).toContain('Range: 4.0 tiles'); // rangeFp 1024 / FP_ONE 256
     expect(text).toContain('Fire rate: 0.7/s'); // (1000/50) / 30 cadenceTicks
@@ -1598,7 +1598,7 @@ describe('overlay — Card/Panel/live region (PLAN.md P2)', () => {
     expect(panel.root.hidden).toBe(false);
     const text = panel.root.textContent!;
     expect(text).toContain('Splash Tower');
-    expect(text).toContain('Cost: 12');
+    expect(text).toContain('Cost: 15');
     expect(text).toContain('Damage: 8'); // the aoe effect's amount, not 0
     expect(text).toContain('Range: 4.0 tiles');
     expect(text).toContain('Fire rate: 0.3/s'); // (1000/50) / 60 cadenceTicks
@@ -1624,7 +1624,7 @@ describe('overlay — Card/Panel/live region (PLAN.md P2)', () => {
     expect(panel.root.hidden).toBe(false);
     const text = panel.root.textContent!;
     expect(text).toContain('Mine');
-    expect(text).toContain('Cost: 6');
+    expect(text).toContain('Cost: 8');
     expect(text).toContain('Damage: 45'); // the aoe effect's amount
     expect(text).toContain('Trigger range: 2.3 tiles'); // rangeFp 576 / FP_ONE 256
     expect(text).not.toContain('Range:'); // never the ordinary firing-range label too
@@ -1678,7 +1678,7 @@ describe('overlay — Card/Panel/live region (PLAN.md P2)', () => {
     expect(glance.getAttribute('aria-hidden')).toBe('true');
     expect(full.getAttribute('aria-hidden')).toBeNull();
     // The full block still carries the whole sentence set.
-    expect(full.textContent).toContain('Cost: 5');
+    expect(full.textContent).toContain('Cost: 6');
     expect(full.textContent).toContain('Damage: 10');
     expect(full.textContent).toContain('Range: 4.0 tiles');
   });
@@ -1719,16 +1719,16 @@ describe('overlay — Card/Panel/live region (PLAN.md P2)', () => {
     // reintroduces the gold metaphor CONTEXT.md's Bounty entry avoids.
     const costRow = glance.querySelector('p')!;
     expect(costRow.firstElementChild!.getAttribute('class')).toContain('wy-icon--bounty');
-    expect(costRow.textContent).toMatch(/^16 · /);
+    expect(costRow.textContent).toMatch(/^20 · /);
     // LEADING it: the gem is the row's first node, ahead of the text — `firstElementChild`
     // alone also passes with the gem appended after the row's text.
     expect(costRow.firstChild).toBe(costRow.firstElementChild);
     expect(g).not.toContain('◈'); // one mark, never the glyph beside the icon
-    expect(g).not.toMatch(/\b16g\b/);
+    expect(g).not.toMatch(/\b20g\b/);
   });
 
   // The glance form must be defined for the catalog's REAL shapes, not just the ordinary
-  // one — a single template with optional slots produces "15 ·  dmg" for a beacon and a
+  // one — a single template with optional slots produces "18 ·  dmg" for a beacon and a
   // phantom fire rate for a mine.
   it('the glance form covers a support tower (no attack) and a burst tower (no fire rate)', () => {
     const { overlay, panel } = setup();
@@ -1752,14 +1752,14 @@ describe('overlay — Card/Panel/live region (PLAN.md P2)', () => {
     // cost+damage one. Asserted on that shape rather than on the absence of the word "dmg",
     // which the Support row legitimately carries now that it names what its percentage
     // modifies.
-    expect(beacon.costRow).toBe('15');
+    expect(beacon.costRow).toBe('18');
     expect(beacon.text).not.toContain('tiles'); // no range
     expect(beacon.text).not.toContain('/s'); // no fire rate
     expect(beacon.text).not.toContain('Hits'); // no target domain
 
     // `mine` is burst: a TRIGGER range, a blast, single-use, and NO fire rate.
     const { text: mine, costRow: mineCost } = glanceOf('mine');
-    expect(mineCost).toBe('6 · 45 dmg');
+    expect(mineCost).toBe('8 · 45 dmg');
     expect(mine).toContain('Trigger 2.3 tiles');
     expect(mine).toContain('Blast 2.5 tiles');
     expect(mine).toContain('One shot');
@@ -1800,7 +1800,7 @@ describe('overlay — Card/Panel/live region (PLAN.md P2)', () => {
     expect(panel.root.hidden).toBe(false);
     const text = panel.root.textContent!;
     expect(text).toContain('Venom Tower');
-    expect(text).toContain('Cost: 9');
+    expect(text).toContain('Cost: 11');
     expect(text).toContain('Damage: 2'); // the direct effect's amount only
     expect(text).toContain('Poison: 4 damage every 0.5s for 3.0s'); // dot: 4/10cadence/60duration ticks
   });
@@ -1833,7 +1833,7 @@ describe('overlay — Card/Panel/live region (PLAN.md P2)', () => {
     expect(panel.root.hidden).toBe(false);
     const text = panel.root.textContent!;
     expect(text).toContain('Stun Tower');
-    expect(text).toContain('Cost: 10');
+    expect(text).toContain('Cost: 12');
     expect(text).toContain('Damage: 4'); // the direct effect's amount only
     // "25.0%", not "25%" (QC fix pass): the chance is now routed through
     // `formatNumber`, like every sibling stat — `oneDecimal` always renders exactly
@@ -1881,7 +1881,7 @@ describe('overlay — Card/Panel/live region (PLAN.md P2)', () => {
     expect(panel.root.hidden).toBe(false);
     const text = panel.root.textContent!;
     expect(text).toContain('Frost Splash Tower');
-    expect(text).toContain('Cost: 16');
+    expect(text).toContain('Cost: 20');
     expect(text).toContain('Damage: 6'); // the aoe effect's amount
     // 0.7 × 256 = 179.2, not an integer — the catalog stores 179, and the derivation
     // (256 − 179) / 256 × 100 = 30.078125…% renders as the honest 30.1%, not 30%.
@@ -1947,7 +1947,7 @@ describe('overlay — Card/Panel/live region (PLAN.md P2)', () => {
     expect(panel.root.hidden).toBe(false);
     const text = panel.root.textContent!;
     expect(text).toContain('Slow Tower');
-    expect(text).toContain('Cost: 8');
+    expect(text).toContain('Cost: 10');
     expect(text).toContain('Damage: 2'); // Σ direct amounts of the slow bundle — not basic's 10
     expect(text).not.toContain('Damage: 10');
     expect(text).toContain('Range: 4.0 tiles');
@@ -1969,7 +1969,7 @@ describe('overlay — Card/Panel/live region (PLAN.md P2)', () => {
     expect(panel.root.hidden).toBe(false);
     const text = panel.root.textContent!;
     expect(text).toContain('Slow Tower');
-    expect(text).toContain('Cost: 8');
+    expect(text).toContain('Cost: 10');
     expect(text).toContain('Damage: 2');
     expect(text).not.toContain('Damage: 10');
   });
@@ -5008,15 +5008,15 @@ describe('overlay — the Rail’s Cards and docked Panel (#181 H3/L2)', () => {
     const { overlay, shell } = setup();
     atBounty(overlay, 7);
     const byId = (id: string) => shell.cards.find((c) => c.towerId === id)!;
-    // basic (5) is affordable at 7.
+    // basic (6) is affordable at 7.
     const basic = byId('basic');
     expect(basic.root.classList.contains('wy-card--short')).toBe(false);
     expect(basic.needText.data).toBe('');
     expect(basic.root.hasAttribute('aria-describedby')).toBe(false);
     for (const [id, need] of [
-      ['slow', 1],
-      ['splash', 5],
-      ['frost-splash', 9],
+      ['slow', 3],
+      ['splash', 8],
+      ['frost-splash', 13],
     ] as const) {
       const card = byId(id);
       expect(card.root.classList.contains('wy-card--short'), id).toBe(true);
@@ -5040,11 +5040,11 @@ describe('overlay — the Rail’s Cards and docked Panel (#181 H3/L2)', () => {
       desc: slow.desc.firstChild,
       value: slow.costValue.firstChild,
     };
-    atBounty(overlay, 3); // slow costs 8: 5 short
-    expect(slow.needText.data).toBe('need 5');
-    atBounty(overlay, 6); // 2 short — the same node, its data rewritten
-    expect(slow.needText.data).toBe('need 2');
-    expect(slow.descText.data).toBe('Not enough Bounty: 2 more needed.');
+    atBounty(overlay, 3); // slow costs 10: 7 short
+    expect(slow.needText.data).toBe('need 7');
+    atBounty(overlay, 6); // 4 short — the same node, its data rewritten
+    expect(slow.needText.data).toBe('need 4');
+    expect(slow.descText.data).toBe('Not enough Bounty: 4 more needed.');
     atBounty(overlay, 80); // affordable again
     expect(slow.root.classList.contains('wy-card--short')).toBe(false);
     expect(slow.root.hasAttribute('aria-describedby')).toBe(false);
@@ -5078,7 +5078,7 @@ describe('overlay — the Rail’s Cards and docked Panel (#181 H3/L2)', () => {
     // `aria-pressed`.
     atBounty(overlay, 7);
     expect(observer.takeRecords()).toEqual([]);
-    // A Bounty that changes some shortfalls rewrites only those Cards: basic (5) is affordable
+    // A Bounty that changes some shortfalls rewrites only those Cards: basic (6) is affordable
     // at 7 and at 6, so it is never touched.
     atBounty(overlay, 6);
     const records = observer.takeRecords();
@@ -5138,7 +5138,7 @@ describe('overlay — the Rail’s Cards and docked Panel (#181 H3/L2)', () => {
       ui: uiState({ armed: 'forged' }),
       refund: 0,
     });
-    expect(forgedPanel.root.querySelector('.wy-stats-full p')!.textContent).toBe('Cost: 5');
+    expect(forgedPanel.root.querySelector('.wy-stats-full p')!.textContent).toBe('Cost: 6');
     expect(forgedPanel.root.querySelector('.wy-panel-role')!.textContent).toBe('Targets: Ground');
     // (The shipped catalog's own Panel is unaffected.)
     overlay.update({
@@ -5167,7 +5167,7 @@ describe('overlay — the Rail’s Cards and docked Panel (#181 H3/L2)', () => {
       p.querySelector('.wy-stat-value')!.textContent,
     ]);
     expect(pairs).toEqual([
-      ['Cost', '9'],
+      ['Cost', '11'],
       ['Damage', '3 (boosted)'],
       ['Range', '4.0 tiles'],
       ['Fire rate', '0.7/s'],

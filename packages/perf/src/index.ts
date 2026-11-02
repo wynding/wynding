@@ -138,3 +138,11 @@ export {
   type GateResult,
 } from './gate';
 export { evaluateEscalation, type EscalationResult } from './escalation';
+// The campaign scene (M3 story 8) — additive, recorded only; nothing above changes.
+export {
+  densestStretch,
+  CAMPAIGN_SAMPLE_TICKS,
+  CAMPAIGN_SLACK_TICKS,
+  CAMPAIGN_SAMPLE_START_TICK,
+  CAMPAIGN_AT_START,
+} from './campaign';

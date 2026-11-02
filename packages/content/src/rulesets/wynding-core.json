@@ -88,7 +88,7 @@
   "towerCatalog": [
     {
       "id": "basic",
-      "cost": 5,
+      "cost": 6,
       "attack": {
         "domain": "ground",
         "rangeFp": 1024,
@@ -99,7 +99,7 @@
     },
     {
       "id": "slow",
-      "cost": 8,
+      "cost": 10,
       "attack": {
         "domain": "both",
         "rangeFp": 1024,
@@ -113,7 +113,7 @@
     },
     {
       "id": "splash",
-      "cost": 12,
+      "cost": 15,
       "attack": {
         "domain": "ground",
         "rangeFp": 1024,
@@ -124,7 +124,7 @@
     },
     {
       "id": "venom",
-      "cost": 9,
+      "cost": 11,
       "attack": {
         "domain": "ground",
         "rangeFp": 1024,
@@ -138,7 +138,7 @@
     },
     {
       "id": "stun",
-      "cost": 10,
+      "cost": 12,
       "attack": {
         "domain": "ground",
         "rangeFp": 768,
@@ -152,7 +152,7 @@
     },
     {
       "id": "antiair",
-      "cost": 7,
+      "cost": 9,
       "attack": {
         "domain": "air",
         "rangeFp": 1280,
@@ -163,18 +163,18 @@
     },
     {
       "id": "beacon",
-      "cost": 15,
+      "cost": 18,
       "effects": [{ "kind": "support", "damageMulFp": 384 }]
     },
     {
       "id": "mine",
-      "cost": 6,
+      "cost": 8,
       "attack": { "domain": "ground", "rangeFp": 576, "travelTicks": 1 },
       "effects": [{ "kind": "burst", "form": "aoe", "damage": 45, "radiusFp": 640 }]
     },
     {
       "id": "frost-splash",
-      "cost": 16,
+      "cost": 20,
       "attack": {
         "domain": "ground",
         "rangeFp": 1024,
@@ -189,7 +189,7 @@
   ],
   "balance": {
     "startingLives": 20,
-    "startingBounty": 80,
+    "startingBounty": 96,
     "refundNum": 3,
     "refundDen": 4,
     "slowFloorNum": 1,
@@ -383,7 +383,7 @@
           "countdownTicks": 550,
           "clearBonus": 3,
           "hpPercent": 155,
-          "entries": [{ "creepId": "flying", "entrance": "north", "count": 10, "spacingTicks": 12 }]
+          "entries": [{ "creepId": "flying", "entrance": "north", "count": 12, "spacingTicks": 8 }]
         },
         {
           "index": 16,
@@ -411,12 +411,12 @@
           "clearBonus": 3,
           "hpPercent": 170,
           "entries": [
-            { "creepId": "armored-flyer", "entrance": "west", "count": 8, "spacingTicks": 18 },
+            { "creepId": "armored-flyer", "entrance": "west", "count": 10, "spacingTicks": 18 },
             { "creepId": "armored", "entrance": "north", "count": 8, "spacingTicks": 20 },
             {
               "creepId": "swarm",
               "entrance": "north",
-              "count": 10,
+              "count": 4,
               "spacingTicks": 5,
               "offsetTicks": 120
             }
@@ -486,7 +486,7 @@
           "index": 23,
           "countdownTicks": 550,
           "clearBonus": 4,
-          "hpPercent": 255,
+          "hpPercent": 270,
           "entries": [
             { "creepId": "armored", "entrance": "west", "count": 8, "spacingTicks": 20 },
             { "creepId": "armored", "entrance": "north", "count": 8, "spacingTicks": 20 }
