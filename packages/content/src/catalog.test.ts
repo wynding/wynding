@@ -9,7 +9,7 @@
 // is the browser frame-time cost of the SHIPPED catalog at 150-tower scale.
 //
 // Two numbers here are load-bearing in a way a reader must not "tidy":
-//   - `startingBounty: 1601` is the EXACT cost of the committed 165-placement table
+//   - `startingBounty: 1983` is the EXACT cost of the committed 165-placement table
 //     (`packages/perf/src/layout.ts`'s `CATALOG_TOWER_ID_AT`). The stress scene's
 //     zero-leftover oracle rests on an equal-cost assumption (150 × 12 = 1800) that a
 //     real catalog breaks; deriving the bounty from the table instead is what keeps that
@@ -106,7 +106,7 @@ describe('the catalog bundle carries the nine REAL wynding-core towers, verbatim
       19 * cost('frost-splash') +
       15 * cost('beacon') +
       15 * cost('mine');
-    expect(spend).toBe(1601);
+    expect(spend).toBe(1983); // 1,601 at the first-pass prices, before M3 story 8
     expect(catalog.balance.startingBounty).toBe(spend);
     // …and the distribution really is 165 placements: 135 attackers over the 135
     // non-beacon anchors (135 = 19 × 7 + 2), plus 15 beacons, plus 15 mine pads.
