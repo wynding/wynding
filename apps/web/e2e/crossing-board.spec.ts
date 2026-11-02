@@ -149,14 +149,14 @@ test('the strip names each stream’s route — in words beside a lone stream, b
   await page.getByRole('button', { name: 'Pause' }).click();
   // Start claims wave 1, so calling wave 2 brings up wave 3 — the north route's first, a lone
   // stream: its own arrow, and its route in words.
-  await callWavePaced(page, titleAfterCall(2, 10));
-  await expect(preview.locator('.wy-wave-preview-title')).toHaveText('Wave 3 of 10');
+  await callWavePaced(page, titleAfterCall(2, 20));
+  await expect(preview.locator('.wy-wave-preview-title')).toHaveText('Wave 3 of 20');
   await expect(preview.locator('.wy-preview-arrow')).toHaveText(['↓']);
   await expect(preview.locator('.wy-preview-route-name')).toHaveText(['north to south']);
   await expect(preview.locator('.wy-preview-route-name')).toBeVisible();
   // Wave 4 is the first on both routes: one creep kind, a stream down each.
-  await callWavePaced(page, titleAfterCall(3, 10));
-  await expect(preview.locator('.wy-wave-preview-title')).toHaveText('Wave 4 of 10');
+  await callWavePaced(page, titleAfterCall(3, 20));
+  await expect(preview.locator('.wy-wave-preview-title')).toHaveText('Wave 4 of 20');
   await expect(preview.locator('.wy-preview-full')).toHaveText([
     '8 × Fast Creep — west to east, ground, armor 0, leak cost 1, no immunities',
     '6 × Fast Creep — north to south, ground, armor 0, leak cost 1, no immunities',
@@ -251,18 +251,18 @@ for (const { name, insets, floor } of INSET_CASES) {
 }
 
 // --- The wave's hit-point clause, in a browser (M3) -----------------------------------------
-// No shipped wave changes its creeps' hit points yet, so these run on the waves harness
-// (`e2e-harness/waves-entry.ts`): the real app on the shipped bundle with every wave's
-// `hpPercent` set (`?hp=`), and wave 1 given waves 8 and 9's streams (`&wave=8,9`): four
-// streams on two routes, the densest line the strip shows (block 1's own waves carry two at
-// most; the arc's four-stream waves come with blocks 2–3).
+// The first shipped wave whose creeps' hit points change is wave 11, and the first four-stream
+// wave is wave 20 (M3 story 6), so these run on the waves harness (`e2e-harness/waves-entry.ts`):
+// the real app on the shipped bundle with every wave's `hpPercent` set (`?hp=`), and wave 1
+// given waves 8 and 9's streams (`&wave=8,9`): four streams on two routes, the densest line the
+// strip shows. `smoke.spec.ts` reads block 2's own clauses, wave by wave, on the shipped run.
 
 const WAVES = 'http://localhost:4176/e2e-harness/waves.html';
 
 async function openWaves(page: Page, query: string, zoom: 100 | 200): Promise<void> {
   await page.goto(`${WAVES}?${query}`);
   if (zoom === 200) await page.addStyleTag({ content: ':root { font-size: 200% }' });
-  await expect(page.locator('.wy-wave-preview-title')).toHaveText('Wave 1 of 10');
+  await expect(page.locator('.wy-wave-preview-title')).toHaveText('Wave 1 of 20');
   await expect(page.locator('.wy-wave-preview li')).toHaveCount(4);
   await page.evaluate(
     () => new Promise<void>((r) => requestAnimationFrame(() => requestAnimationFrame(() => r()))),

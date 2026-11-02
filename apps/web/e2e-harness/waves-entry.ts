@@ -3,13 +3,14 @@
 // `dist-e2e`, a directory nothing that ships reads.
 //
 // Why a harness: the wave strip states a wave's hit points when its creeps do not have the
-// catalog's ("+70% hit points"), and no shipped wave does yet — block 1's are all at 100, until
-// stories 6–7 author the ones that grow; nor does block 1 carry a wave of more than two
-// streams, where the arc's densest carry four. So this page boots the REAL app (the real scene,
-// overlay and `main.ts`'s requestAnimationFrame scheduler) on the shipped bundle with its waves
-// changed, through the controller's content seam, and the strip shows them from the first frame:
+// catalog's ("+70% hit points"), and the first shipped wave whose creeps do not is wave 11
+// (block 2, M3 story 6); the arc's densest line, four streams on two routes, first comes at
+// wave 20. Ten and nineteen calls in, they are slow to reach and hard to hold. So this page
+// boots the REAL app (the real scene, overlay and `main.ts`'s requestAnimationFrame
+// scheduler) on the shipped bundle with its waves changed, through the controller's content
+// seam, and the strip shows them from the first frame:
 //
-// - `?hp=<percent>` sets every wave's `hpPercent` (default 100, the shipped value);
+// - `?hp=<percent>` sets every wave's `hpPercent` (default 100, wave 1's shipped value);
 // - `&wave=<n>[,<m>…]` gives wave 1 the streams of waves n, m, … in that order, so a dense line
 //   (`8,9`: four streams on two routes) is what the strip shows before Start.
 //

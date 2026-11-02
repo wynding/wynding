@@ -12,21 +12,20 @@ import { callWavePaced, titleAfterCall } from './paced-call';
 // run — pressing Start both flips `started` (gating `advance()`) AND buffers a
 // `callWaveEarly` for wave 1, consumed on the very next tick. The sim's own `phase` still
 // never flips on Start (only `won`/`lost` are distinct phases), so the observable proof of
-// the claim is the wave preview flipping to "Wave 2 of 10" once that buffered call lands —
+// the claim is the wave preview flipping to "Wave 2 of 20" once that buffered call lands —
 // this spec asserts that LAUNCH directly, alongside the wave-1 countdown movement
 // `advance()`'s `started` gate still produces.
 
 test('holds at tick 0 until Start, commits a Pending pre-start build, and Play-again re-holds', async ({
   page,
 }) => {
-  // Above the sum of this test's own declared worst-case budgets — nine paced calls
+  // Above the sum of this test's own declared worst-case budgets — nineteen paced calls
   // (#70: wave 1 now launches on Start itself, not through this loop) carrying a 5s
-  // in-page deadline each (paced-call.ts) plus the 60s results wait — so a pathological
-  // run dies at the stage that owns it, with that stage's named diagnostic, never as an
-  // anonymous whole-test timeout mid-budget (CodeRabbit #117). The budget itself is
-  // unchanged — #117 pinned it for the marathon's worst case and one fewer paced call
-  // only widens the margin.
-  test.setTimeout(150_000);
+  // in-page deadline each (paced-call.ts) plus the 60s results wait, 155s — so a
+  // pathological run dies at the stage that owns it, with that stage's named diagnostic,
+  // never as an anonymous whole-test timeout mid-budget (CodeRabbit #117). M3 story 6's
+  // twenty-wave run doubled the calls, and the budget grew with them.
+  test.setTimeout(240_000);
   await page.goto('/');
 
   const board = page.locator('.wy-board');
@@ -97,7 +96,7 @@ test('holds at tick 0 until Start, commits a Pending pre-start build, and Play-a
   // reach its first leak, halved by the speed to a still-enormous margin — but it is,
   // strictly, a window the old same-tick Start->Pause did not have, so the real speed is
   // stated rather than assumed.
-  await expect(previewTitle).toHaveText('Wave 2 of 10');
+  await expect(previewTitle).toHaveText('Wave 2 of 20');
   await expect(callWave).toHaveAttribute('aria-disabled', 'false');
 
   // #97: enter the marathon loop PAUSED. An undefended run free-running at 2× while the
@@ -108,21 +107,21 @@ test('holds at tick 0 until Start, commits a Pending pre-start build, and Play-a
   await page.getByRole('button', { name: 'Pause' }).click();
 
   // Early-call every REMAINING wave via the SAME morphed primary control (now
-  // "Call wave") — wave 1 already launched on Start above, so this calls 2 through 10,
-  // keeping the spec deterministic and fast rather than waiting out nine full natural
+  // "Call wave") — wave 1 already launched on Start above, so this calls 2 through 20,
+  // keeping the spec deterministic and fast rather than waiting out nineteen full natural
   // countdowns (smoke.spec.ts exercises the identical flow end-to-end, with the preview
-  // + axe). The bundle carries ten waves — block 1 of M3's arc (M3 story 5) — so this
-  // early-calls nine.
-  for (let waveNumber = 2; waveNumber <= 10; waveNumber++) {
+  // + axe). The bundle carries twenty waves — blocks 1–2 of M3's arc (M3 stories 5–6) —
+  // so this early-calls nineteen.
+  for (let waveNumber = 2; waveNumber <= 20; waveNumber++) {
     // Gate each press on LAUNCH-specific state, not the free-running sim heartbeat:
     // a tick boundary can fall between a tick-read and the click, so a tick-poll
     // passes even when the press itself was swallowed or same-tick-deduped (local
     // QC round 2 + CodeRabbit — the loop would silently stop testing "call every
     // wave"). The preview title only advances when the PREVIOUS call actually
     // landed, and the aria gate proves this press is genuinely accepted-able.
-    await expect(previewTitle).toHaveText(`Wave ${waveNumber} of 10`);
+    await expect(previewTitle).toHaveText(`Wave ${waveNumber} of 20`);
     await expect(callWave).toHaveAttribute('aria-disabled', 'false');
-    await callWavePaced(page, titleAfterCall(waveNumber, 10));
+    await callWavePaced(page, titleAfterCall(waveNumber, 20));
   }
   await expect(previewTitle).toHaveText('Final wave launched — no more waves to call');
 

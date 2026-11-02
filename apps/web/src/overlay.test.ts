@@ -4659,11 +4659,11 @@ describe('overlay — routes, hit points and the wave counter on the crossing bo
     const { overlay, shell } = setup();
     show(overlay, [entry()], { waveNumber: 3, waveCount: 30 });
     expect(shell.preview.title.textContent).toBe('Wave 3 of 30');
-    // And from a real run's HUD: the shipped crossing board's block 1 has ten.
+    // And from a real run's HUD: the shipped crossing board's blocks 1–2 have twenty.
     const c = createController(1);
     overlay.update({ hud: c.hud(), paused: false, speed: 1, ui: uiState(), refund: 0 });
     expect(shell.preview.title.textContent).toBe(`Wave 1 of ${c.ruleset.waves.length}`);
-    expect(c.ruleset.waves).toHaveLength(10);
+    expect(c.ruleset.waves).toHaveLength(20);
   });
 
   it('carries an authored hpPercent from the bundle through a real controller to the clause', () => {
