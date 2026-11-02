@@ -76,8 +76,8 @@
 //     `packages/replay/src/test-support.ts` (which that harness reaches by relative path, the
 //     last for its 30-wave run) carry no hook and no fake transport, and nothing here would see
 //     shipped code import them — nor `reference-build.ts`, `reference-builds.ts` and
-//     `script-runner.ts` in `packages/content/src`, which the perf build's campaign scene reaches
-//     the same way (M3 story 8). The
+//     `m2-fixture-key.ts` in `packages/content/src`, which the perf build's campaign scene
+//     reaches the same way (M3 story 8). The
 //     markers are reached from the module's top-level side effects, so any graph that imports the
 //     module keeps them. A refactor that moves a marker behind a call shipped code never makes lets
 //     Rollup drop it, and the module could then ship unseen — the same limit as `stats.ts` above.

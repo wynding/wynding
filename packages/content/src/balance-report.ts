@@ -394,7 +394,9 @@ const runBuild: MeasureBuild = (build, ruleset, seed) =>
 /** Run every build of every set and render the report. `load` returns a bundled ruleset
  *  by id — the registry in tests, the on-disk artifact from the command line. `measure`
  *  runs a build; a test that has already run a set's builds on the same bundle and seed
- *  passes its own runs, so a whole-arc report is not simulated twice. */
+ *  passes its own runs, so a whole-arc report is not simulated twice. It is also called once
+ *  more for a set's centre-only build, on the set's bundle recompiled with lives to spare, so a
+ *  `measure` that hands back runs it already has must tell the two rulesets apart. */
 export function balanceReport(
   sets: readonly ReferenceSet[],
   load: (rulesetId: string) => Ruleset,
@@ -448,8 +450,10 @@ export function balanceReport(
           `${set.id}: its centre-only anti-air build, ${set.centreAntiAir.id}, is not one of its builds`,
         );
       } else {
-        const spare = () =>
-          measure(
+        // Held to the report's own rule like every measured run: a second run that stalled or
+        // never ended would give a take of the air that means nothing.
+        const spare = () => {
+          const run = measure(
             entry.build,
             compileRuleset(
               { ...bundle, balance: { ...bundle.balance, startingLives: LIVES_TO_SPARE } },
@@ -457,6 +461,9 @@ export function balanceReport(
             ),
             set.seed,
           );
+          failures.push(...checkAllStepsRan(`${set.id}/${entry.build.id} (lives to spare)`, run));
+          return run;
+        };
         lines.push(...centreAntiAirLines(entry, spare, ruleset), '');
       }
     }

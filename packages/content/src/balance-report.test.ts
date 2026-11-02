@@ -390,6 +390,21 @@ describe('the report’s section-B lines (M3 story 8)', () => {
       },
     );
     expect(survives.failures).toEqual([]);
+    // A second run that never ended gives a take that means nothing, so the report fails.
+    const unfinished = report(
+      set,
+      {
+        centre: fake(
+          crossing,
+          { phase: 'won', lives: 14, waveCursor: 30 },
+          { waves: rows(18, 14) },
+        ),
+      },
+      { centre: fake(crossing, { phase: 'running', tick: 72_000, waveCursor: 30 }) },
+    );
+    expect(unfinished.failures).toEqual([
+      'probe/centre (lives to spare): still running at tick 72000, the cap',
+    ]);
     expect(survives.text).toContain(
       'centre-only anti-air: centre won on 14 lives; it met the air down two lanes at once, from wave 26, on 18 lives\n  with lives to spare, the flyers from wave 26 on take 3 (wave 26: 1, wave 29: 2) — fewer than it met that air on: it survives it\n',
     );
