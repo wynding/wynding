@@ -151,7 +151,8 @@ describe('blocks 1–2 keep the spec’s authoring rules (m3.md, "Waves & timing
     // Both lanes at once is block 3's (from wave 26), so no shipped wave flies both yet.
     for (const [k, lanes] of flown.entries())
       expect(lanes.size, `wave ${k + 1}`).toBeLessThanOrEqual(1);
-    // About one wave in four carries air: waves 6, 9, 16 and 19.
+    // Air flies in waves 6, 9, 16 and 19: 4 of 20 so far, toward the arc's 7 of 30 (about one
+    // wave in four).
     expect(flown.flatMap((lanes, k) => (lanes.size > 0 ? [k + 1] : []))).toEqual([6, 9, 16, 19]);
   });
 
@@ -229,24 +230,24 @@ describe('blocks 1–2 keep the spec’s authoring rules (m3.md, "Waves & timing
   });
 
   it('starts a boss’s same-route escorts at least 600 ticks after it (M2’s measured fix)', () => {
-    let bosses = 0;
+    const checked: string[] = [];
     for (const wave of board.waves) {
       for (const boss of wave.entries.filter((e) => creepById.get(e.creepId)!.role === 'boss')) {
-        bosses++;
         const bossLast = (boss.offsetTicks ?? 0) + (boss.count - 1) * boss.spacingTicks;
         for (const escort of wave.entries) {
           if (escort === boss || escort.entrance !== boss.entrance) continue;
           expect(escort.offsetTicks ?? 0, `wave ${wave.index + 1}`).toBeGreaterThanOrEqual(
             bossLast + 600,
           );
+          checked.push(`wave ${wave.index + 1} ${boss.entrance}`);
         }
       }
     }
     // Block 1's one boss (wave 10, from the west) has no same-route escort — its escort walks
     // the north route — so the rule first bites in block 2: wave 20's west boss leads its
     // escort by 600 ticks, and its north boss, 200 ticks in, leads its own escort by 600 too.
-    // The count keeps this honest.
-    expect(bosses).toBe(3);
+    // The pairs checked keep this honest.
+    expect(checked).toEqual(['wave 20 west', 'wave 20 north']);
   });
 });
 

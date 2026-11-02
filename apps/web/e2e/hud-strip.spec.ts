@@ -1313,7 +1313,7 @@ test('Compact: the room the wings take moves no count, and no wing runs onto one
   // the page — beside the icon, the old check exactly; a count on the line under it sits below
   // the wings, whatever their reach across. Both forms are measured (the premises at the end).
   // Whether a count fits the column at all is the wrap's, pinned by the per-phone tests below.
-  test.setTimeout(360_000); // ten previews, two windows and four text sizes; generous for slow cores
+  test.setTimeout(360_000); // twenty previews, two windows and four text sizes; generous for slow cores
   await gotoAt(page, PHONE);
   expect(await page.evaluate((q) => matchMedia(q).matches, COMPACT_QUERY)).toBe(true);
   const previewTitle = page.locator('.wy-wave-preview .wy-wave-preview-title');
@@ -1379,7 +1379,9 @@ test('Compact: the room the wings take moves no count, and no wing runs onto one
   await expect(previewTitle).toHaveText('Wave 2 of 20');
   await page.getByRole('button', { name: 'Pause' }).click();
   await check('wave 2');
-  for (let waveNumber = 2; waveNumber <= 9; waveNumber++) {
+  // Every wave the run previews, to wave 20 (M3 story 6): block 2's entries are measured too,
+  // its three- and four-stream lines among them, each under its wave's hit-point clause.
+  for (let waveNumber = 2; waveNumber <= 19; waveNumber++) {
     await callWavePaced(page, titleAfterCall(waveNumber, 20));
     await check(`wave ${waveNumber + 1}`);
   }

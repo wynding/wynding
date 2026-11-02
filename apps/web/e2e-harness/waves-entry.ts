@@ -10,7 +10,7 @@
 // scheduler) on the shipped bundle with its waves changed, through the controller's content
 // seam, and the strip shows them from the first frame:
 //
-// - `?hp=<percent>` sets every wave's `hpPercent` (default 100, wave 1's shipped value);
+// - `?hp=<percent>` sets every wave's `hpPercent` (absent, each wave keeps its shipped one);
 // - `&wave=<n>[,<m>…]` gives wave 1 the streams of waves n, m, … in that order, so a dense line
 //   (`8,9`: four streams on two routes) is what the strip shows before Start.
 //
@@ -22,7 +22,7 @@ import { createApp, rafScheduler } from '../src/main';
 import { createController } from '../src/controller';
 
 const params = new URLSearchParams(window.location.search);
-const hp = Number(params.get('hp') ?? '100');
+const hp = params.get('hp');
 const from = (params.get('wave') ?? '1').split(',').map(Number);
 
 const bundle = structuredClone(getBundledRuleset()) as Ruleset;
@@ -36,7 +36,9 @@ const streams = from.flatMap((n) => {
   return source.entries;
 });
 board.waves[0]!.entries = structuredClone(streams);
-for (const wave of board.waves) wave.hpPercent = hp;
+if (hp !== null) {
+  for (const wave of board.waves) wave.hpPercent = Number(hp);
+}
 const content = { bundle, boardId: defaultBoardId(bundle) } as const;
 
 const root = document.getElementById('app');

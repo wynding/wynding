@@ -118,7 +118,7 @@ describe('M2-S11 P6 — client/server replay parity through the real handler()',
     expect(payload.ok).toBe(true);
     expect(payload.score).toBe(clientScore);
     expect(payload.stars).toBe(clientStars);
-  });
+  }, 120_000);
 
   it('leg 3a: a replay whose script differs by one placement is re-simulated and returns the independently derived, known-different score', async () => {
     const ruleset = compileRuleset(bundle, BOARD_ID);
@@ -131,19 +131,20 @@ describe('M2-S11 P6 — client/server replay parity through the real handler()',
     expect(original.state.phase).toBe('won');
     const originalScore = deriveScore(original.state, ruleset);
 
-    // Drop exactly ONE placement — the fourth, the west wall's `splash` two rows above the
-    // entrance — a genuinely different build, re-simulated from scratch, never a
+    // Drop exactly ONE placement — the fourth, the west wall's second `splash` above the
+    // entrance (rows 7–8) — a genuinely different build, re-simulated from scratch, never a
     // claimed-score echo. Measured: it still WINS, on fewer lives, so the changed value is a
     // real score rather than a loss's 0. (Since M3 story 6 the run is twenty waves, and
-    // dropping the wall's first three towers loses it.)
+    // dropping any one of the wall's first three towers loses it.)
     const tamperedIndex = 3;
-    expect(baseScript[tamperedIndex]).toBeDefined();
+    expect(baseScript[tamperedIndex]).toMatchObject({ towerId: 'splash', col: 2, row: 7 });
     const tamperedScript = [
       ...baseScript.slice(0, tamperedIndex),
       ...baseScript.slice(tamperedIndex + 1),
     ];
     const tampered = runScript(ruleset, tamperedScript);
     expect(tampered.state.phase).toBe('won');
+    expect(tampered.state.lives).toBeLessThan(original.state.lives);
     const tamperedScore = deriveScore(tampered.state, ruleset);
     const tamperedStars = deriveStars(tampered.state, ruleset);
 
@@ -161,7 +162,7 @@ describe('M2-S11 P6 — client/server replay parity through the real handler()',
     expect(payload.score).toBe(tamperedScore);
     expect(payload.stars).toBe(tamperedStars);
     expect(payload.score).not.toBe(originalScore);
-  });
+  }, 120_000);
 
   it('leg 3b: a forged extra claimed-score field on the wire is accepted, re-simulated, and ignored', async () => {
     const ruleset = compileRuleset(bundle, BOARD_ID);
@@ -189,7 +190,7 @@ describe('M2-S11 P6 — client/server replay parity through the real handler()',
     expect(payload.score).toBe(trueScore);
     expect(payload.stars).toBe(trueStars);
     expect(payload.score).not.toBe(999_999_999);
-  });
+  }, 120_000);
 });
 
 describe('#25 item 1 — the terminal contract is STRICT, on a WINNING replay, through the real handler', () => {

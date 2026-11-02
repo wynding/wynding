@@ -8,13 +8,16 @@ import { defineConfig } from 'vitest/config';
 export default defineConfig({
   test: {
     // Turning coverage on is what makes this necessary. `replay-parity.test.ts` re-simulates
-    // the full ten-wave arc through `handler()` three times, and v8's instrumentation costs
-    // roughly 5x on that loop — measured here, 489ms of test time without `--coverage`
+    // the full arc (ten waves then) through `handler()` three times, and v8's instrumentation
+    // costs roughly 5x on that loop — measured here, 489ms of test time without `--coverage`
     // against 2.31s with it. Locally that still fits vitest's 5s default; on the CI runner
     // the same legs took 7.5s and 5.8s and timed out, red on the first push of #108. So the
     // package that opts into the instrumentation also states the budget it needs. Generous
     // on purpose (4x the worst CI reading, a quarter of what `m2-golden.test.ts` grants its
     // goldens): a slow cold runner must not red a suite that is merely doing its job.
+    // Since M3 story 6 the arc is twenty waves, about 11,700 ticks a run, about 2s each under
+    // coverage locally; every leg that plays it states its own 120s budget, so this default
+    // covers the rest of the package.
     testTimeout: 30_000,
     coverage: {
       provider: 'v8',

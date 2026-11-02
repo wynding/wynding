@@ -8,7 +8,13 @@ import { describe, it, expect } from 'vitest';
 import { compileRuleset } from '@wynding/sim';
 import { loadRulesetOrM2Fixture } from './m2-fixture';
 import { drawGrid, type ReferenceSet } from './reference-build';
-import { M3_CROSSING, M3_SERPENTINE, M3_UNDEFENDED, M3_WEST_ONLY } from './reference-builds';
+import {
+  M3_CROSSING,
+  M3_SERPENTINE,
+  M3_TWO_MAZES,
+  M3_UNDEFENDED,
+  M3_WEST_ONLY,
+} from './reference-builds';
 import {
   drawnCapacity,
   firstWaveCovering,
@@ -179,6 +185,24 @@ describe('the report’s capacity lines', () => {
       'income with every early call at its maximum reaches 361 by the end of wave 10, short of it',
     );
   });
+
+  it(
+    'fail the report for a drawing that does not draw the strongest build',
+    { timeout: 120_000 },
+    () => {
+      // Two mazes is the set's only winner, so its strongest; the serpentine's plan does not
+      // begin with its plan, so the serpentine priced is no drawing of it.
+      const set: ReferenceSet = {
+        ...M3_CROSSING,
+        id: 'probe',
+        builds: [M3_TWO_MAZES],
+        fullBoard: M3_SERPENTINE,
+      };
+      expect(balanceReport([set], loadRulesetOrM2Fixture).failures).toEqual([
+        "probe/m3-serpentine: the capacity drawing does not draw the strongest build, m3-two-mazes — its plan does not begin with that build's",
+      ]);
+    },
+  );
 
   it('fail the report for a drawing the sim will not take', () => {
     const set: ReferenceSet = {

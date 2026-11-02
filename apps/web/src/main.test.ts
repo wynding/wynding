@@ -2731,7 +2731,7 @@ describe('main — backgrounding pauses the run, and NOTHING resumes it (#139)',
   });
 
   it('…and the same after a WIN', () => {
-    // Reaching a real win needs a maze that survives every wave and its bosses; the money cap is
+    // Reaching a real win needs a maze that survives every wave and its bosses; the bounty cap is
     // sixteen towers and every layout tried loses, so the one terminal phase a unit test
     // cannot play its way to is supplied through `AppDeps.controllerFactory` — the seam that
     // exists for exactly this. Only the PHASE is forced: `isTerminal()` is derived from it by

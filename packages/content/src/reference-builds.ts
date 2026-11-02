@@ -150,10 +150,11 @@ export const M2_SHOWCASE: ReferenceSet = {
 // the first two horizontal walls; the antiair over the west lane stands where the third and
 // fourth will. Splash at the entrance for the swarm, venom along the corridors for armor and
 // the boss. Block 2 builds the other five walls, down to the bottom border, which fills the
-// board: no 2 × 2 is left clear of both routes' paths. Their towers are mostly splash,
-// because both routes walk every corridor, with venom down the middle for armor and the two
-// bosses, antiair down column 12 under the north lane, and two beacons in the row-11
-// antiair line for wave 19's armored flyers. By spend it is a basic and splash build.
+// board: no 2 × 2 is left clear of both routes' paths. Their towers are basic and splash,
+// splash the most by spend because both routes walk every corridor, with venom down the
+// middle for armor and the two bosses, antiair down column 12 under the north lane, and two
+// beacons in the row-11 antiair line for wave 19's armored flyers. By spend the whole build
+// is a basic and splash build.
 //
 // TWO MAZES defends the routes separately. Three vertical walls (columns 3–4 and 10–11 from
 // the top border, 7–8 from the bottom) wind the west route; two horizontal walls east of
@@ -313,12 +314,13 @@ export const M3_WEST_ONLY: ReferenceBuild = {
   `,
 };
 
-/** The serpentine's maze for the ground alone: every antiair it holds a venom, every slow a
- *  basic, so no tower it places can hit a flyer (only `antiair` and `slow` reach the air). */
+/** The serpentine for the ground alone: tower for tower its plan, with a venom wherever it
+ *  places an antiair and a basic wherever it places a slow or a beacon, so no tower it places
+ *  can hit a flyer (only `antiair` and `slow` reach the air) or lift one that can. */
 export const M3_NO_ANTI_AIR: ReferenceBuild = {
   id: 'm3-no-anti-air',
   summary:
-    'the serpentine’s maze with nothing that can hit a flyer: venom where its antiair stands, basic where its slow does',
+    'the serpentine with nothing that can hit a flyer: venom where its antiair stands, basic where its slow and beacons do',
   grid: `
     #############+##############
     #.......................bb.#
@@ -328,20 +330,20 @@ export const M3_NO_ANTI_AIR: ReferenceBuild = {
     #.pp..bbvvbbvvbbppbbvvbbbb.#
     #.pp..bbvvbbvvbbppbbvvbbbb.#
     #.pp....................bb.#
-    #.ppbbvvbbppvvvvbbvvvv..bb.#
-    #.ppbbvvbbppvvvvbbvvvv..bb.#
+    #.ppbbppbbppvvvvbbppvv..bb.#
+    #.ppbbppbbppvvvvbbppvv..bb.#
     #.pp....................bb.#
-    +.bb..vvvvvvbbvvvvvvbbvvbb.+
-    #.bb..vvvvvvbbvvvvvvbbvvbb.#
+    +.bb..vvppvvbbvvvvvvbbvvbb.+
+    #.bb..vvppvvbbvvvvvvbbvvbb.#
     #.bb....................bb.#
-    #.bbbbvvbbppvvvvbbvvbb..bb.#
-    #.bbbbvvbbppvvvvbbvvbb..bb.#
+    #.bbbbppbbppvvvvbbppbb..bb.#
+    #.bbbbppbbppvvvvbbppbb..bb.#
     #.bb....................bb.#
-    #.bb..bbvvbbvvppbbvvbbbbbb.#
-    #.bb..bbvvbbvvppbbvvbbbbbb.#
+    #.bb..bbppbbvvppbbppbbbbbb.#
+    #.bb..bbppbbvvppbbppbbbbbb.#
     #.bb....................bb.#
-    #.bbbbvvbbppvvvvbbbbbb..bb.#
-    #.bbbbvvbbppvvvvbbbbbb.....#
+    #.bbbbppbbppvvvvbbbbbb..bb.#
+    #.bbbbppbbppvvvvbbbbbb.....#
     #.bb.......................#
     #############+##############
   `,
@@ -350,9 +352,9 @@ export const M3_NO_ANTI_AIR: ReferenceBuild = {
     b2,17 b2,19 b2,21 v10,11 v14,11 v6,11 b24,11 b24,9 b24,13 b24,7 b24,15 b24,5 b24,17
     b24,3 b24,19 b24,1 v18,11 b22,5 v20,5 b18,5 p16,5 b14,5 v12,5 v22,11 v12,8 v20,8 b10,5
     v8,5 b6,5
-    b4,8 v6,8 b8,8 p10,8 v14,8 b16,8 v18,8 v8,11 b12,11 v16,11 b20,11 b4,14 v6,14 b8,14 p10,14
-    v12,14 v14,14 b16,14 v18,14 b20,14 b6,17 v8,17 b10,17 v12,17 p14,17 b16,17 v18,17 b20,17
-    b22,17 b4,20 v6,20 b8,20 p10,20 v12,20 v14,20 b16,20 b18,20 b20,20
+    b4,8 p6,8 b8,8 p10,8 v14,8 b16,8 p18,8 p8,11 b12,11 v16,11 b20,11 b4,14 p6,14 b8,14 p10,14
+    v12,14 v14,14 b16,14 p18,14 b20,14 b6,17 p8,17 b10,17 v12,17 p14,17 b16,17 p18,17 b20,17
+    b22,17 b4,20 p6,20 b8,20 p10,20 v12,20 v14,20 b16,20 b18,20 b20,20
   `,
 };
 

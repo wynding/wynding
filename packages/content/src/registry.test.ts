@@ -278,7 +278,7 @@ describe('getBundledRuleset (happy path + authored values)', () => {
   // west, its escort down the north route 600 ticks later. Every clear bonus is the spec's
   // `2 + ⌊(wave − 1) / 10⌋`, plus 4 on the boss wave.
   // Re-pinned M3 story 6: block 2 (rows 11–20) follows, its hit points rising 110 → 175.
-  // Wave 11 is the relief, on a 700-tick countdown; both routes carry every threat; the
+  // Wave 11 is the relief, on a 700-tick countdown; the north route carries the full mix; the
   // north lane's air joins at wave 16; the wall is wave 19's armored flyers from the west
   // beside armored creeps from the north; wave 20 sends a boss down each route, each with its
   // escort 600 ticks behind on its own route.

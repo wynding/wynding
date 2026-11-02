@@ -330,9 +330,21 @@ describe('M3 stories 5–6 — the reference builds, blocks 1–2 on the crossin
     'no anti-air places nothing that can hit a flyer, and loses by the end of block 2 to the north lane’s flyers, located by creep id',
     { timeout: 120_000 },
     () => {
-      // Every tower it places attacks the ground alone: the serpentine's maze with venom for
-      // its antiair and basic for its slow, the two kinds that reach the air.
+      // The serpentine's plan, step for step, with a venom for each antiair and a basic for
+      // each slow (the two kinds that reach the air) and each beacon (which lifts them) —
+      // so every tower it places attacks the ground alone.
       const plan = compileReferenceBuild(M3_NO_ANTI_AIR, ruleset);
+      const swap: Readonly<Record<string, string>> = {
+        antiair: 'venom',
+        slow: 'basic',
+        beacon: 'basic',
+      };
+      const serpentine = compileReferenceBuild(M3_SERPENTINE, ruleset);
+      expect(plan).toEqual(
+        serpentine.map((s) =>
+          s.kind === 'sell' ? s : { ...s, towerId: swap[s.towerId] ?? s.towerId },
+        ),
+      );
       const kinds = new Set(plan.flatMap((s) => (s.kind === 'sell' ? [] : [s.towerId])));
       expect(plan.every((s) => s.kind !== 'sell')).toBe(true);
       expect([...kinds].sort()).toEqual(['basic', 'splash', 'venom']);
@@ -342,13 +354,12 @@ describe('M3 stories 5–6 — the reference builds, blocks 1–2 on the crossin
       expect(run.state.phase).toBe('lost');
       expect(checkAllStepsRan(M3_NO_ANTI_AIR.id, run)).toEqual([]);
       // Lost to the first flyers down the north lane — `flying`, in the wave the lane joins —
-      // inside block 2, which ends at wave 20.
+      // inside block 2, which ends at wave 20. Block 2 brings no creep id block 1 did not, so
+      // no window named by first appearance (`checkLossWindow`) can single that wave out: the
+      // loss is located by its fatal creep and the lane's opening, itself found by content.
       const flying = ruleset.waves[NORTH_AIR]!.spawns;
       expect(new Set(flying.map((s) => s.creepId))).toEqual(new Set(['flying']));
       expect(NORTH_AIR).toBeLessThanOrEqual(BLOCK_2_LAST);
-      expect(checkLossWindow(M3_NO_ANTI_AIR.id, run, ruleset, { fromWaveOf: 'flying' })).toEqual(
-        [],
-      );
       expect(run.state.tick).toBe(8707);
       expect(locateLoss(run)).toEqual({
         tick: 8706,
@@ -371,7 +382,8 @@ describe('M3 stories 5–6 — the reference builds, blocks 1–2 on the crossin
     { timeout: 120_000 },
     () => {
       // Floors chosen for this story: nearly every bounty it received spent, three tower
-      // kinds, and the 211 ground creeps of waves 1–15 all killed.
+      // kinds, and the 211 ground creeps of waves 1–15 all killed. The wave it reached, the
+      // north lane's opening, is pinned above (`locateLoss`): no creep id first appears there.
       const run = measured(M3_NO_ANTI_AIR);
       expect(
         checkPlausibility(M3_NO_ANTI_AIR.id, run, ruleset, {
@@ -379,7 +391,6 @@ describe('M3 stories 5–6 — the reference builds, blocks 1–2 on the crossin
           minSpentShare: 0.95,
           minTowerKinds: 3,
           minKills: 211,
-          reachesWaveOf: 'armored-flyer',
         }),
       ).toEqual([]);
       const groundSpawns = ruleset.waves
@@ -387,7 +398,7 @@ describe('M3 stories 5–6 — the reference builds, blocks 1–2 on the crossin
         .flatMap((w) => w.spawns)
         .filter((s) => !isAir(s.creepId)).length;
       expect([run.kills, groundSpawns]).toEqual([211, 211]);
-      expect([run.spend, run.state.bounty, run.stepsDone]).toEqual([427, 7, 61]);
+      expect([run.spend, run.state.bounty, run.stepsDone]).toEqual([430, 4, 60]);
     },
   );
 

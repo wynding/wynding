@@ -16,7 +16,8 @@
 // Beside the text it returns what makes the report untrustworthy — no set registered, a
 // build whose plan didn't finish or whose run never ended, or a capacity drawing the sim
 // will not take as drawn (`placeCapacityDrawing`: a sell, a refused tower, a creep on the
-// board before it stands), whose price is still printed — so the command can fail.
+// board before it stands) or that does not draw the strongest build (its plan must begin
+// with that build's), whose price is still printed — so the command can fail.
 
 import { compileRuleset, deriveScore, deriveStars, type CompiledRuleset } from '@wynding/sim';
 import type { Ruleset } from '@wynding/types';
@@ -143,6 +144,26 @@ function boardFullLine(
   return `board-full: the strongest build, ${best.build.id} (won on ${run.state.lives} lives), ${where}`;
 }
 
+/** What makes `full` no drawing of the strongest build, `best`: its plan must begin with
+ *  that build's, step for step, so the capacity priced is that build's maze at its mix (the
+ *  build itself, once its plan fills the board). Nothing to check when no build is strongest
+ *  — the board-full line already says so. */
+function checkDrawsStrongest(
+  label: string,
+  full: ReferenceBuild,
+  best: { readonly build: ReferenceBuild } | null,
+  ruleset: CompiledRuleset,
+): string[] {
+  if (best === null) return [];
+  const key = (steps: readonly unknown[]): string[] => steps.map((s) => JSON.stringify(s));
+  const drawn = key(compileReferenceBuild(full, ruleset));
+  const built = key(compileReferenceBuild(best.build, ruleset));
+  if (built.every((step, i) => drawn[i] === step)) return [];
+  return [
+    `${label}: the capacity drawing does not draw the strongest build, ${best.build.id} — its plan does not begin with that build's`,
+  ];
+}
+
 /** The capacity lines for a set that draws its board full (`balance-capacity.ts`): what the
  *  drawing holds, and the wave whose income first covers it, without and with early calls. */
 function capacityLines(full: ReferenceBuild, ruleset: CompiledRuleset): string[] {
@@ -205,6 +226,9 @@ export function balanceReport(
     if (set.fullBoard !== undefined) {
       const label = `${set.id}/${set.fullBoard.id}`;
       failures.push(...placeCapacityDrawing(label, set.fullBoard, ruleset, set.seed).failures);
+      failures.push(
+        ...checkDrawsStrongest(label, set.fullBoard, strongest(runs, ruleset), ruleset),
+      );
       lines.push(...capacityLines(set.fullBoard, ruleset), '');
     }
   }
