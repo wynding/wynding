@@ -218,9 +218,9 @@ function airOnlySupportSpend(state: SimState, ruleset: CompiledRuleset): number 
 
 /** How much of each honest winner's spend went on anti-air (m3.md's flag that every winner
  *  carries `antiair`; the owner asked how heavily winning leans on it): the towers that hit
- *  only flyers; those with the beacons that lift nothing else, on the winner's finished board
- *  (an honest winner never sells, so every beacon it bought stands there); and every tower that
- *  can hit a flyer, beacons aside. */
+ *  only flyers; those with the beacons on the winner's finished board that lift nothing else
+ *  (a beacon sold between waves isn't judged, so it doesn't count here, though its cost stays in
+ *  the spend); and every tower that can hit a flyer, beacons aside. */
 function antiAirLines(runs: readonly Entry[], ruleset: CompiledRuleset): string[] {
   const winners = honestWinners(runs);
   if (winners.length === 0) return [];
@@ -230,7 +230,7 @@ function antiAirLines(runs: readonly Entry[], ruleset: CompiledRuleset): string[
       .reduce((n, [, spend]) => n + spend, 0);
   const share = (part: number, run: BuildRun) => `${part} (${percent(part, run.spend)})`;
   return [
-    'anti-air share of spend (towers that hit only flyers; with the beacons that lift nothing else; every tower that can hit a flyer):',
+    'anti-air share of spend (towers that hit only flyers; with the beacons left on the board that lift nothing else; every tower that can hit a flyer):',
     ...winners.map(({ build, run }) => {
       const only = spentWhere(run, ['air']);
       const lifted = only + airOnlySupportSpend(run.state, ruleset);

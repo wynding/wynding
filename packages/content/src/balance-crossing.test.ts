@@ -1162,7 +1162,7 @@ describe('M3 stories 5–8 — the board’s capacity in bounty', () => {
       );
       expect(text).toContain(
         [
-          'anti-air share of spend (towers that hit only flyers; with the beacons that lift nothing else; every tower that can hit a flyer):',
+          'anti-air share of spend (towers that hit only flyers; with the beacons left on the board that lift nothing else; every tower that can hit a flyer):',
           '  m3-serpentine: 144 of 799 (18%); 252 (32%); 184 (23%)',
           '  m3-two-mazes: 207 of 689 (30%); 225 (33%); 207 (30%)',
           '  m3-channel: 135 of 876 (15%); 225 (26%); 385 (44%)',

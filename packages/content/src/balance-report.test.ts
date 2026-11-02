@@ -278,7 +278,7 @@ describe('the report’s section-B lines (M3 story 8)', () => {
     const lifted = aa + cost('beacon');
     const any = aa + cost('slow');
     expect(text).toContain(
-      `anti-air share of spend (towers that hit only flyers; with the beacons that lift nothing else; every tower that can hit a flyer):\n  winner: ${aa} of ${spend} (${pct(aa, spend)}); ${lifted} (${pct(lifted, spend)}); ${any} (${pct(any, spend)})\n`,
+      `anti-air share of spend (towers that hit only flyers; with the beacons left on the board that lift nothing else; every tower that can hit a flyer):\n  winner: ${aa} of ${spend} (${pct(aa, spend)}); ${lifted} (${pct(lifted, spend)}); ${any} (${pct(any, spend)})\n`,
     );
     // The juggler, on a live sell, is no honest winner.
     expect(text).not.toContain('  juggler:');
