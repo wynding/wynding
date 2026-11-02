@@ -28,22 +28,24 @@ import { createController, type Controller } from '../src/controller';
 
 const params = new URLSearchParams(window.location.search);
 const hp = Number(params.get('hp') ?? '100');
-const from = Number(params.get('wave') ?? '1');
 
 const bundle = structuredClone(getBundledRuleset()) as Ruleset;
 const board = bundle.boards[0] as unknown as {
   waves: { hpPercent: number; entries: unknown[] }[];
 };
-const source = board.waves[from - 1];
-// The message is also `check:build-layering`'s marker for this module: rename it there too.
-if (source === undefined) throw new Error(`waves harness: the board has no wave ${String(from)}`);
-board.waves[0]!.entries = structuredClone(source.entries);
 const streams = params.get('streams');
 if (streams !== null) {
+  // `&streams=` overrides `&wave=`, which is then neither read nor checked.
   board.waves[0]!.entries = streams.split(',').map((stream) => {
     const [creepId, entrance, count] = stream.split(':');
     return { creepId, entrance, count: Number(count), spacingTicks: 20 };
   });
+} else {
+  const from = Number(params.get('wave') ?? '1');
+  const source = board.waves[from - 1];
+  // The message is also `check:build-layering`'s marker for this module: rename it there too.
+  if (source === undefined) throw new Error(`waves harness: the board has no wave ${String(from)}`);
+  board.waves[0]!.entries = structuredClone(source.entries);
 }
 for (const wave of board.waves) wave.hpPercent = hp;
 const content = { bundle, boardId: defaultBoardId(bundle) } as const;

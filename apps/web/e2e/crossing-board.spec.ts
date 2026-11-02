@@ -304,8 +304,8 @@ async function stripHead(page: Page): Promise<{
 }
 
 for (const [zoom, hp, glance, sentence] of [
-  [100, 170, '+70% hit points', 'Every creep in this wave has +70% hit points'],
-  [200, 80, '20% fewer hit points', 'Every creep in this wave has 20% fewer hit points'],
+  [100, 170, '+70% hit points', 'Creeps in this wave have 70% more hit points'],
+  [200, 80, '20% fewer hit points', 'Creeps in this wave have 20% fewer hit points'],
 ] as const) {
   test(`Standard at ${String(zoom)}% text: the hit-point clause stacks whole under the title, moving the rows only by what it is wider than the title`, async ({
     page,
@@ -358,7 +358,7 @@ for (const zoom of [100, 200] as const) {
     await page.setViewportSize(PHONE);
     await openWaves(page, 'hp=80&wave=9', zoom);
     await expect(page.locator('.wy-preview-hp-full')).toHaveText(
-      'Every creep in this wave has 20% fewer hit points',
+      'Creeps in this wave have 20% fewer hit points',
     );
     const column = await page.evaluate(() => {
       const hud = document.querySelector<HTMLElement>('.wy-hud')!;

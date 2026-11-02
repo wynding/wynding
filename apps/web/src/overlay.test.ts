@@ -4673,7 +4673,7 @@ describe('overlay — routes, hit points and the wave counter on the crossing bo
     show(overlay, [entry(), north()], { hpPercent: 170 });
     const hp = shell.preview.hp;
     expect(hp.hidden).toBe(false);
-    expect(shell.preview.hpFull.textContent).toBe('Every creep in this wave has +70% hit points');
+    expect(shell.preview.hpFull.textContent).toBe('Creeps in this wave have 70% more hit points');
     expect(shell.preview.hpGlance.textContent).toBe('+70% hit points');
     expect(shell.preview.hpGlance.getAttribute('aria-hidden')).toBe('true');
     expect(shell.preview.hpFull.getAttribute('aria-hidden')).toBeNull();
@@ -4686,9 +4686,7 @@ describe('overlay — routes, hit points and the wave counter on the crossing bo
   it('says a wave below the catalog’s hit points too, and nothing at exactly 100', () => {
     const { overlay, shell } = setup();
     show(overlay, [entry()], { hpPercent: 80 });
-    expect(shell.preview.hpFull.textContent).toBe(
-      'Every creep in this wave has 20% fewer hit points',
-    );
+    expect(shell.preview.hpFull.textContent).toBe('Creeps in this wave have 20% fewer hit points');
     expect(shell.preview.hpGlance.textContent).toBe('20% fewer hit points'); // never a bare minus sign
     show(overlay, [entry()], { hpPercent: 100 }); // only the hit points moved: the key rebuilds
     expect(shell.preview.hp.hidden).toBe(true);
@@ -4732,7 +4730,7 @@ describe('overlay — routes, hit points and the wave counter on the crossing bo
     const { overlay, shell } = setup(undefined, undefined, { ruleset: c.ruleset, board: c.board });
     overlay.update({ hud: c.hud(), paused: false, speed: 1, ui: uiState(), refund: 0 });
     expect(shell.preview.hp.hidden).toBe(false);
-    expect(shell.preview.hpFull.textContent).toBe('Every creep in this wave has +50% hit points');
+    expect(shell.preview.hpFull.textContent).toBe('Creeps in this wave have 50% more hit points');
     expect(shell.preview.hpGlance.textContent).toBe('+50% hit points');
   });
 });
