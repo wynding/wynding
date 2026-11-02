@@ -204,11 +204,24 @@ export interface BalanceReport {
   readonly failures: readonly string[];
 }
 
+/** How the report measures one build: a fresh run of its plan (`balance-run.ts`). */
+export type MeasureBuild = (
+  build: ReferenceBuild,
+  ruleset: CompiledRuleset,
+  seed: number,
+) => BuildRun;
+
+const runBuild: MeasureBuild = (build, ruleset, seed) =>
+  runReferenceBuild(ruleset, seed, compileReferenceBuild(build, ruleset));
+
 /** Run every build of every set and render the report. `load` returns a bundled ruleset
- *  by id — the registry in tests, the on-disk artifact from the command line. */
+ *  by id — the registry in tests, the on-disk artifact from the command line. `measure`
+ *  runs a build; a test that has already run a set's builds on the same bundle and seed
+ *  passes its own runs, so a whole-arc report is not simulated twice. */
 export function balanceReport(
   sets: readonly ReferenceSet[],
   load: (rulesetId: string) => Ruleset,
+  measure: MeasureBuild = runBuild,
 ): BalanceReport {
   const failures: string[] = [];
   if (sets.length === 0) failures.push('no reference sets are registered');
@@ -225,10 +238,7 @@ export function balanceReport(
       `== ${set.id}: ${set.rulesetId} / ${set.boardId}, seed 0x${set.seed.toString(16)} ==`,
       '',
     );
-    const runs = set.builds.map((build) => ({
-      build,
-      run: runReferenceBuild(ruleset, set.seed, compileReferenceBuild(build, ruleset)),
-    }));
+    const runs = set.builds.map((build) => ({ build, run: measure(build, ruleset, set.seed) }));
     for (const { build, run } of runs) {
       lines.push(`${build.id} — ${build.summary}`, `  ${summaryLine(run, ruleset)}`);
       lines.push(...profileTable(run).map((l) => `  ${l}`), '');

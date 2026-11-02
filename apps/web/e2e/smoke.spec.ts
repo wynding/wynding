@@ -698,13 +698,13 @@ test('the Venom Tower ghost stays functional and axe-clean under reduced motion,
   const preview = page.locator('.wy-wave-preview');
   const previewTitle = preview.locator('.wy-wave-preview-title');
   for (let waveNumber = 2; waveNumber <= 4; waveNumber++) {
-    await expect(previewTitle).toHaveText(`Wave ${waveNumber} of 20`);
+    await expect(previewTitle).toHaveText(`Wave ${waveNumber} of 30`);
     await expect(callWave).toHaveAttribute('aria-disabled', 'false');
     await callWave.click();
   }
   // M3 story 5: block 1's armored wave is wave 5 — armored creeps from the north beside the
   // opener's creeps from the west, which the strip reads first (its routes, west first).
-  await expect(previewTitle).toHaveText('Wave 5 of 20');
+  await expect(previewTitle).toHaveText('Wave 5 of 30');
   await expect(callWave).toHaveAttribute('aria-disabled', 'false');
   await expect(preview.locator('.wy-preview-full')).toHaveText([
     '8 × Creep — west to east, ground, armor 0, leak cost 1, no immunities',
@@ -811,16 +811,17 @@ test('the pollable board summary (#79): a real slow + venom crossfire puts BOTH 
   await expect(summary).toBeHidden({ timeout: 30_000 });
 });
 
-test('supports player-started runs, pause / speed controls, launches wave 1 on Start and early-calls the remaining nineteen with the preview checked before each, and reaches a result', async ({
+test('supports player-started runs, pause / speed controls, launches wave 1 on Start and early-calls the remaining twenty-nine with the preview checked before each, and reaches a result', async ({
   page,
 }) => {
-  // Above the sum of this test's own declared worst-case budgets — nineteen paced calls
+  // Above the sum of this test's own declared worst-case budgets — twenty-nine paced calls
   // (#70: wave 1 now launches on Start itself, not through this loop) carrying a 5s
-  // in-page deadline each (paced-call.ts) plus the 60s results wait, 155s — so a
+  // in-page deadline each (paced-call.ts) plus the 60s results wait, 205s — so a
   // pathological run dies at the stage that owns it, with that stage's named diagnostic,
   // never as an anonymous whole-test timeout mid-budget (CodeRabbit #117). M3 story 6's
-  // twenty-wave run doubled the calls, and the budget grew with them.
-  test.setTimeout(240_000);
+  // twenty-wave run doubled the calls, story 7's thirty-wave run added half again, and the
+  // budget grew with them.
+  test.setTimeout(300_000);
   await page.goto('/');
 
   // Pre-start (PLAN.md P4 + Story 11's wave-slot states, decoupled further at M2-S2): the
@@ -835,7 +836,7 @@ test('supports player-started runs, pause / speed controls, launches wave 1 on S
   // 1's composition pre-start — the shipped bundle's single creep kind.
   const preview = page.locator('.wy-wave-preview');
   await expect(preview).toBeVisible();
-  await expect(preview.locator('.wy-wave-preview-title')).toHaveText('Wave 1 of 20');
+  await expect(preview.locator('.wy-wave-preview-title')).toHaveText('Wave 1 of 30');
   await expect(preview.locator('.wy-preview-full')).toHaveText([
     '10 × Creep — west to east, ground, armor 0, leak cost 1, no immunities',
   ]);
@@ -862,7 +863,7 @@ test('supports player-started runs, pause / speed controls, launches wave 1 on S
   // before the Pause press below — Pause is a distinct control from Call wave, so it
   // cannot dedupe against the buffered call, but this pins the claim itself as a named
   // assertion rather than an incidental side effect of what follows.
-  await expect(previewTitle).toHaveText('Wave 2 of 20');
+  await expect(previewTitle).toHaveText('Wave 2 of 30');
   await expect(callWave).toHaveAttribute('aria-disabled', 'false');
 
   const pause = page.getByRole('button', { name: 'Pause' });
@@ -883,18 +884,20 @@ test('supports player-started runs, pause / speed controls, launches wave 1 on S
   await page.getByRole('button', { name: 'Pause' }).click();
 
   // Early-call every REMAINING wave via the morphed primary control — wave 1 already
-  // launched on Start above, so this calls 2 through 20 — checking the preview shows the
+  // launched on Start above, so this calls 2 through 30 — checking the preview shows the
   // CORRECT upcoming wave before each call (PLAN.md P3 step 19) — per-wave, since each
-  // wave of blocks 1–2 (M3 stories 5–6: m3.md's first-pass arc, rows 1–20) brings a new
+  // wave of the arc (M3 stories 5–7: m3.md's first-pass arc, rows 1–30) brings a new
   // threat or route: the swarm, the north route opening at wave 3, multi-entry waves from
   // wave 4 (an array of `<li>` texts, each naming its route, grouped by route with west
-  // first — M3 story 4: `overlay.ts`'s `byRoute`), the air headline at wave 6 (its row reads
-  // `air`, not `ground`), the armored-flyer wall at wave 9, the boss at wave 10; then block
-  // 2's threats on both routes, the north lane's air at wave 16, the second wall at wave 19
-  // and a boss down each route at wave 20.
-  // Block 2's creeps also grow: each of its waves states its hit points once (`hpPercent`,
-  // m3.md "Creep HP growth"), 110 at wave 11 rising to 175 at wave 20, and block 1's say
-  // nothing (100, the catalog's).
+  // first and each route's streams in arrival order — M3 story 4: `overlay.ts`'s `byRoute`),
+  // the air headline at wave 6 (its row reads `air`, not `ground`), the armored-flyer wall at
+  // wave 9, the boss at wave 10; then block 2's threats on both routes, the north lane's air
+  // at wave 16, the second wall at wave 19 and a boss down each route at wave 20; then block
+  // 3's, both lanes' air at once at wave 26, the third wall at wave 29 and the finale's three
+  // bosses at wave 30, the two from the west on one row.
+  // From block 2 the creeps also grow: each wave states its hit points once (`hpPercent`,
+  // m3.md "Creep HP growth"), 110 at wave 11 rising to 175 at wave 20 and 270 by wave 25,
+  // and block 1's say nothing (100, the catalog's).
   // Keyed from wave 2: wave 1 launches on Start, so its composition is asserted PRE-start
   // above rather than inside the loop. Carrying a `1:` entry here too would be a second
   // source of truth that nothing reads — and therefore nothing keeps honest.
@@ -905,8 +908,8 @@ test('supports player-started runs, pause / speed controls, launches wave 1 on S
       '8 × Fast Creep — west to east, ground, armor 0, leak cost 1, no immunities',
       '6 × Fast Creep — north to south, ground, armor 0, leak cost 1, no immunities',
     ],
-    // Waves 5, 8, 12, 17 and 18 are authored with a north stream first, and wave 20
-    // interleaves its routes; the strip reads west first.
+    // Waves 5, 8, 12, 17, 18 and 27 are authored with a north stream first, and waves 20,
+    // 28, 29 and 30 interleave their routes; the strip reads west first.
     5: [
       '8 × Creep — west to east, ground, armor 0, leak cost 1, no immunities',
       '6 × Armored Creep — north to south, ground, armor 6 (subtracted from each direct hit; damage over time ignores it), leak cost 1, no immunities',
@@ -973,6 +976,53 @@ test('supports player-started runs, pause / speed controls, launches wave 1 on S
       '1 × Boss — boss, north to south, ground, armor 8 (subtracted from each direct hit; damage over time ignores it), leak cost 3, stun',
       '8 × Creep — north to south, ground, armor 0, leak cost 1, no immunities',
     ],
+    21: [
+      '6 × Creep — west to east, ground, armor 0, leak cost 1, no immunities',
+      '6 × Creep — north to south, ground, armor 0, leak cost 1, no immunities',
+    ],
+    22: [
+      '16 × Swarm Creep — west to east, ground, armor 0, leak cost 1, no immunities',
+      '10 × Swarm Creep — north to south, ground, armor 0, leak cost 1, no immunities',
+    ],
+    23: [
+      '10 × Fast Creep — west to east, ground, armor 0, leak cost 1, no immunities',
+      '10 × Fast Creep — north to south, ground, armor 0, leak cost 1, no immunities',
+    ],
+    24: [
+      '8 × Armored Creep — west to east, ground, armor 6 (subtracted from each direct hit; damage over time ignores it), leak cost 1, no immunities',
+      '8 × Armored Creep — north to south, ground, armor 6 (subtracted from each direct hit; damage over time ignores it), leak cost 1, no immunities',
+    ],
+    25: [
+      '10 × Creep — west to east, ground, armor 0, leak cost 1, no immunities',
+      '10 × Creep — north to south, ground, armor 0, leak cost 1, no immunities',
+      '8 × Swarm Creep — north to south, ground, armor 0, leak cost 1, no immunities',
+    ],
+    26: [
+      '10 × Armored Flyer — west to east, air, armor 5 (subtracted from each direct hit; damage over time ignores it), leak cost 1, no immunities',
+      '10 × Flying Creep — north to south, air, armor 0, leak cost 1, no immunities',
+    ],
+    27: [
+      '6 × Resolute Creep — west to east, ground, armor 0, leak cost 1, slow',
+      '14 × Swarm Creep — north to south, ground, armor 0, leak cost 1, no immunities',
+      '8 × Fast Creep — north to south, ground, armor 0, leak cost 1, no immunities',
+    ],
+    28: [
+      '8 × Armored Creep — west to east, ground, armor 6 (subtracted from each direct hit; damage over time ignores it), leak cost 1, no immunities',
+      '8 × Fast Creep — west to east, ground, armor 0, leak cost 1, no immunities',
+      '8 × Armored Creep — north to south, ground, armor 6 (subtracted from each direct hit; damage over time ignores it), leak cost 1, no immunities',
+    ],
+    29: [
+      '8 × Armored Flyer — west to east, air, armor 5 (subtracted from each direct hit; damage over time ignores it), leak cost 1, no immunities',
+      '8 × Swarm Creep — west to east, ground, armor 0, leak cost 1, no immunities',
+      '6 × Armored Flyer — north to south, air, armor 5 (subtracted from each direct hit; damage over time ignores it), leak cost 1, no immunities',
+      '8 × Armored Creep — north to south, ground, armor 6 (subtracted from each direct hit; damage over time ignores it), leak cost 1, no immunities',
+    ],
+    30: [
+      '2 × Boss — boss, west to east, ground, armor 8 (subtracted from each direct hit; damage over time ignores it), leak cost 3, stun',
+      '8 × Armored Flyer — west to east, air, armor 5 (subtracted from each direct hit; damage over time ignores it), leak cost 1, no immunities',
+      '1 × Boss — boss, north to south, ground, armor 8 (subtracted from each direct hit; damage over time ignores it), leak cost 3, stun',
+      '8 × Armored Flyer — north to south, air, armor 5 (subtracted from each direct hit; damage over time ignores it), leak cost 1, no immunities',
+    ],
   };
   // Each wave's hit points as the bundle authors them, from wave 11 on; absent, the catalog's.
   const HP_PERCENT: Record<number, number> = {
@@ -986,10 +1036,20 @@ test('supports player-started runs, pause / speed controls, launches wave 1 on S
     18: 165,
     19: 170,
     20: 175,
+    21: 195,
+    22: 215,
+    23: 235,
+    24: 255,
+    25: 270,
+    26: 270,
+    27: 270,
+    28: 270,
+    29: 270,
+    30: 270,
   };
   const hpClause = preview.locator('.wy-wave-preview-hp');
-  for (let waveNumber = 2; waveNumber <= 20; waveNumber++) {
-    await expect(previewTitle).toHaveText(`Wave ${waveNumber} of 20`);
+  for (let waveNumber = 2; waveNumber <= 30; waveNumber++) {
+    await expect(previewTitle).toHaveText(`Wave ${waveNumber} of 30`);
     await expect(callWave).toHaveAttribute('aria-disabled', 'false');
     await expect(preview.locator('.wy-preview-full')).toHaveText(EXPECTED_COMPOSITION[waveNumber]!);
     const hp = HP_PERCENT[waveNumber];
@@ -1001,7 +1061,7 @@ test('supports player-started runs, pause / speed controls, launches wave 1 on S
       );
       await expect(hpClause).toBeVisible();
     }
-    await callWavePaced(page, titleAfterCall(waveNumber, 20));
+    await callWavePaced(page, titleAfterCall(waveNumber, 30));
   }
   // Every wave has launched: the preview's explicit last-wave marker, and the control is
   // visible-disabled (never hidden — it hides only at terminal).
@@ -1106,9 +1166,9 @@ test('supports player-started runs, pause / speed controls, launches wave 1 on S
   await expect(page.locator('.wy-board')).toBeFocused();
 
   // Play-again returns to the pre-start state (PLAN.md P4): held again, Start required
-  // again — including the wave preview going back to wave 1 of 20 (M3 story 6).
+  // again — including the wave preview going back to wave 1 of 30 (M3 story 7).
   await expect(waveChip).toBeVisible();
-  await expect(preview.locator('.wy-wave-preview-title')).toHaveText('Wave 1 of 20');
+  await expect(preview.locator('.wy-wave-preview-title')).toHaveText('Wave 1 of 30');
   await expect(page.getByRole('button', { name: 'Pause' })).toBeHidden();
   await expect(page.getByRole('button', { name: 'Start' })).toBeVisible();
 });

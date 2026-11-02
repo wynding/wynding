@@ -269,7 +269,7 @@ test.describe('Compact layout (PLAN.md P1 / two-layouts contract)', () => {
     await gotoAt(page, PHONE);
     const preview = page.locator('.wy-wave-preview');
     await expect(preview).toBeVisible(); // visible pre-start too (M2-S2 decouple)
-    await expect(preview.locator('.wy-wave-preview-title')).toHaveText('Wave 1 of 20'); // M3 story 6: blocks 1–2
+    await expect(preview.locator('.wy-wave-preview-title')).toHaveText('Wave 1 of 30'); // M3 story 7: the whole arc
     // Rows carry BOTH forms since #101, so a bare `li` locator reads the accessible
     // sentence and the visible glance concatenated. Address each explicitly: the full form
     // is unchanged (which is the parity guarantee — the diet cost no information), and the
@@ -320,7 +320,7 @@ test.describe('Compact layout (PLAN.md P1 / two-layouts contract)', () => {
   // box (contract §1) — the mechanism the test above proves generalizes to overflow content
   // — so this measures whether that SAME mechanism holds up honestly with 4× the rows: no
   // clipping, every row reachable by keyboard, and axe-clean.
-  // M3 stories 5–6: the shipped run's one four-stream wave is wave 20, nineteen calls in, so
+  // M3 stories 5–7: the shipped run's first four-stream wave is wave 20, nineteen calls in, so
   // this runs on the waves harness (`e2e-harness/waves-entry.ts`): the real app on the shipped
   // bundle, wave 1 given waves 8 and 9's streams — four rows on two routes,
   // the real catalog compiled by the real ruleset. Held before Start, nothing launches under
@@ -335,7 +335,7 @@ test.describe('Compact layout (PLAN.md P1 / two-layouts contract)', () => {
     const preview = page.locator('.wy-wave-preview');
     const previewTitle = preview.locator('.wy-wave-preview-title');
     const entries = preview.locator('li');
-    await expect(previewTitle).toHaveText('Wave 1 of 20');
+    await expect(previewTitle).toHaveText('Wave 1 of 30');
 
     await expect(entries).toHaveCount(4);
     // Grouped by route, west first (M3 story 4: `overlay.ts`'s `byRoute`).
@@ -380,7 +380,7 @@ test.describe('Compact layout (PLAN.md P1 / two-layouts contract)', () => {
 
     // GUARD: held before Start, the title cannot move under this tail; re-asserting it keeps
     // a lost hold a NAMED failure rather than a stale-locator mystery below.
-    await expect(previewTitle).toHaveText('Wave 1 of 20');
+    await expect(previewTitle).toHaveText('Wave 1 of 30');
 
     // No clipping: the preview's rendered box, and every one of its 4 rows, stays within
     // the Compact column's own width — never spilling past it or off the viewport (a

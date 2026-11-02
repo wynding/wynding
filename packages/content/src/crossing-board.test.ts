@@ -5,7 +5,7 @@
 // (0,11) and north (13,0), exits east (27,11) and south (13,23), each entrance heading for
 // its own one exit; empty-board routes of 27 and 23 tiles that cross at (13,11). Then what
 // that data does in the sim — a build sealing either route is refused — and the schedule's
-// authoring rules ("Waves & timing"), which blocks 1–2 (M3 stories 5–6) keep and block 3 must.
+// authoring rules ("Waves & timing"), which the whole arc keeps (M3 stories 5–7).
 // The shipped artifact's content digest is pinned here too: M2's pin moved with the M2
 // bundle to the frozen fixture (`parity.test.ts`).
 
@@ -128,11 +128,11 @@ describe('the maze invariant holds per route on the crossing board', () => {
   });
 });
 
-describe('blocks 1–2 keep the spec’s authoring rules (m3.md, "Waves & timing")', () => {
+describe('the arc keeps the spec’s authoring rules (m3.md, "Waves & timing")', () => {
   const creepById = new Map(bundle.creepCatalog.map((c) => [c.id, c]));
   const first = board.entrances[0]!.id;
 
-  it('flies the north lane from wave 16, block 2’s air headline, and never both lanes in one wave before block 3', () => {
+  it('flies the north lane from wave 16, block 2’s air headline, and both lanes at once from wave 26, block 3’s', () => {
     const flown = board.waves.map(
       (w) =>
         new Set(
@@ -148,12 +148,21 @@ describe('blocks 1–2 keep the spec’s authoring rules (m3.md, "Waves & timing
     expect(board.waves[north]!.entries).toEqual([
       { creepId: 'flying', entrance: 'north', count: 10, spacingTicks: 12, offsetTicks: 0 },
     ]);
-    // Both lanes at once is block 3's (from wave 26), so no shipped wave flies both yet.
-    for (const [k, lanes] of flown.entries())
-      expect(lanes.size, `wave ${k + 1}`).toBeLessThanOrEqual(1);
-    // Air flies in waves 6, 9, 16 and 19: 4 of 20 so far, toward the arc's 7 of 30 (about one
-    // wave in four).
-    expect(flown.flatMap((lanes, k) => (lanes.size > 0 ? [k + 1] : []))).toEqual([6, 9, 16, 19]);
+    // Both lanes at once is block 3's air headline, wave 26: armored flyers down the west lane,
+    // flyers down the north, and nothing else. No earlier wave flies both; the wall and the
+    // finale after it do.
+    const both = flown.findIndex((lanes) => lanes.size === 2);
+    expect(both).toBe(25);
+    expect(board.waves[both]!.entries).toEqual([
+      { creepId: 'armored-flyer', entrance: 'west', count: 10, spacingTicks: 15, offsetTicks: 0 },
+      { creepId: 'flying', entrance: 'north', count: 10, spacingTicks: 15, offsetTicks: 0 },
+    ]);
+    expect(flown.flatMap((lanes, k) => (lanes.size === 2 ? [k + 1] : []))).toEqual([26, 29, 30]);
+    // Air flies in 7 of the 30 waves, the arc's "about one wave in four": 6, 9, 16, 19, 26, 29
+    // and 30.
+    expect(flown.flatMap((lanes, k) => (lanes.size > 0 ? [k + 1] : []))).toEqual([
+      6, 9, 16, 19, 26, 29, 30,
+    ]);
   });
 
   it('introduces at most one new thing per wave, and a boss wave nothing but its bosses', () => {
@@ -191,13 +200,17 @@ describe('blocks 1–2 keep the spec’s authoring rules (m3.md, "Waves & timing
 
   it('keeps every wave within four (creep, route) streams, the Compact preview’s rows', () => {
     for (const wave of ruleset.waves) expect(wave.entriesSummary.length).toBeLessThanOrEqual(4);
-    // Wave 20 is the first to fill all four: a boss and its escort down each route.
-    expect(ruleset.waves.findIndex((w) => w.entriesSummary.length === 4)).toBe(19);
+    // Wave 20 is the first to fill all four, a boss and its escort down each route; then the
+    // wall and the finale, waves 29 and 30.
+    expect(ruleset.waves.flatMap((w, k) => (w.entriesSummary.length === 4 ? [k + 1] : []))).toEqual(
+      [20, 29, 30],
+    );
   });
 
   it('keeps the biggest wave within the authoring rule’s thirty creeps', () => {
     const sizes = ruleset.waves.map((w) => w.spawns.length);
-    expect(Math.max(...sizes)).toBe(26); // waves 12, 15 and 19
+    expect(Math.max(...sizes)).toBe(30); // wave 29, the wall, m3.md's biggest wave
+    expect(sizes.indexOf(30)).toBe(28);
     expect(Math.max(...sizes)).toBeLessThanOrEqual(30);
   });
 
@@ -246,8 +259,9 @@ describe('blocks 1–2 keep the spec’s authoring rules (m3.md, "Waves & timing
     // Block 1's one boss (wave 10, from the west) has no same-route escort — its escort walks
     // the north route — so the rule first bites in block 2: wave 20's west boss leads its
     // escort by 600 ticks, and its north boss, 200 ticks in, leads its own escort by 600 too.
-    // The pairs checked keep this honest.
-    expect(checked).toEqual(['wave 20 west', 'wave 20 north']);
+    // Wave 30's two west bosses, 400 ticks apart, lead their armored flyers by 600 from the
+    // second; its north boss leads its own by 600. The pairs checked keep this honest.
+    expect(checked).toEqual(['wave 20 west', 'wave 20 north', 'wave 30 west', 'wave 30 north']);
   });
 });
 
@@ -259,7 +273,8 @@ describe('blocks 1–2 keep the spec’s authoring rules (m3.md, "Waves & timing
 // Re-pinned M3 story 5 (measured): block 1's ten waves replace the placeholder schedule, and
 // the lives, economy and score knobs re-pin to the longer run.
 // Re-pinned M3 story 6 (measured): block 2's ten waves follow block 1's.
-const SHIPPED_RULESET_HASH = '389e84d7bc5b2312647888377aa0c264f5d5f5db551724057f8dff9ff211c0d1';
+// Re-pinned M3 story 7 (measured): block 3's ten waves complete the arc.
+const SHIPPED_RULESET_HASH = '4fc31b60bc6abb30098f6942f066a5997966bac8556732f5e3417efe8a735260';
 // ------------------------------------------------------------------------------------------
 
 describe('digest golden — the shipped artifact’s content hash', () => {

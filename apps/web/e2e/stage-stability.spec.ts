@@ -684,9 +684,9 @@ test('1000×720, walking every wave: the board never re-projects — the strip i
   // Deliberately asserted WITHOUT a precondition on the line the strip takes. The contract is
   // "wave content never moves the board", which must hold on either line — and pinning it here
   // would make this test hostage to the strip floor's boundary behaviour on a given font stack.
-  // Eighteen paced calls at a 5s in-page deadline each (paced-call.ts), 90s, and the
-  // measurements between them: the run's twenty waves since M3 story 6.
-  test.setTimeout(210_000);
+  // Twenty-eight paced calls at a 5s in-page deadline each (paced-call.ts), 140s, and the
+  // measurements between them: the run's thirty waves since M3 story 7.
+  test.setTimeout(300_000);
   await gotoAt(page, { width: 1000, height: 720 });
   await expect(page.locator('.wy-wave-preview')).toBeVisible();
 
@@ -701,15 +701,16 @@ test('1000×720, walking every wave: the board never re-projects — the strip i
   };
   const previewTitle = page.locator('.wy-wave-preview .wy-wave-preview-title');
   await page.getByRole('button', { name: 'Start' }).click(); // Start claims wave 1 (#70)
-  await expect(previewTitle).toHaveText('Wave 2 of 20');
+  await expect(previewTitle).toHaveText('Wave 2 of 30');
   await page.getByRole('button', { name: 'Pause' }).click();
   await holds('wave 2');
-  for (let waveNumber = 2; waveNumber <= 19; waveNumber++) {
-    await callWavePaced(page, titleAfterCall(waveNumber, 20));
+  for (let waveNumber = 2; waveNumber <= 29; waveNumber++) {
+    await callWavePaced(page, titleAfterCall(waveNumber, 30));
     await holds(`wave ${waveNumber + 1}`);
   }
-  // The last wave, the run's densest line: a boss and its escort down each route.
-  await expect(previewTitle).toHaveText('Wave 20 of 20');
+  // The last wave, one of the run's densest lines: three bosses and an armored-flyer escort
+  // down each route.
+  await expect(previewTitle).toHaveText('Wave 30 of 30');
   await expect(page.locator('.wy-wave-preview li')).toHaveCount(4);
 
   // ...and then the CONSERVATIVE bound, which is what turns this red for a content-sized strip.
@@ -732,7 +733,7 @@ test('1512×854, a four-stream wave pending: a tower built in the corner the pre
   // strip and the tower do not share a pixel — nor the strip and ANY cell of the board, since
   // #181 put it in the status row for good.
   //
-  // M3 stories 5–6: the shipped run's one four-stream wave is wave 20, nineteen calls in, so
+  // M3 stories 5–7: the shipped run's first four-stream wave is wave 20, nineteen calls in, so
   // the preview is wave 1 on the waves harness (`e2e-harness/waves-entry.ts`), given waves 8
   // and 9's streams.
   await page.setViewportSize(STANDARD);
@@ -761,7 +762,7 @@ test('1512×854, a four-stream wave pending: a tower built in the corner the pre
   await expect(page.locator('.wy-panel').getByRole('button', { name: /^Sell/ })).toBeVisible();
 
   const previewTitle = page.locator('.wy-wave-preview .wy-wave-preview-title');
-  await expect(previewTitle).toHaveText('Wave 1 of 20');
+  await expect(previewTitle).toHaveText('Wave 1 of 30');
   await expect(page.locator('.wy-wave-preview li')).toHaveCount(4);
 
   // The tower's own 2×2 footprint in page coordinates, and the strip's box. Not one pixel

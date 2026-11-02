@@ -14,8 +14,8 @@
 // field on the wire (`Replay` carries none) is silently ignored.
 //
 // Every leg plays `m3-serpentine`, the first build of M3's reference set on the shipped
-// crossing board (`packages/content/src/reference-builds.ts`, M3 stories 5–6), compiled from
-// its grid to the same plan `balance-crossing.test.ts` proves wins blocks 1–2 — imported
+// crossing board (`packages/content/src/reference-builds.ts`, M3 stories 5–7), compiled from
+// its grid to the same plan `balance-crossing.test.ts` proves wins the whole arc — imported
 // here, never re-typed, so this file can't drift into scripting a DIFFERENT build than the
 // one the balance checker pins. `@wynding/content`'s package.json `exports` map has no subpath for
 // the test-support modules, so the imports below reach across the package boundary by
@@ -27,6 +27,10 @@
 // plays the shipped schedule — until M3 story 5 these legs replayed M2's showcase build on
 // story 4's placeholder schedule. The guards in each leg (won, lost, a score that moved) fail
 // by name if a retune outgrows the build.
+//
+// Since M3 story 7 the arc is thirty waves, about 19,500 ticks a run. The client's side of
+// the winning run is simulated once for the file (`serpentineRun`); each leg's handler call
+// re-simulates it, which is what the leg tests.
 
 import { afterEach, describe, it, expect } from 'vitest';
 import {
@@ -57,9 +61,10 @@ const RULESET_HASH = currentRulesetHash(bundle);
  *  handler's default. */
 const SERPENTINE = compileReferenceBuild(M3_SERPENTINE, compileRuleset(bundle, BOARD_ID));
 
-// Every test here re-simulates a whole run synchronously. Yield a macrotask after each so
-// the worker reads Vitest's RPC replies between them: birpc times a reply out at 60 s, so
-// each test alone must still finish inside that. The yield sits between runs, never in one.
+// Every leg here re-simulates a whole run synchronously, inside the handler. Yield a
+// macrotask after each so the worker reads Vitest's RPC replies between them: birpc times a
+// reply out at 60 s, so each test alone must still finish inside that. The yield sits between
+// runs, never in one — as the replay package's `replay.test.ts` and `run-length.test.ts` do.
 afterEach(() => new Promise<void>((r) => setImmediate(r)));
 
 interface ClientRun {
@@ -86,6 +91,15 @@ function runScript(ruleset: CompiledRuleset, script: readonly ScriptStep[]): Cli
   return { state, tickInputs };
 }
 
+let serpentineMemo: ClientRun | undefined;
+/** The serpentine's whole winning run on the shipped board, as a client records it —
+ *  simulated the first time a leg asks, then shared: every leg that submits it is testing
+ *  the handler's re-simulation, not this one. */
+function serpentineRun(): ClientRun {
+  serpentineMemo ??= runScript(compileRuleset(bundle, BOARD_ID), SERPENTINE);
+  return serpentineMemo;
+}
+
 function replayFor(tickInputs: readonly (readonly SimInput[])[]): Replay {
   return {
     seed: SCENARIO_SEED,
@@ -104,7 +118,7 @@ describe('M2-S11 P6 — client/server replay parity through the real handler()',
 
   it('leg 2: a full-arc WINNING run submitted as a replay returns the same score and stars as the independent client-side simulation', async () => {
     const ruleset = compileRuleset(bundle, BOARD_ID);
-    const client = runScript(ruleset, SERPENTINE);
+    const client = serpentineRun();
 
     // This has to actually be the winning run the plan asks for, not merely "some
     // terminal" — assert it before comparing anything else.
@@ -132,17 +146,17 @@ describe('M2-S11 P6 — client/server replay parity through the real handler()',
     // changes the re-simulated outcome, and the handler returns exactly that changed value.
     // The serpentine's whole plan serves: its west wall is load-bearing tower by tower.
     const baseScript = SERPENTINE;
-    const original = runScript(ruleset, baseScript);
+    const original = serpentineRun();
     expect(original.state.phase).toBe('won');
     const originalScore = deriveScore(original.state, ruleset);
 
-    // Drop exactly ONE placement — the fourth, the west wall's second `splash` above the
-    // entrance (rows 7–8) — a genuinely different build, re-simulated from scratch, never a
+    // Drop exactly ONE placement — the 23rd, the east wall's `slow` beside the exit
+    // (rows 11–12) — a genuinely different build, re-simulated from scratch, never a
     // claimed-score echo. Measured: it still WINS, on fewer lives, so the changed value is a
-    // real score rather than a loss's 0. (Since M3 story 6 the run is twenty waves, and
-    // dropping any one of the wall's first three towers loses it.)
-    const tamperedIndex = 3;
-    expect(baseScript[tamperedIndex]).toMatchObject({ towerId: 'splash', col: 2, row: 7 });
+    // real score rather than a loss's 0. (Since M3 story 7 the run is thirty waves, and
+    // dropping any one of the west wall's first five towers loses it.)
+    const tamperedIndex = 22;
+    expect(baseScript[tamperedIndex]).toMatchObject({ towerId: 'slow', col: 24, row: 11 });
     const tamperedScript = [
       ...baseScript.slice(0, tamperedIndex),
       ...baseScript.slice(tamperedIndex + 1),
@@ -171,7 +185,7 @@ describe('M2-S11 P6 — client/server replay parity through the real handler()',
 
   it('leg 3b: a forged extra claimed-score field on the wire is accepted, re-simulated, and ignored', async () => {
     const ruleset = compileRuleset(bundle, BOARD_ID);
-    const client = runScript(ruleset, SERPENTINE);
+    const client = serpentineRun();
     expect(client.state.phase).toBe('won');
     const trueScore = deriveScore(client.state, ruleset);
     const trueStars = deriveStars(client.state, ruleset);
@@ -210,7 +224,7 @@ describe('#25 item 1 — the terminal contract is STRICT, on a WINNING replay, t
   const ruleset = compileRuleset(bundle, BOARD_ID);
 
   it('the recorder’s own truncated-at-terminal log is ACCEPTED, and graded exactly as the client graded it', async () => {
-    const client = runScript(ruleset, SERPENTINE);
+    const client = serpentineRun();
     expect(client.state.phase).toBe('won');
 
     // The recorder's contract, asserted as a property of the log rather than assumed:
@@ -268,7 +282,7 @@ describe('#25 item 1 — the terminal contract is STRICT, on a WINNING replay, t
   }, 120_000);
 
   it('the SAME winning log plus one inert trailing tick is rejected 422, with the exact reason', async () => {
-    const client = runScript(ruleset, SERPENTINE);
+    const client = serpentineRun();
     expect(client.state.phase).toBe('won');
     // The log ends AT the terminal tick, so its LENGTH is the first index a canonical log
     // must not contain — the terminal tick index + 1. Named for what it is: `terminalTick`
