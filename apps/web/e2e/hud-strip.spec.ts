@@ -206,6 +206,123 @@ test('wave 1 and a four-stream line, at 1280×720, 1440×900, 1920×1080 and 108
   expect(audit.violations, JSON.stringify(audit.violations, null, 2)).toEqual([]);
 });
 
+test('under a wide font, the densest waves keep the strip’s line at the four desktop sizes, with room to spare (M3)', async ({
+  page,
+}) => {
+  // The strip's type is `system-ui`, which a Linux machine draws in a wider face than macOS
+  // does: CI's ran story 4's placeholder wave 9 (four streams) 2px past the strip at 1080×810
+  // while every Mac had room. So the fit is pinned under a WIDE face: Verdana where it is
+  // installed (macOS; wider than CI's face, so conservative), DejaVu Sans where it is not
+  // (Linux, CI's own face). On the waves harness, each under its real title and with its real
+  // hit points: every wave of the shipped run on both routes — block 1's, two streams each (M3
+  // story 5), which of them is widest depending on the face, and block 2's (M3 story 6), up to
+  // three streams (waves 15 and 19) and wave 20's four, two bosses among them, each with its
+  // clause stacked under the title — and m3.md's densest arc wave the strip will show, wave 29,
+  // four streams on both routes at +170% hit points. Each keeps its line with 16px to spare at
+  // every size on one status line: the margin a further stream's growth spends before the strip
+  // takes its scroll form (measured on macOS at 1080×810: 31px for wave 29).
+  // Sixteen harness loads at four sizes: 26s on a fast core (M3 story 6). Generous for slow
+  // cores.
+  test.setTimeout(300_000);
+  const HARNESS = 'http://localhost:4176/e2e-harness/waves.html';
+  const WIDE = '* { font-family: Verdana, "DejaVu Sans", sans-serif !important; }';
+  const VIEWS = [
+    { width: 1280, height: 720 },
+    { width: 1440, height: 900 },
+    { width: 1920, height: 1080 },
+    { width: 1080, height: 810 },
+  ];
+  // The shipped waves on both routes: their streams, and block 2's hit points (100 in block 1).
+  const SHIPPED: readonly (readonly [wave: number, rows: number, hpPercent: number])[] = [
+    [4, 2, 100],
+    [5, 2, 100],
+    [7, 2, 100],
+    [8, 2, 100],
+    [9, 2, 100],
+    [10, 2, 100],
+    [11, 2, 110],
+    [12, 2, 120],
+    [13, 2, 130],
+    [14, 2, 140],
+    [15, 3, 150],
+    [17, 2, 160],
+    [18, 2, 165],
+    [19, 3, 170],
+    [20, 4, 175],
+  ];
+  const WAVES = [
+    ...SHIPPED.map(([n, rows, hpPercent]) => ({
+      name: `the shipped wave ${String(n)}`,
+      query: `wave=${String(n)}&as=${String(n)}/20&hp=${String(hpPercent)}`,
+      title: `Wave ${String(n)} of 20`,
+      rows,
+      hp: hpPercent === 100 ? null : `+${String(hpPercent - 100)}% hit points`,
+    })),
+    {
+      name: 'the arc’s wave 29',
+      query:
+        'as=29/30&hp=270&streams=armored-flyer:west:8,armored-flyer:north:6,armored:north:8,swarm:west:8',
+      title: 'Wave 29 of 30',
+      rows: 4,
+      hp: '+170% hit points',
+    },
+  ];
+  const titleWidth = (): Promise<number> =>
+    page.evaluate(() => {
+      const range = document.createRange();
+      range.selectNodeContents(document.querySelector('.wy-wave-preview-title')!);
+      return range.getBoundingClientRect().width;
+    });
+  /** The least room each wave left, over the four sizes. */
+  const least = new Map<string, number>();
+  for (const wave of WAVES) {
+    await page.setViewportSize(VIEWS[0]!);
+    await page.goto(`${HARNESS}?${wave.query}`);
+    const strip = page.locator('.wy-wave-preview');
+    await expect(strip.locator('.wy-wave-preview-title')).toHaveText(wave.title);
+    await expect(strip.locator('li')).toHaveCount(wave.rows);
+    if (wave.hp !== null) await expect(strip.locator('.wy-preview-hp-glance')).toHaveText(wave.hp);
+    // Two routes, each arrow drawn once (`overlay.ts`'s `byRoute`).
+    await expect(strip.locator('.wy-preview-arrow')).toHaveText(['→', '↓']);
+    // The premise: the forced face is at least as wide as the one the page draws by default —
+    // where neither Verdana nor DejaVu Sans exists, a narrower fallback would prove nothing.
+    const usual = await titleWidth();
+    await page.addStyleTag({ content: WIDE });
+    expect(
+      await titleWidth(),
+      `${wave.name}: the forced face is a wide one`,
+    ).toBeGreaterThanOrEqual(usual - 0.5);
+    for (const view of VIEWS) {
+      await page.setViewportSize(view);
+      await settle(page);
+      const at = `${wave.name} at ${view.width}×${view.height}`;
+      const status = (await regionRect(page, 'status')) as Rect;
+      expect(status.height, `${at}: one status line`).toBeLessThanOrEqual(
+        view.width === 1080 ? 64 : 56,
+      );
+      const m = await page.evaluate(() => {
+        const el = document.querySelector<HTMLElement>('.wy-wave-preview')!;
+        const b = el.getBoundingClientRect();
+        const end =
+          b.left + el.clientLeft + el.clientWidth - parseFloat(getComputedStyle(el).paddingRight);
+        const list = document.querySelector('.wy-wave-preview-list')!.getBoundingClientRect();
+        return {
+          slack: end - list.right,
+          scrollForm: el.classList.contains('wy-wave-preview--scroll'),
+        };
+      });
+      expect(m.scrollForm, `${at}: the strip needed its scroll form`).toBe(false);
+      expect(m.slack, `${at}: px to spare at the line's end`).toBeGreaterThanOrEqual(16);
+      least.set(wave.name, Math.min(least.get(wave.name) ?? Infinity, m.slack));
+    }
+  }
+  console.log(
+    `[hud-strip] least px to spare under the wide face: ${[...least]
+      .map(([name, px]) => `${name} ${px.toFixed(1)}`)
+      .join(', ')}`,
+  );
+});
+
 test('a strip whose line runs past its edge fades that edge, follows the scroll and costs no width', async ({
   page,
 }) => {
@@ -1569,7 +1686,7 @@ test('Compact: in a wave of several creeps each count stays with its own icon �
   // there has another entry's icon under it. The shipped run's one four-stream wave is wave 20,
   // nineteen calls in, so this reads the arc's densest line on the waves harness
   // (`e2e-harness/waves-entry.ts`): wave 1 given waves 8 and 9's streams, four entries, the
-  // third airborne.
+  // second airborne.
   test.setTimeout(180_000); // four windows at five text sizes
   await page.setViewportSize(PHONE);
   await stubFullscreen(page);

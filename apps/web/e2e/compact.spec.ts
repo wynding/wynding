@@ -338,10 +338,11 @@ test.describe('Compact layout (PLAN.md P1 / two-layouts contract)', () => {
     await expect(previewTitle).toHaveText('Wave 1 of 20');
 
     await expect(entries).toHaveCount(4);
+    // Grouped by route, west first (M3 story 4: `overlay.ts`'s `byRoute`).
     await expect(preview.locator('.wy-preview-full')).toHaveText([
-      '6 × Resolute Creep — north to south, ground, armor 0, leak cost 1, slow',
       '6 × Fast Creep — west to east, ground, armor 0, leak cost 1, no immunities',
       '6 × Armored Flyer — west to east, air, armor 5 (subtracted from each direct hit; damage over time ignores it), leak cost 1, no immunities',
+      '6 × Resolute Creep — north to south, ground, armor 0, leak cost 1, slow',
       '8 × Creep — north to south, ground, armor 0, leak cost 1, no immunities',
     ]);
     // The densest line, in the form a player actually reads it (#181): each row is the creep's
@@ -353,13 +354,24 @@ test.describe('Compact layout (PLAN.md P1 / two-layouts contract)', () => {
     await expect(icons).toHaveCount(4);
     expect(
       await icons.evaluateAll((els) => els.map((el) => el.getAttribute('data-wy-shape'))),
-    ).toEqual(['resolute', 'fast', 'armored-flyer', 'normal'].map((id) => creepShapeFor(id)));
+    ).toEqual(['fast', 'armored-flyer', 'resolute', 'normal'].map((id) => creepShapeFor(id)));
     expect(
       await icons.evaluateAll((els) =>
         els.map((el) => el.querySelector('.wy-creep-wing') !== null),
       ),
-    ).toEqual([false, false, true, false]);
+    ).toEqual([false, true, false, false]);
     for (const icon of await icons.all()) await expect(icon).toBeVisible();
+    // Each route's arrow once, on a line of its own above its group's first icon (M3 story 4).
+    await expect(preview.locator('.wy-preview-arrow')).toHaveText(['→', '↓']);
+    const above = await preview.locator('li').evaluateAll((rows) =>
+      rows.map((row) => {
+        const arrow = row.querySelector('.wy-preview-arrow');
+        if (arrow === null) return null;
+        const icon = row.querySelector('svg.wy-creep-icon')!.getBoundingClientRect();
+        return arrow.getBoundingClientRect().bottom <= icon.top + 0.5;
+      }),
+    );
+    expect(above).toEqual([true, null, true, null]);
 
     // axe audit with all 4 rows showing — the standard bar every other HUD content is
     // held to (PLAN.md P3 step 19).

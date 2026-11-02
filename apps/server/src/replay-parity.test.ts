@@ -28,7 +28,7 @@
 // story 4's placeholder schedule. The guards in each leg (won, lost, a score that moved) fail
 // by name if a retune outgrows the build.
 
-import { describe, it, expect } from 'vitest';
+import { afterEach, describe, it, expect } from 'vitest';
 import {
   compileRuleset,
   deriveScore,
@@ -56,6 +56,11 @@ const RULESET_HASH = currentRulesetHash(bundle);
 /** The serpentine's plan on the shipped board: the set names that board, and it is the
  *  handler's default. */
 const SERPENTINE = compileReferenceBuild(M3_SERPENTINE, compileRuleset(bundle, BOARD_ID));
+
+// Every test here re-simulates a whole run synchronously. Yield a macrotask after each so
+// the worker reads Vitest's RPC replies between them: birpc times a reply out at 60 s, so
+// each test alone must still finish inside that. The yield sits between runs, never in one.
+afterEach(() => new Promise<void>((r) => setImmediate(r)));
 
 interface ClientRun {
   readonly state: SimState;

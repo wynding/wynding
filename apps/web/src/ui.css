@@ -797,10 +797,22 @@ a.wy-home:focus-visible {
      strip's observer (`overlay.ts`) sees every change in the line's length — a reflow, a font
      swap — not only the ones that also resize the strip. */
   .wy-shell .wy-wave-preview-list {
+    --wy-strip-row-gap: 0.9rem;
     display: flex;
     align-items: center;
-    gap: 0.9rem;
+    gap: var(--wy-strip-row-gap);
     flex: none;
+  }
+
+  /* A ROUTE'S STREAMS SIT TOGETHER (M3 story 4). The rows come grouped by route, its arrow on
+     the group's first row only (`overlay.ts`'s `byRoute`), and a row continuing the group
+     closes to half the gap between routes, in either form of the strip — the arrow and the
+     wider gap mark where a route begins. Together they keep a four-stream wave on its line at
+     1080×810 under a wide font: with an arrow on every row it ran 2px past the strip on CI's
+     Linux face. `hud-strip.spec.ts` holds the line's slack under a wide face (Verdana on
+     macOS, wider than CI's; DejaVu Sans, CI's own, on Linux). */
+  .wy-shell .wy-wave-preview-list > .wy-preview-entry--continues {
+    margin-inline-start: calc(-0.5 * var(--wy-strip-row-gap));
   }
 
   /* A NARROW strip (squeezed beside the chips, or its own line in a portrait window's hud)
@@ -814,7 +826,7 @@ a.wy-home:focus-visible {
     }
 
     .wy-shell .wy-wave-preview-list {
-      gap: 0.55rem;
+      --wy-strip-row-gap: 0.55rem;
     }
 
     .wy-wave-preview-list .wy-creep-icon {
@@ -1314,10 +1326,11 @@ a.wy-home:focus-visible {
   font-weight: 700;
 }
 
-/* A stream's route (M3 story 4): its arrow leads the row — the heading the board draws on that
-   entrance and its exit. The walls it runs between, in words, lead a single entry's detail
-   (`.wy-preview-route-name`, below); a multi-entry line and Compact's column keep the arrow
-   alone, and the row's full sentence names the route either way. */
+/* A stream's route (M3 story 4): its arrow leads its route's group of rows — the heading the
+   board draws on that entrance and its exit, once per route (`overlay.ts`'s `byRoute`). The
+   walls it runs between, in words, lead a single entry's detail (`.wy-preview-route-name`,
+   below); a multi-entry line and Compact's column keep the arrow alone, and every row's full
+   sentence names its route either way. */
 .wy-preview-arrow {
   flex: none;
   margin-inline-end: 0.3em;
@@ -3381,9 +3394,9 @@ a.wy-home:focus-visible {
     white-space: normal;
   }
 
-  /* A ROW'S ROUTE ARROW TAKES A LINE OF ITS OWN, above its icon (M3 story 4). The column has
-     no width to spare beside the icon and count — their wrap, above, is measured to the pixel
-     — and an arrow beside them would narrow the glance and move both. On its own line the
+  /* A ROUTE'S ARROW TAKES A LINE OF ITS OWN, above its group's first icon (M3 story 4). The
+     column has no width to spare beside the icon and count — their wrap, above, is measured to
+     the pixel — and an arrow beside them would narrow the glance and move both. On its own line the
      glance keeps the column's whole width, so every rule above holds as it did; the arrow
      lines up with the icon (the wings' margin), and the row's full sentence names the route. */
   .wy-wave-preview-list .wy-preview-entry {

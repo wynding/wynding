@@ -703,12 +703,12 @@ test('the Venom Tower ghost stays functional and axe-clean under reduced motion,
     await callWave.click();
   }
   // M3 story 5: block 1's armored wave is wave 5 — armored creeps from the north beside the
-  // opener's creeps from the west.
+  // opener's creeps from the west, which the strip reads first (its routes, west first).
   await expect(previewTitle).toHaveText('Wave 5 of 20');
   await expect(callWave).toHaveAttribute('aria-disabled', 'false');
   await expect(preview.locator('.wy-preview-full')).toHaveText([
-    '6 × Armored Creep — north to south, ground, armor 6 (subtracted from each direct hit; damage over time ignores it), leak cost 1, no immunities',
     '8 × Creep — west to east, ground, armor 0, leak cost 1, no immunities',
+    '6 × Armored Creep — north to south, ground, armor 6 (subtracted from each direct hit; damage over time ignores it), leak cost 1, no immunities',
   ]);
 
   const previewAudit = await new AxeBuilder({ page }).include('#app').analyze();
@@ -887,10 +887,11 @@ test('supports player-started runs, pause / speed controls, launches wave 1 on S
   // CORRECT upcoming wave before each call (PLAN.md P3 step 19) — per-wave, since each
   // wave of blocks 1–2 (M3 stories 5–6: m3.md's first-pass arc, rows 1–20) brings a new
   // threat or route: the swarm, the north route opening at wave 3, multi-entry waves from
-  // wave 4 (an array of `<li>` texts in authored order, each naming its route), the air
-  // headline at wave 6 (its row reads `air`, not `ground`), the armored-flyer wall at wave
-  // 9, the boss at wave 10; then block 2's threats on both routes, the north lane's air at
-  // wave 16, the second wall at wave 19 and a boss down each route at wave 20.
+  // wave 4 (an array of `<li>` texts, each naming its route, grouped by route with west
+  // first — M3 story 4: `overlay.ts`'s `byRoute`), the air headline at wave 6 (its row reads
+  // `air`, not `ground`), the armored-flyer wall at wave 9, the boss at wave 10; then block
+  // 2's threats on both routes, the north lane's air at wave 16, the second wall at wave 19
+  // and a boss down each route at wave 20.
   // Block 2's creeps also grow: each of its waves states its hit points once (`hpPercent`,
   // m3.md "Creep HP growth"), 110 at wave 11 rising to 175 at wave 20, and block 1's say
   // nothing (100, the catalog's).
@@ -904,9 +905,11 @@ test('supports player-started runs, pause / speed controls, launches wave 1 on S
       '8 × Fast Creep — west to east, ground, armor 0, leak cost 1, no immunities',
       '6 × Fast Creep — north to south, ground, armor 0, leak cost 1, no immunities',
     ],
+    // Waves 5, 8, 12, 17 and 18 are authored with a north stream first, and wave 20
+    // interleaves its routes; the strip reads west first.
     5: [
-      '6 × Armored Creep — north to south, ground, armor 6 (subtracted from each direct hit; damage over time ignores it), leak cost 1, no immunities',
       '8 × Creep — west to east, ground, armor 0, leak cost 1, no immunities',
+      '6 × Armored Creep — north to south, ground, armor 6 (subtracted from each direct hit; damage over time ignores it), leak cost 1, no immunities',
     ],
     6: ['8 × Flying Creep — west to east, air, armor 0, leak cost 1, no immunities'],
     7: [
@@ -914,8 +917,8 @@ test('supports player-started runs, pause / speed controls, launches wave 1 on S
       '10 × Swarm Creep — north to south, ground, armor 0, leak cost 1, no immunities',
     ],
     8: [
-      '6 × Resolute Creep — north to south, ground, armor 0, leak cost 1, slow',
       '6 × Fast Creep — west to east, ground, armor 0, leak cost 1, no immunities',
+      '6 × Resolute Creep — north to south, ground, armor 0, leak cost 1, slow',
     ],
     9: [
       '6 × Armored Flyer — west to east, air, armor 5 (subtracted from each direct hit; damage over time ignores it), leak cost 1, no immunities',
@@ -934,8 +937,8 @@ test('supports player-started runs, pause / speed controls, launches wave 1 on S
       '8 × Creep — north to south, ground, armor 0, leak cost 1, no immunities',
     ],
     12: [
-      '14 × Swarm Creep — north to south, ground, armor 0, leak cost 1, no immunities',
       '12 × Swarm Creep — west to east, ground, armor 0, leak cost 1, no immunities',
+      '14 × Swarm Creep — north to south, ground, armor 0, leak cost 1, no immunities',
     ],
     13: [
       '8 × Resolute Creep — west to east, ground, armor 0, leak cost 1, slow',
@@ -952,12 +955,12 @@ test('supports player-started runs, pause / speed controls, launches wave 1 on S
     ],
     16: ['10 × Flying Creep — north to south, air, armor 0, leak cost 1, no immunities'],
     17: [
-      '12 × Fast Creep — north to south, ground, armor 0, leak cost 1, no immunities',
       '8 × Resolute Creep — west to east, ground, armor 0, leak cost 1, slow',
+      '12 × Fast Creep — north to south, ground, armor 0, leak cost 1, no immunities',
     ],
     18: [
-      '8 × Armored Creep — north to south, ground, armor 6 (subtracted from each direct hit; damage over time ignores it), leak cost 1, no immunities',
       '16 × Swarm Creep — west to east, ground, armor 0, leak cost 1, no immunities',
+      '8 × Armored Creep — north to south, ground, armor 6 (subtracted from each direct hit; damage over time ignores it), leak cost 1, no immunities',
     ],
     19: [
       '8 × Armored Flyer — west to east, air, armor 5 (subtracted from each direct hit; damage over time ignores it), leak cost 1, no immunities',
@@ -966,8 +969,8 @@ test('supports player-started runs, pause / speed controls, launches wave 1 on S
     ],
     20: [
       '1 × Boss — boss, west to east, ground, armor 8 (subtracted from each direct hit; damage over time ignores it), leak cost 3, stun',
-      '1 × Boss — boss, north to south, ground, armor 8 (subtracted from each direct hit; damage over time ignores it), leak cost 3, stun',
       '8 × Creep — west to east, ground, armor 0, leak cost 1, no immunities',
+      '1 × Boss — boss, north to south, ground, armor 8 (subtracted from each direct hit; damage over time ignores it), leak cost 3, stun',
       '8 × Creep — north to south, ground, armor 0, leak cost 1, no immunities',
     ],
   };
@@ -994,7 +997,7 @@ test('supports player-started runs, pause / speed controls, launches wave 1 on S
       await expect(hpClause).toBeHidden();
     } else {
       await expect(hpClause.locator('.wy-preview-hp-full')).toHaveText(
-        `Every creep in this wave has +${String(hp - 100)}% hit points`,
+        `Creeps in this wave have ${String(hp - 100)}% more hit points`,
       );
       await expect(hpClause).toBeVisible();
     }
