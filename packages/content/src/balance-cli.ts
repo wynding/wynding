@@ -1,8 +1,10 @@
 // balance-cli.ts — M3 story 1: `pnpm --filter @wynding/content run balance` prints the
 // balance report (`balance-report.ts`) for every registered reference set, reading each
 // bundle from disk (`balance-artifacts.ts`). Opt-in: it is not part of `verify`. It exits
-// nonzero when the report can't be trusted — nothing registered, or a build whose plan
-// didn't finish or whose run never ended.
+// nonzero when the report can't be trusted — every failure `balance-report.ts` names: nothing
+// registered, a set with no builds, a build whose plan didn't finish or whose run never
+// ended, or a capacity drawing the sim won't take as drawn or that doesn't draw the
+// strongest build.
 
 import { loadArtifactRuleset } from './balance-artifacts';
 import { balanceReport } from './balance-report';

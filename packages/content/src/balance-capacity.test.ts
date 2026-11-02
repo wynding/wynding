@@ -1,21 +1,28 @@
 // balance-capacity.test.ts — M3 story 5: the capacity arithmetic (`balance-capacity.ts`) on
 // small drawings and the shipped schedule, each branch on both sides; the check that the sim
-// takes a drawing as drawn; and the report's capacity lines when the schedule's income does
-// cover a drawing, and its failure when the sim refuses one. The registered capacity drawing
-// is `balance-crossing.test.ts`'s.
+// takes a drawing as drawn, and that it draws the strongest build; and the report's capacity
+// lines when the schedule's income does cover a drawing and when it falls short, and its
+// failure when the sim refuses one or it draws another build. The registered capacity
+// drawing is `balance-crossing.test.ts`'s.
 
 import { describe, it, expect } from 'vitest';
 import { compileRuleset } from '@wynding/sim';
 import { loadRulesetOrM2Fixture } from './m2-fixture';
-import { drawGrid, type ReferenceSet } from './reference-build';
-import { M3_CROSSING, M3_UNDEFENDED, M3_WEST_ONLY } from './reference-builds';
+import { drawGrid, type ReferenceBuild, type ReferenceSet } from './reference-build';
+import {
+  M3_CROSSING,
+  M3_SERPENTINE,
+  M3_TWO_MAZES,
+  M3_UNDEFENDED,
+  M3_WEST_ONLY,
+} from './reference-builds';
 import {
   drawnCapacity,
   firstWaveCovering,
   placeCapacityDrawing,
   scheduleIncome,
 } from './balance-capacity';
-import { balanceReport } from './balance-report';
+import { balanceReport, checkDrawsStrongest } from './balance-report';
 
 const bundle = loadRulesetOrM2Fixture(M3_CROSSING.rulesetId);
 const ruleset = compileRuleset(bundle, M3_CROSSING.boardId);
@@ -107,9 +114,53 @@ describe('a capacity drawing, placed', () => {
   });
 });
 
+describe('a capacity drawing of the strongest build', () => {
+  /** A reference build drawing the towers `order` places. */
+  const drawing = (id: string, order: string): ReferenceBuild => {
+    const anchors = new Map<string, readonly [number, number, string]>();
+    for (const token of order.split(' ')) {
+      const m = /^(-?)([a-z])(\d+),(\d+)/.exec(token)!;
+      if (m[1] === '') anchors.set(`${m[3]},${m[4]}`, [Number(m[3]), Number(m[4]), m[2]!]);
+    }
+    return { id, summary: id, grid: drawGrid(ruleset, [...anchors.values()]), order };
+  };
+  const check = (built: string, drawn: string) =>
+    checkDrawsStrongest(
+      'probe',
+      drawing('full', drawn),
+      { build: drawing('best', built) },
+      ruleset,
+    );
+  const BUILT = 'b2,10 v4,10 b6,10';
+  const FAILED = [
+    "probe: the capacity drawing does not draw the strongest build, best — its towers do not begin with that build's",
+  ];
+
+  it('passes the build itself, and a drawing that goes on past it', () => {
+    expect(check(BUILT, BUILT)).toEqual([]);
+    expect(check(BUILT, 'b2,10 v4,10 b6,10 b8,10 v10,10')).toEqual([]);
+  });
+
+  it('reads the towers, not their timing or a juggle', () => {
+    expect(check(BUILT, 'b2,10@600 v4,10 b6,10@900')).toEqual([]);
+    expect(check('b2,10 v4,10 -v4,10@700 v4,10 b6,10', BUILT)).toEqual([]);
+  });
+
+  it('fails one that stops short of it, leaves it late, changes a tower or reorders it', () => {
+    expect(check(BUILT, 'b2,10 v4,10')).toEqual(FAILED);
+    expect(check(BUILT, 'b2,10 v4,10 b8,10 b6,10')).toEqual(FAILED);
+    expect(check(BUILT, 'b2,10 b4,10 b6,10')).toEqual(FAILED);
+    expect(check(BUILT, 'v4,10 b2,10 b6,10')).toEqual(FAILED);
+  });
+
+  it('has nothing to check when no build is strongest', () => {
+    expect(checkDrawsStrongest('probe', M3_SERPENTINE, null, ruleset)).toEqual([]);
+  });
+});
+
 describe('a schedule’s income', () => {
   it('adds each wave’s kill bounty and clear bonus to the starting bounty, and the early calls beside it', () => {
-    // Waves 1–3 of block 1: 10 normals, 16 swarm, 10 normals (1 bounty each), 2 a clear.
+    // Waves 1–3: 10 normals, 16 swarm, 10 normals (1 bounty each), 2 a clear.
     // Wave 1's call pays nothing (Start claims it); a 500-tick countdown pays ⌊500 / 100⌋.
     expect(scheduleIncome(ruleset).slice(0, 3)).toEqual([
       { wave: 0, earned: 92, earnedWithCalls: 92 },
@@ -131,8 +182,12 @@ describe('a schedule’s income', () => {
     expect(firstWaveCovering(income, 92, false)).toBe(0);
     expect(firstWaveCovering(income, 123, false)).toBe(3); // 122 by wave 3, 152 by wave 4
     expect(firstWaveCovering(income, 123, true)).toBe(2); // 132 by wave 3
-    expect(firstWaveCovering(income, 316, false)).toBeNull();
-    expect(firstWaveCovering(income, 362, true)).toBeNull();
+    // One past what the whole schedule earns, with or without the calls: no wave covers it.
+    const last = income[income.length - 1]!;
+    expect(firstWaveCovering(income, last.earned, false)).toBe(last.wave);
+    expect(firstWaveCovering(income, last.earned + 1, false)).toBeNull();
+    expect(firstWaveCovering(income, last.earnedWithCalls, true)).toBe(last.wave);
+    expect(firstWaveCovering(income, last.earnedWithCalls + 1, true)).toBeNull();
   });
 });
 
@@ -155,6 +210,44 @@ describe('the report’s capacity lines', () => {
       'income with every early call at its maximum covers it by the end of wave 3',
     );
   });
+
+  it('say how far short the schedule’s income falls of a drawing it cannot pay for', () => {
+    // The serpentine's 613 against block 1 alone: ten waves earn 315, 361 with every call.
+    const board = bundle.boards[0]!;
+    const blockOne = { ...bundle, boards: [{ ...board, waves: board.waves.slice(0, 10) }] };
+    const set: ReferenceSet = {
+      ...M3_CROSSING,
+      id: 'probe',
+      builds: [M3_UNDEFENDED],
+      fullBoard: M3_SERPENTINE,
+    };
+    const { text, failures } = balanceReport([set], () => blockOne);
+    expect(failures).toEqual([]);
+    expect(text).toContain(
+      'income (every kill and clear bonus) reaches 315 by the end of wave 10, short of it',
+    );
+    expect(text).toContain(
+      'income with every early call at its maximum reaches 361 by the end of wave 10, short of it',
+    );
+  });
+
+  it(
+    'fail the report for a drawing that does not draw the strongest build',
+    { timeout: 120_000 },
+    () => {
+      // Two mazes is the set's only winner, so its strongest; the serpentine's towers do not
+      // begin with two mazes', so the serpentine priced is no drawing of it.
+      const set: ReferenceSet = {
+        ...M3_CROSSING,
+        id: 'probe',
+        builds: [M3_TWO_MAZES],
+        fullBoard: M3_SERPENTINE,
+      };
+      expect(balanceReport([set], loadRulesetOrM2Fixture).failures).toEqual([
+        "probe/m3-serpentine: the capacity drawing does not draw the strongest build, m3-two-mazes — its towers do not begin with that build's",
+      ]);
+    },
+  );
 
   it('fail the report for a drawing the sim will not take', () => {
     const set: ReferenceSet = {

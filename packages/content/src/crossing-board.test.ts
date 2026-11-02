@@ -5,7 +5,7 @@
 // (0,11) and north (13,0), exits east (27,11) and south (13,23), each entrance heading for
 // its own one exit; empty-board routes of 27 and 23 tiles that cross at (13,11). Then what
 // that data does in the sim — a build sealing either route is refused — and the schedule's
-// authoring rules ("Waves & timing"), which block 1 (M3 story 5) keeps and blocks 2–3 must.
+// authoring rules ("Waves & timing"), which blocks 1–2 (M3 stories 5–6) keep and block 3 must.
 // The shipped artifact's content digest is pinned here too: M2's pin moved with the M2
 // bundle to the frozen fixture (`parity.test.ts`).
 
@@ -128,17 +128,32 @@ describe('the maze invariant holds per route on the crossing board', () => {
   });
 });
 
-describe('block 1 keeps the spec’s authoring rules (m3.md, "Waves & timing")', () => {
+describe('blocks 1–2 keep the spec’s authoring rules (m3.md, "Waves & timing")', () => {
   const creepById = new Map(bundle.creepCatalog.map((c) => [c.id, c]));
   const first = board.entrances[0]!.id;
 
-  it('sends ground creeps only down the north route (it carries no air until block 2)', () => {
-    for (const wave of board.waves) {
-      for (const entry of wave.entries) {
-        if (entry.entrance === first) continue;
-        expect(creepById.get(entry.creepId)!.domain, `wave index ${wave.index}`).toBe('ground');
-      }
-    }
+  it('flies the north lane from wave 16, block 2’s air headline, and never both lanes in one wave before block 3', () => {
+    const flown = board.waves.map(
+      (w) =>
+        new Set(
+          w.entries
+            .filter((e) => creepById.get(e.creepId)!.domain === 'air')
+            .map((e) => e.entrance),
+        ),
+    );
+    // The north lane joins with ten flyers and nothing else: before it, the north route
+    // carries ground creeps only.
+    const north = flown.findIndex((lanes) => lanes.has('north'));
+    expect(north).toBe(15);
+    expect(board.waves[north]!.entries).toEqual([
+      { creepId: 'flying', entrance: 'north', count: 10, spacingTicks: 12, offsetTicks: 0 },
+    ]);
+    // Both lanes at once is block 3's (from wave 26), so no shipped wave flies both yet.
+    for (const [k, lanes] of flown.entries())
+      expect(lanes.size, `wave ${k + 1}`).toBeLessThanOrEqual(1);
+    // Air flies in waves 6, 9, 16 and 19: 4 of 20 so far, toward the arc's 7 of 30 (about one
+    // wave in four).
+    expect(flown.flatMap((lanes, k) => (lanes.size > 0 ? [k + 1] : []))).toEqual([6, 9, 16, 19]);
   });
 
   it('introduces at most one new thing per wave, and a boss wave nothing but its bosses', () => {
@@ -176,6 +191,14 @@ describe('block 1 keeps the spec’s authoring rules (m3.md, "Waves & timing")',
 
   it('keeps every wave within four (creep, route) streams, the Compact preview’s rows', () => {
     for (const wave of ruleset.waves) expect(wave.entriesSummary.length).toBeLessThanOrEqual(4);
+    // Wave 20 is the first to fill all four: a boss and its escort down each route.
+    expect(ruleset.waves.findIndex((w) => w.entriesSummary.length === 4)).toBe(19);
+  });
+
+  it('keeps the biggest wave within the authoring rule’s thirty creeps', () => {
+    const sizes = ruleset.waves.map((w) => w.spawns.length);
+    expect(Math.max(...sizes)).toBe(26); // waves 12, 15 and 19
+    expect(Math.max(...sizes)).toBeLessThanOrEqual(30);
   });
 
   it('spawns each stream at its own entrance, two routes in one wave where it says so', () => {
@@ -207,22 +230,24 @@ describe('block 1 keeps the spec’s authoring rules (m3.md, "Waves & timing")',
   });
 
   it('starts a boss’s same-route escorts at least 600 ticks after it (M2’s measured fix)', () => {
-    let bosses = 0;
+    const checked: string[] = [];
     for (const wave of board.waves) {
       for (const boss of wave.entries.filter((e) => creepById.get(e.creepId)!.role === 'boss')) {
-        bosses++;
         const bossLast = (boss.offsetTicks ?? 0) + (boss.count - 1) * boss.spacingTicks;
         for (const escort of wave.entries) {
           if (escort === boss || escort.entrance !== boss.entrance) continue;
           expect(escort.offsetTicks ?? 0, `wave ${wave.index + 1}`).toBeGreaterThanOrEqual(
             bossLast + 600,
           );
+          checked.push(`wave ${wave.index + 1} ${boss.entrance}`);
         }
       }
     }
     // Block 1's one boss (wave 10, from the west) has no same-route escort — its escort walks
-    // the north route — so the rule first bites in block 2; the count keeps this honest.
-    expect(bosses).toBe(1);
+    // the north route — so the rule first bites in block 2: wave 20's west boss leads its
+    // escort by 600 ticks, and its north boss, 200 ticks in, leads its own escort by 600 too.
+    // The pairs checked keep this honest.
+    expect(checked).toEqual(['wave 20 west', 'wave 20 north']);
   });
 });
 
@@ -233,7 +258,8 @@ describe('block 1 keeps the spec’s authoring rules (m3.md, "Waves & timing")',
 // bundle's only board. M2's digest stays pinned on the frozen fixture (`parity.test.ts`).
 // Re-pinned M3 story 5 (measured): block 1's ten waves replace the placeholder schedule, and
 // the lives, economy and score knobs re-pin to the longer run.
-const SHIPPED_RULESET_HASH = 'cd99471c534de643a6881aabfad717917a62dc7f4f223daa70958debad44c93d';
+// Re-pinned M3 story 6 (measured): block 2's ten waves follow block 1's.
+const SHIPPED_RULESET_HASH = '389e84d7bc5b2312647888377aa0c264f5d5f5db551724057f8dff9ff211c0d1';
 // ------------------------------------------------------------------------------------------
 
 describe('digest golden — the shipped artifact’s content hash', () => {

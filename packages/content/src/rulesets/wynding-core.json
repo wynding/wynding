@@ -320,6 +320,137 @@
               "offsetTicks": 600
             }
           ]
+        },
+        {
+          "index": 10,
+          "countdownTicks": 700,
+          "clearBonus": 3,
+          "hpPercent": 110,
+          "entries": [
+            { "creepId": "normal", "entrance": "west", "count": 8, "spacingTicks": 20 },
+            { "creepId": "normal", "entrance": "north", "count": 8, "spacingTicks": 20 }
+          ]
+        },
+        {
+          "index": 11,
+          "countdownTicks": 500,
+          "clearBonus": 3,
+          "hpPercent": 120,
+          "entries": [
+            { "creepId": "swarm", "entrance": "north", "count": 14, "spacingTicks": 5 },
+            { "creepId": "swarm", "entrance": "west", "count": 12, "spacingTicks": 5 }
+          ]
+        },
+        {
+          "index": 12,
+          "countdownTicks": 500,
+          "clearBonus": 3,
+          "hpPercent": 130,
+          "entries": [
+            { "creepId": "resolute", "entrance": "west", "count": 8, "spacingTicks": 15 },
+            { "creepId": "resolute", "entrance": "north", "count": 8, "spacingTicks": 15 }
+          ]
+        },
+        {
+          "index": 13,
+          "countdownTicks": 500,
+          "clearBonus": 3,
+          "hpPercent": 140,
+          "entries": [
+            { "creepId": "armored", "entrance": "west", "count": 6, "spacingTicks": 25 },
+            { "creepId": "armored", "entrance": "north", "count": 6, "spacingTicks": 25 }
+          ]
+        },
+        {
+          "index": 14,
+          "countdownTicks": 500,
+          "clearBonus": 3,
+          "hpPercent": 150,
+          "entries": [
+            { "creepId": "normal", "entrance": "west", "count": 10, "spacingTicks": 15 },
+            { "creepId": "swarm", "entrance": "north", "count": 10, "spacingTicks": 5 },
+            {
+              "creepId": "fast",
+              "entrance": "north",
+              "count": 6,
+              "spacingTicks": 15,
+              "offsetTicks": 120
+            }
+          ]
+        },
+        {
+          "index": 15,
+          "countdownTicks": 550,
+          "clearBonus": 3,
+          "hpPercent": 155,
+          "entries": [{ "creepId": "flying", "entrance": "north", "count": 10, "spacingTicks": 12 }]
+        },
+        {
+          "index": 16,
+          "countdownTicks": 500,
+          "clearBonus": 3,
+          "hpPercent": 160,
+          "entries": [
+            { "creepId": "fast", "entrance": "north", "count": 12, "spacingTicks": 12 },
+            { "creepId": "resolute", "entrance": "west", "count": 8, "spacingTicks": 15 }
+          ]
+        },
+        {
+          "index": 17,
+          "countdownTicks": 500,
+          "clearBonus": 3,
+          "hpPercent": 165,
+          "entries": [
+            { "creepId": "armored", "entrance": "north", "count": 8, "spacingTicks": 20 },
+            { "creepId": "swarm", "entrance": "west", "count": 16, "spacingTicks": 5 }
+          ]
+        },
+        {
+          "index": 18,
+          "countdownTicks": 550,
+          "clearBonus": 3,
+          "hpPercent": 170,
+          "entries": [
+            { "creepId": "armored-flyer", "entrance": "west", "count": 8, "spacingTicks": 18 },
+            { "creepId": "armored", "entrance": "north", "count": 8, "spacingTicks": 20 },
+            {
+              "creepId": "swarm",
+              "entrance": "north",
+              "count": 10,
+              "spacingTicks": 5,
+              "offsetTicks": 120
+            }
+          ]
+        },
+        {
+          "index": 19,
+          "countdownTicks": 700,
+          "clearBonus": 7,
+          "hpPercent": 175,
+          "entries": [
+            { "creepId": "boss", "entrance": "west", "count": 1, "spacingTicks": 20 },
+            {
+              "creepId": "boss",
+              "entrance": "north",
+              "count": 1,
+              "spacingTicks": 20,
+              "offsetTicks": 200
+            },
+            {
+              "creepId": "normal",
+              "entrance": "west",
+              "count": 8,
+              "spacingTicks": 20,
+              "offsetTicks": 600
+            },
+            {
+              "creepId": "normal",
+              "entrance": "north",
+              "count": 8,
+              "spacingTicks": 20,
+              "offsetTicks": 800
+            }
+          ]
         }
       ]
     }

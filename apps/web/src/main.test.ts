@@ -1238,7 +1238,7 @@ describe('main — Score chip across a run and Play-again (#53)', () => {
 
     // Re-pinned #25 (SIM_VERSION 15 → 16, measured). At resolution the chip stops showing
     // the earned-so-far readout and shows the AUTHORITATIVE terminal — and this fixture's
-    // one tower loses the ten-wave arc, so since sv16 that authoritative number is 0: a
+    // one tower loses the shipped run, so since sv16 that authoritative number is 0: a
     // loss forfeits its kill bounty along with its early-call credit. Measured: this
     // chip read 6 before the bump. The live→authoritative switch is still witnessed, and
     // more sharply than before (a nonzero live value replaced by 0), but the Play-again
@@ -2731,7 +2731,7 @@ describe('main — backgrounding pauses the run, and NOTHING resumes it (#139)',
   });
 
   it('…and the same after a WIN', () => {
-    // Reaching a real win needs a maze that survives ten waves and a boss; the money cap is
+    // Reaching a real win needs a maze that survives every wave and its bosses; the bounty cap is
     // sixteen towers and every layout tried loses, so the one terminal phase a unit test
     // cannot play its way to is supplied through `AppDeps.controllerFactory` — the seam that
     // exists for exactly this. Only the PHASE is forced: `isTerminal()` is derived from it by
