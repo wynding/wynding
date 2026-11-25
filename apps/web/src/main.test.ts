@@ -71,8 +71,13 @@ beforeEach(() => {
   vi.clearAllMocks();
 });
 
-/** The clock step every harness in this file advances by per frame (~60 Hz). */
+/** The clock step a harness frame advances by unless a test asks for more (~60 Hz). */
 const FRAME_MS = 16;
+/** The frame step for driving a run to its end when a test needs only the end. The loop
+ *  catches up at most five ticks a frame, so a 300 ms frame steps the full five: the same
+ *  ticks as 16 ms frames in about a sixteenth of the frames. Each frame re-renders the
+ *  overlay in jsdom, which is what a 16 ms run-to-end loop spends its time on. */
+const RESOLVE_FRAME_MS = 300;
 /** Frames needed to cross one sim tick. Since #70 the Start press leaves its wave-1 claim
  *  BUFFERED, and the primary control is legitimately not call-ready until a tick consumes
  *  it — so any test asserting the settled post-Start state must drive at least this many
@@ -270,7 +275,7 @@ describe('main — createApp wiring & frame loop', () => {
     // Drive frames until the run terminates (results screen appears) — later waves
     // auto-launch on their own countdown even without further primary-button presses.
     const results = root.querySelector<HTMLElement>('.wy-results')!;
-    for (let i = 0; i < 4000 && results.hidden; i++) sched.frame((clock += 300));
+    for (let i = 0; i < 4000 && results.hidden; i++) sched.frame((clock += RESOLVE_FRAME_MS));
     expect(results.hidden).toBe(false);
 
     // The Shell (status bar + main + board + rail) is the ONLY node the modal owner ever
@@ -330,7 +335,7 @@ describe('main — the results panel reads the finished run (#181 H2)', () => {
     sched.frame((clock += 16));
     dockButton(root, 'Start').click();
     const results = root.querySelector<HTMLElement>('.wy-results')!;
-    for (let i = 0; i < 4000 && results.hidden; i++) sched.frame((clock += 300));
+    for (let i = 0; i < 4000 && results.hidden; i++) sched.frame((clock += RESOLVE_FRAME_MS));
     expect(results.hidden).toBe(false);
 
     const stats = controller!.runStats();
@@ -420,9 +425,9 @@ describe('main — the terminal edge captures each run once, even when it throws
      *  that throw (#191): the frame is skipped, its error logged, and a HUD refresh that threw
      *  leaves the HUD key where it was, so the NEXT frame walks the edge again. */
     const runToBrokenEdge = (): void => {
-      sched.frame((clock += 16));
+      sched.frame((clock += FRAME_MS));
       dockButton(root, 'Start').click();
-      for (let i = 0; i < 4000 && armed; i++) sched.frame((clock += 300));
+      for (let i = 0; i < 4000 && armed; i++) sched.frame((clock += RESOLVE_FRAME_MS));
       expect(armed, 'the terminal edge never broke').toBe(false);
       const edgeErrors = logged.mock.calls.filter(
         ([, error]) => error instanceof Error && error.message === 'the terminal edge broke',
@@ -973,7 +978,7 @@ describe('main — a frame that throws (#191)', () => {
     const offered = (): boolean[] => h.surveySlots().map((slot) => !slot.hidden);
     // The control: in this same app, a finished run's dialog offers it.
     h.start();
-    for (let i = 0; i < 4000 && h.results.hidden; i++) h.frame(300);
+    for (let i = 0; i < 4000 && h.results.hidden; i++) h.frame(RESOLVE_FRAME_MS);
     expect(h.results.hidden, 'the run must actually have resolved').toBe(false);
     await settle();
     expect(offered(), 'a finished run is offered the survey').toEqual([true, true]);
@@ -1005,7 +1010,7 @@ describe('main — a frame that throws (#191)', () => {
   it('once the results dialog is showing, a draw that keeps failing only parks the loop: the dialog stays as it is', () => {
     const h = stopApp();
     h.start();
-    for (let i = 0; i < 4000 && h.results.hidden; i++) h.frame(300);
+    for (let i = 0; i < 4000 && h.results.hidden; i++) h.frame(RESOLVE_FRAME_MS);
     expect(h.results.hidden, 'the run must actually have resolved').toBe(false);
     const draw = vi.mocked(fakeHandle.draw);
     draw.mockImplementation(() => {
@@ -1233,7 +1238,7 @@ describe('main — Score chip across a run and Play-again (#53)', () => {
     expect(liveScore).toBeGreaterThan(0);
     expect(results.hidden).toBe(true); // ...and it was LIVE, not a terminal readout
 
-    for (let i = 0; i < 4000 && results.hidden; i++) sched.frame((clock += 300));
+    for (let i = 0; i < 4000 && results.hidden; i++) sched.frame((clock += RESOLVE_FRAME_MS));
     expect(results.hidden).toBe(false);
 
     // Re-pinned #25 (SIM_VERSION 15 → 16, measured). At resolution the chip stops showing
@@ -1361,7 +1366,7 @@ function homeApp(options: HomeAppOptions = {}) {
     board,
     home: homeLink(root),
     shell: root.querySelector<HTMLElement>('.wy-shell')!,
-    frame: (): void => sched.frame((clock += 16)),
+    frame: (ms: number = FRAME_MS): void => sched.frame((clock += ms)),
     /** A board-scoped keydown — the keymapped route (pause is Space, start is KeyC). */
     key: (code: string): void => {
       board.dispatchEvent(new KeyboardEvent('keydown', { code, cancelable: true }));
@@ -1556,7 +1561,7 @@ describe('main — home link visibility (hidden only while the run is live)', ()
     h.frame();
     dockButton(h.root, 'Start').click();
     const results = h.root.querySelector<HTMLElement>('.wy-results')!;
-    for (let i = 0; i < 4000 && results.hidden; i++) h.frame();
+    for (let i = 0; i < 4000 && results.hidden; i++) h.frame(RESOLVE_FRAME_MS);
     expect(results.hidden).toBe(false);
 
     // Visible, and NOT self-inert — but unreachable all the same, because the modal owner
@@ -1573,7 +1578,7 @@ describe('main — home link visibility (hidden only while the run is live)', ()
     h.frame();
     dockButton(h.root, 'Start').click();
     const results = h.root.querySelector<HTMLElement>('.wy-results')!;
-    for (let i = 0; i < 4000 && results.hidden; i++) h.frame();
+    for (let i = 0; i < 4000 && results.hidden; i++) h.frame(RESOLVE_FRAME_MS);
 
     results.querySelectorAll<HTMLButtonElement>('.wy-btn')[0]!.click(); // Play again
     // No frame driven: the fresh run is held and un-ticking, so waiting for one could mean
@@ -1801,7 +1806,7 @@ describe('main — the live-run exit guard (owned by main.ts)', () => {
     h.frame();
     dockButton(h.root, 'Start').click();
     const results = h.root.querySelector<HTMLElement>('.wy-results')!;
-    for (let i = 0; i < 4000 && results.hidden; i++) h.frame();
+    for (let i = 0; i < 4000 && results.hidden; i++) h.frame(RESOLVE_FRAME_MS);
     // The results dialog is left OPEN on purpose — closing it is not what this test is about,
     // and Play-again would restart the run and destroy the terminal state being tested. The
     // guard reads `isTerminal()`, which is true here regardless of what is on screen, so
@@ -2002,7 +2007,7 @@ describe('main — input.reset() across Play-again (#40)', () => {
     const primaryBtn = dockButton(root, 'Start');
     primaryBtn.click(); // launches the run (M1's one wave, immediately)
     const results = root.querySelector<HTMLElement>('.wy-results')!;
-    for (let i = 0; i < 4000 && results.hidden; i++) sched.frame((clock += 300));
+    for (let i = 0; i < 4000 && results.hidden; i++) sched.frame((clock += RESOLVE_FRAME_MS));
     expect(results.hidden).toBe(false);
 
     const playAgain = results.querySelectorAll<HTMLButtonElement>('.wy-btn')[0]!;
@@ -2074,7 +2079,7 @@ describe('main — fullscreen on Start (PLAN.md Story 11 P4)', () => {
     return {
       root,
       app,
-      frame: () => sched.frame((clock += FRAME_MS)),
+      frame: (ms: number = FRAME_MS) => sched.frame((clock += ms)),
       advance: () => (clock += 300),
     };
   }
@@ -2196,7 +2201,7 @@ describe('main — fullscreen on Start (PLAN.md Story 11 P4)', () => {
     expect(fs.calls()).toBe(1);
 
     const results = root.querySelector<HTMLElement>('.wy-results')!;
-    for (let i = 0; i < 4000 && results.hidden; i++) frame();
+    for (let i = 0; i < 4000 && results.hidden; i++) frame(RESOLVE_FRAME_MS);
     expect(results.hidden).toBe(false);
     results.querySelectorAll<HTMLButtonElement>('.wy-btn')[0]!.click(); // Play again
     frame();
@@ -2721,7 +2726,7 @@ describe('main — backgrounding pauses the run, and NOTHING resumes it (#139)',
     h.frame();
     dockButton(h.root, 'Start').click();
     const results = h.root.querySelector<HTMLElement>('.wy-results')!;
-    for (let i = 0; i < 4000 && results.hidden; i++) h.frame();
+    for (let i = 0; i < 4000 && results.hidden; i++) h.frame(RESOLVE_FRAME_MS);
     expect(results.hidden, 'the run must actually have resolved').toBe(false);
     expect(pausePressed(h.root)).toBe('false');
 
@@ -2810,7 +2815,7 @@ describe('main — the screen wake lock (#140)', () => {
     expect(lock.liveSentinels()).toBe(1);
 
     const results = h.root.querySelector<HTMLElement>('.wy-results')!;
-    for (let i = 0; i < 4000 && results.hidden; i++) h.frame();
+    for (let i = 0; i < 4000 && results.hidden; i++) h.frame(RESOLVE_FRAME_MS);
     expect(results.hidden).toBe(false);
     await lock.settle();
     expect(lock.liveSentinels(), 'a finished match must not hold the screen awake').toBe(0);
@@ -2986,7 +2991,7 @@ describe('main — hardware Back never exits out from under work (#138)', () => 
       registered,
       isRegistered: (): boolean => onBack !== null,
       back: (): void => onBack?.(),
-      frame: (): void => sched.frame((clock += 16)),
+      frame: (ms: number = FRAME_MS): void => sched.frame((clock += ms)),
     };
   }
 
@@ -3039,7 +3044,7 @@ describe('main — hardware Back never exits out from under work (#138)', () => 
     h.frame();
     dockButton(h.root, 'Start').click();
     const results = h.root.querySelector<HTMLElement>('.wy-results')!;
-    for (let i = 0; i < 4000 && results.hidden; i++) h.frame();
+    for (let i = 0; i < 4000 && results.hidden; i++) h.frame(RESOLVE_FRAME_MS);
     expect(results.hidden, 'the run must actually have resolved').toBe(false);
 
     // THE PREMISES, asserted rather than narrated — without these the test proves only
@@ -3169,7 +3174,7 @@ describe('main — the playtrace capture and its export actions (#133)', () => {
       pushCopyGate: (g: Promise<boolean>): void => void copyGateQueue.push(g),
       copyOrder,
       setSaveThrows: (v: boolean): void => void (saveThrows = v),
-      frame: (): void => sched.frame((clock += 16)),
+      frame: (ms: number = FRAME_MS): void => sched.frame((clock += ms)),
       /** Jump the frame clock without driving frames — `deps.now` is what the playtrace
        *  ring measures its six-hour bound against. */
       advance: (ms: number): void => void (clock += ms),
@@ -3178,7 +3183,7 @@ describe('main — the playtrace capture and its export actions (#133)', () => {
       resolve(): void {
         this.frame();
         dockButton(root, 'Start').click();
-        for (let i = 0; i < 4000 && results.hidden; i++) this.frame();
+        for (let i = 0; i < 4000 && results.hidden; i++) this.frame(RESOLVE_FRAME_MS);
         expect(results.hidden, 'the run must actually have resolved').toBe(false);
         resultsButton('Run data').click();
       },
@@ -3814,11 +3819,11 @@ describe('main — the end-of-run survey (#158, ADR 0014)', () => {
       slot: (): HTMLElement => results.querySelector<HTMLElement>('.wy-survey')!,
       /** Give feedback's own slot, in the action row (#181 H2). */
       opener: (): HTMLElement => results.querySelector<HTMLElement>('.wy-survey-opener')!,
-      frame: (): void => sched.frame((clock += 16)),
+      frame: (ms: number = FRAME_MS): void => sched.frame((clock += ms)),
       resolve(): void {
         this.frame();
         dockButton(root, 'Start').click();
-        for (let i = 0; i < 4000 && results.hidden; i++) this.frame();
+        for (let i = 0; i < 4000 && results.hidden; i++) this.frame(RESOLVE_FRAME_MS);
         expect(results.hidden, 'the run must actually have resolved').toBe(false);
       },
     };

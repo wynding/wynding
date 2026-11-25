@@ -1660,9 +1660,12 @@ describe('controller — armed/selection state machine (PLAN.md P2 table)', () =
   });
 
   it("armed: click a cell rejected for INSUFFICIENT BOUNTY reports reason 'bounty'", () => {
-    const c = createController(1);
+    // On the frozen M2 board, like the buffer-cap tests below: a balance pass that moves the
+    // shipped costs cannot move this arithmetic, and 16 buffered placements cost about half
+    // as much to re-check on its one route as on Crossing's two.
+    const c = createController(1, M2_CONTENT);
     c.start(); // PLAN.md P4: advance() no-ops while held
-    // Drain the starting 96 Bounty exactly: 16 builds × cost 6, all queued into the SAME
+    // Drain the starting 80 Bounty exactly: 16 builds × cost 5, all queued into the SAME
     // tick's buffer (placement validity is evaluated against the cumulative pending
     // preview, so no tick needs to elapse between them).
     const cells: Array<[number, number]> = [];
@@ -1681,10 +1684,10 @@ describe('controller — armed/selection state machine (PLAN.md P2 table)', () =
   });
 
   it('the aim memo key includes the armed tower id — same cell, basic affordable, slow not: switching arms MUST re-evaluate (Codex R1-3)', () => {
-    const c = createController(1);
+    const c = createController(1, M2_CONTENT); // the frozen board, as in the test above
     c.start(); // PLAN.md P4: advance() no-ops while held
-    // Drain the starting 96 Bounty to exactly 6 (15 basic builds × cost 6) — affordable
-    // for `basic` (cost 6) but NOT for `slow` (cost 10), all queued into this one tick's
+    // Drain the starting 80 Bounty to exactly 5 (15 basic builds × cost 5) — affordable
+    // for `basic` (cost 5) but NOT for `slow` (cost 8), all queued into this one tick's
     // buffer (placement validity reads the cumulative pending preview).
     const cells: Array<[number, number]> = [];
     for (const row of [2, 5])
@@ -1697,14 +1700,14 @@ describe('controller — armed/selection state machine (PLAN.md P2 table)', () =
     const FRESH: [number, number] = [2, 8]; // an otherwise-buildable, never-touched cell
     c.armTower('basic');
     const basicAim = c.aimAt(...FRESH);
-    expect(basicAim).toMatchObject({ kind: 'ghost', valid: true }); // basic: affordable (6 == 6)
+    expect(basicAim).toMatchObject({ kind: 'ghost', valid: true }); // basic: affordable (5 == 5)
     // Switch armed to `slow` on the SAME cell in the SAME tick — the aim memo key must
     // include the armed id, or the affordable-basic verdict would leak onto the
     // unaffordable-slow candidate (a stale `true` reused from the basic memo entry).
     c.armTower('slow'); // different id → switches in one action (not a toggle-off)
     expect(c.uiState().armed).toBe('slow');
     const slowAim = c.aimAt(...FRESH);
-    expect(slowAim).toMatchObject({ kind: 'ghost', valid: false }); // slow: unaffordable (6 < 10)
+    expect(slowAim).toMatchObject({ kind: 'ghost', valid: false }); // slow: unaffordable (5 < 8)
   });
 
   it('armed: document-scope Escape disarms; the ghost clears immediately', () => {
@@ -1948,7 +1951,11 @@ describe('controller — player-started runs (PLAN.md P4)', () => {
     // wave-1 claim, so it is back — and only pre-start: once `started` there is nothing
     // left to reserve for. Reach the boundary with a cheap build-then-sell cycle
     // at one cell (each cycle costs 2 commands + a net 2 Bounty, well within the starting
-    // 80).
+    // 80). These tests run on the frozen M2 board: the cap is their subject, not the board,
+    // and every buffered placement is re-checked on each aim and command, which on the
+    // shipped Crossing board's two routes costs about twice as much (0.4 s a test against
+    // 0.2 s; 3.4 s against 1.7 s under coverage, measured at the M3 close-out) — enough to
+    // push the family past its budget on a loaded laptop.
     function fillToCap(c: Controller, cycles: number): void {
       for (let i = 0; i < cycles; i++) {
         c.armTower('basic');
@@ -1971,7 +1978,7 @@ describe('controller — player-started runs (PLAN.md P4)', () => {
       // signal.
       { timeout: 20_000 },
       () => {
-        const c = createController(1);
+        const c = createController(1, M2_CONTENT);
         // 31 build+sell cycles = 62 commands; each cycle nets the cell back to empty.
         fillToCap(c, (MAX_INPUTS_PER_TICK - 2) / 2);
         // The 63rd — the last slot ordinary build/sell traffic may take before the run
@@ -2026,7 +2033,7 @@ describe('controller — player-started runs (PLAN.md P4)', () => {
       'placementValid’s memo re-evaluates across the Start flip — the cap it folds moves with `started` (#70)',
       { timeout: 20_000 },
       () => {
-        const c = createController(1);
+        const c = createController(1, M2_CONTENT);
         fillToCap(c, (MAX_INPUTS_PER_TICK - 2) / 2); // 62 commands
         c.armTower('basic');
         c.aimAt(3, 3);
@@ -2092,10 +2099,11 @@ describe('controller — call-wave readiness (UiState.callWaveReady, PLAN.md P3 
     // placement re-runs the maze-invariant check — O(n²) with n = 64. Fast
     // locally (~0.3 s) but past vitest's 5 s default on CI runners (it timed
     // out there on 3e9b8eb), so the budget is explicit. A cheaper synthetic
-    // fill would bypass the exact projection path this test exists to cover.
+    // fill would bypass the exact projection path this test exists to cover;
+    // the frozen M2 board keeps it cheap instead (see the reservation tests above).
     { timeout: 20_000 },
     () => {
-      const c = createController(1);
+      const c = createController(1, M2_CONTENT);
       // STARTED, deliberately (#70): a held run reserves the last slot for Start's own
       // wave-1 claim, so a 64-command buffer is unreachable before the run begins — the
       // 64th build/sell is refused there, which is the sibling reservation test's subject.
