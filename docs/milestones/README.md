@@ -25,6 +25,9 @@ and keep terminology consistent with [../CONTEXT.md](../CONTEXT.md).
 - [M3 — The full tuned campaign](m3.md) — the complete 30-wave run on the crossing board (two
   entrance → exit pairs), with per-wave creep HP growth, 20 lives, and a balance checker that
   makes "tuned" checkable.
+- [M4 — Depth](m4.md) — tower leveling: three levels on the seven attacking towers, bought in
+  place, with creep HP rising past the board-full wave to meet them and the balance checker
+  extended to upgrades.
 
 ## Required: the completeness boundary
 

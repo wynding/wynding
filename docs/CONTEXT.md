@@ -15,7 +15,7 @@ The open playfield — a rectangular grid of tiles with one or more **entrances*
 and one or more **exits**, each entrance assigned a **destination**. Unlike
 fixed-lane defense, the board starts empty and the player shapes the route by
 building.
-_Avoid_: map, field, level.
+_Avoid_: map, field.
 
 **Entrance**:
 A border cell where creeps enter the board. Every wave entry names the entrance
@@ -47,6 +47,12 @@ creeps in range or aids nearby towers (a support tower). Towers are also **walls
 they reshape the maze. Towers upgrade in place
 (per-run only — no permanent meta-progression).
 _Avoid_: turret, unit, building, defense.
+
+**Level**:
+A tower's position on its upgrade track: level 1 as built, one higher with each upgrade.
+A level changes only how strong the tower is, never what it is. The word belongs to towers
+alone: never a board, a wave, a difficulty tier or a star grade.
+_Avoid_: rank, stage.
 
 **Effect primitive**:
 One of the composable tower behaviors — direct damage (single-target or AoE),
@@ -113,7 +119,7 @@ must always remain.
 _Avoid_: route (interchangeable in prose, but "path" is canonical in code).
 
 **Pending**:
-A build or sell accepted but not yet applied by a tick — the pause is the common
+A build, sell or upgrade accepted but not yet applied by a tick — the pause is the common
 long-lived case. What the player sees — board, aim/selection, and bounty — always
 reflects pending changes; they commit on the next tick that runs.
 _Avoid_: queued, buffered.
@@ -156,7 +162,7 @@ _Avoid_: bomb, trap, one-shot, proximity mine.
 **Wave**:
 A scheduled group of creeps the player must survive. Waves come in a finite,
 ordered sequence — a board's **wave schedule**.
-_Avoid_: round, level, round-number.
+_Avoid_: round, round-number.
 
 **Arc**:
 A board's complete ordered run of waves taken as one authored progression, where
@@ -216,7 +222,7 @@ _Avoid_: elite, miniboss, champion.
 **Difficulty tier**:
 One of the selectable difficulty settings (Easy/Medium/Hard). Each board × tier is
 a distinct content entry with its own tuning and its own best-score.
-_Avoid_: mode, level.
+_Avoid_: mode.
 
 **Score**:
 The deterministic numeric result of a run, computed from sim state (so the server

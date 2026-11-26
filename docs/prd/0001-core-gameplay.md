@@ -165,8 +165,11 @@ difficulty tier, score, star grade**) are added to the glossary in this change.
   creep most about to leak; ties break to the lower creep id) — and **holds that target until it
   dies, leaks, or leaves range**, then
   re-acquires. It never swaps to a
-  higher-priority creep mid-life. _(Player-selectable targeting priority — first/last/strong/
-  weak — is a depth feature deferred to M4.)_
+  higher-priority creep mid-life. _(Player-selectable targeting priority is a depth feature,
+  deferred out of M4: towers keep sticky "first" unless the M4 balance checker's boss-screening
+  probe shows escorts screening a boss that the content fixes — a longer escort offset, a slower
+  escort — cannot cure (m4.md). Amended 2026-11-26 — the M4 grill: this note read "…
+  priority — first/last/strong/weak — is a depth feature deferred to M4".)_
 - **Effects compose.** A tower is a bundle of **effect primitives**, not a fixed archetype;
   any tower may carry any mix of:
   - **direct damage** (single-target or AoE),
@@ -263,11 +266,16 @@ difficulty tier, score, star grade**) are added to the glossary in this change.
   creeps are still on the board, even if the last wave has spawned out.)
 - **Scoring — two readouts:**
   - A deterministic **numeric score** computed **from sim state** (so it is server-re-derivable
-    — this is the ladder's measure, built now per ADR 0006). It rewards kills, efficiency,
-    upgrade value, and aggressive early calls; these inputs come online as they become
-    meaningful (kills with combat, early calls at M2, upgrade value at M4). _(Score weights — and the exact
-    sim-state measure behind each input, e.g. what "upgrade value" counts — are pinned with the
+    — this is the ladder's measure, built now per ADR 0006). It rewards kills, efficiency, and
+    aggressive early calls; these inputs come online as they become meaningful (kills with
+    combat, early calls at M2, efficiency at M5). _(Score weights — and the exact sim-state
+    measure behind each input, e.g. what "efficiency" counts — are pinned with the
     authoritative scorer; the current scorer is a placeholder that grows into this contract.)_
+    _(Amended 2026-11-26 — the M4 grill: "upgrade value" is retired as a separate input; this
+    line read "kills, efficiency, upgrade value, and aggressive early calls … upgrade value at
+    M4". Upgrades earn score through the survival and early calls they make possible, and
+    whether spending should score against banking is revisited with M5's efficiency input
+    (m4.md).)_
   - A derived **star grade** (from lives remaining — a near-flawless run is the top grade) as
     the casual-legible "how'd I do."
 - **Neither is a currency and neither gates content.** Score and stars are a badge and a
@@ -340,8 +348,11 @@ Difficulty runs on the single **Medium** reference curve.
 | **M1**    | The vertical slice above: 1 board / 1 tower / 1 creep / 1 wave, full loop mechanics, thin economy.              |
 | **M2**    | Breadth — more tower/creep types (incl. air + anti-air) and more waves; wave-clear + early-call bonuses active. |
 | **M3**    | A full, tuned wave progression — the complete run you can win or lose; per-wave creep HP growth.                |
-| **M4**    | Depth — tower leveling and the rest of creep leveling; optionally player-selectable targeting priority.         |
+| **M4**    | Depth — tower leveling, with creep leveling as the per-wave creep HP axis tuned against it; targeting deferred. |
 | **M5**    | Economy tuned to the content; the three difficulty tiers tuned; interest-on-savings decided.                    |
+
+_(M4 row amended 2026-11-26 — the M4 grill (m4.md): it read "tower leveling and the rest of creep
+leveling; optionally player-selectable targeting priority".)_
 
 ## Determinism impact
 
@@ -378,9 +389,13 @@ keep the determinism gate intact (ADR 0001, ADR 0006).
   because pause advances no ticks a player can sell and rebuild the same cells repeatedly — so a
   legitimate paused burst can exceed board capacity. The anti-DoS per-tick command cap (design
   note [`replay-and-commands.md`](../design-notes/replay-and-commands.md)) must admit a full
-  legitimate paused re-maze rather than cap to "plausible real-time input." The exact mechanism —
-  a generous per-tick command budget, or a batching / tick-boundary rule — is a determinism-gated
-  detail fixed when the command-processing pipeline is built.
+  legitimate paused re-maze rather than cap to "plausible real-time input." The mechanism is a
+  per-tick command cap sized to admit one: 512 commands from M4, against 286 to re-maze the
+  default board's whole 143-tower capacity and 429 with a level on each rebuilt tower (m4.md).
+  _(Amended 2026-11-26 — the M4 grill: this read "The exact mechanism — a generous per-tick
+  command budget, or a batching / tick-boundary rule — is a determinism-gated detail fixed when
+  the command-processing pipeline is built"; the cap that shipped, 64, was below a re-maze of M3's
+  own strongest build.)_
 - Any change to the shapes above is a determinism-affecting change and **bumps `simVersion`**;
   content/tuning changes bump `rulesetHash` (ADR 0006/0007).
 
@@ -401,4 +416,7 @@ Genuinely open (edges for reviewers), plus the small defaults chosen while draft
 - **Creep leveling shape (M4)** — named as wave-indexed stat scaling in the wave schedule;
   its curve is M4 tuning. _(Amended 2026-10-31 — the M3 grill: the **creep HP axis** lands at M3 as a
   per-wave `hpPercent` in the schedule, fixed data rather than a reaction to play (m3.md); the
-  other axes and the tuned curve stay M4, with tower leveling.)_
+  other axes and the tuned curve stay M4, with tower leveling.)_ _(Amended 2026-11-26 — the M4
+  grill: creep leveling **is** that per-wave creep HP axis. Speed, armor and bounty stay part of
+  each creep's identity rather than growing by wave, and the curve keeps rising past the
+  board-full wave, tuned against tower leveling (m4.md).)_

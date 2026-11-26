@@ -61,11 +61,6 @@
       "why": "Names the whole damage system in PRD 0001 \u00a75; the stat inside it is still called armor."
     },
     {
-      "term": "level",
-      "pattern": "(single|base|max|upgrade|tower) level|level \\d|(tick|milestone)-level",
-      "why": "A tower's upgrade level, and the two granularity suffixes the specs use (tick-level, milestone-level) \u2014 not a board, wave, or difficulty tier."
-    },
-    {
       "term": "field",
       "pattern": "flow-field|field-derivation",
       "why": "The pathfinding algorithm (flow-field + A*) and its per-tick derivation phase, not the board."
@@ -236,12 +231,6 @@
       "term": "trap",
       "pattern": "It never traps|focus trap|two-branch trap",
       "why": "Three unrelated senses: the Fullscreen API never trapping the user, WCAG's keyboard focus trap, and the ordinary \"code trap\" (a two-branch pitfall a mutation test catches) \u2014 none is the burst-tower sense.",
-      "files": ["docs/accessibility-checklist.md"]
-    },
-    {
-      "term": "level",
-      "pattern": "any game-level Escape|type-level|zoom level",
-      "why": "Ordinary English compounds \u2014 Escape handling scoped to the whole game, a TypeScript type-system fact, and browser zoom percentage \u2014 none is a board, wave, or difficulty tier.",
       "files": ["docs/accessibility-checklist.md"]
     },
     {
