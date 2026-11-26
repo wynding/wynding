@@ -42,7 +42,7 @@ Milestones, in rough build order (each a tagged **checkpoint**, `p1-m<n>`):
 - **M3 — the full tuned campaign:** the complete, tuned wave progression on the
   two-path board — the run you can win or lose, superseding M2's showcase arc — with
   creep HP growing wave by wave (the first axis of creep leveling).
-- **M4 — depth:** tower leveling and the rest of creep leveling.
+- **M4 — depth:** tower leveling, with the wave-by-wave growth in creep HP tuned against it.
 - **M5 — economy:** tuned to the content. (A minimal economy exists from M1 — you
   need bounty to place a tower — and is _tuned_ across the phase, not bolted on at
   the end.)

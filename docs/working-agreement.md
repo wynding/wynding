@@ -95,8 +95,9 @@ community-tuned vision in three moves:
   encouraged.
 - **Automated guardrails will screen** — the intended design is regression sims and balance
   invariants (no unwinnable wave, no dominant-strategy collapse) that give fast signal on
-  every proposal. _These don't exist yet: balance review is manual today, and the guardrails
-  are planned, not a check to rely on now._
+  every proposal. _M3 built their first form: the balance checker re-simulates a set of
+  reference builds in CI, so a change under which its winning builds stop winning, or stop
+  winning in distinct ways, fails there; the owner still reads its report._
 - **The owner arbitrates** — the final sign-off is always the owner's.
 
 Once built, those guardrails make the owner's review _cheap_ rather than bypassed. The
